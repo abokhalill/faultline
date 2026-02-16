@@ -1,0 +1,72 @@
+cmake_minimum_required(VERSION 3.20)
+project(faultline VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# --- LLVM/Clang dependency ---
+find_package(LLVM REQUIRED CONFIG)
+find_package(Clang REQUIRED CONFIG)
+
+message(STATUS "LLVM version: ${LLVM_VERSION}")
+message(STATUS "LLVM include dirs: ${LLVM_INCLUDE_DIRS}")
+message(STATUS "Clang include dirs: ${CLANG_INCLUDE_DIRS}")
+
+include_directories(${LLVM_INCLUDE_DIRS})
+include_directories(${CLANG_INCLUDE_DIRS})
+add_definitions(${LLVM_DEFINITIONS})
+
+# --- Project includes ---
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
+# --- Source files ---
+set(FAULTLINE_SOURCES
+    src/main.cpp
+    src/core/Diagnostic.cpp
+    src/core/Rule.cpp
+    src/core/RuleRegistry.cpp
+    src/core/Severity.cpp
+    src/core/HotPathOracle.cpp
+    src/core/Config.cpp
+    src/output/CLIOutput.cpp
+    src/output/JSONOutput.cpp
+    src/analysis/FaultlineAction.cpp
+    src/analysis/FaultlineASTConsumer.cpp
+    src/analysis/StructLayoutVisitor.cpp
+    src/analysis/EscapeAnalysis.cpp
+    src/rules/FL001_CacheLineSpanning.cpp
+    src/rules/FL002_FalseSharing.cpp
+    src/rules/FL020_HeapAllocHotPath.cpp
+    src/rules/FL021_LargeStackFrame.cpp
+    src/rules/FL030_VirtualDispatch.cpp
+    src/rules/FL031_StdFunctionHotPath.cpp
+    src/rules/FL010_OverlyStrongOrdering.cpp
+    src/rules/FL011_AtomicContention.cpp
+    src/rules/FL012_LockHotPath.cpp
+    src/rules/FL040_CentralizedGlobalState.cpp
+    src/rules/FL041_ContendedQueue.cpp
+    src/rules/FL050_DeepConditionalTree.cpp
+    src/rules/FL090_HazardAmplification.cpp
+)
+
+add_executable(faultline ${FAULTLINE_SOURCES})
+
+# --- Link Clang/LLVM libraries ---
+target_link_libraries(faultline
+    PRIVATE
+    clangTooling
+    clangFrontend
+    clangSerialization
+    clangDriver
+    clangParse
+    clangSema
+    clangAnalysis
+    clangAST
+    clangASTMatchers
+    clangBasic
+    clangEdit
+    clangLex
+    clangRewrite
+    LLVM
+)
