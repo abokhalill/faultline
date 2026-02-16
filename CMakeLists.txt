@@ -48,6 +48,8 @@ set(FAULTLINE_SOURCES
     src/rules/FL041_ContendedQueue.cpp
     src/rules/FL050_DeepConditionalTree.cpp
     src/rules/FL090_HazardAmplification.cpp
+    src/rules/FL060_NUMAUnfriendly.cpp
+    src/rules/FL061_CentralizedDispatcher.cpp
     src/ir/IRAnalyzer.cpp
     src/ir/DiagnosticRefiner.cpp
 )

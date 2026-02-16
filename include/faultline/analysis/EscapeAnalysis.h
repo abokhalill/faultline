@@ -40,6 +40,11 @@ public:
     bool isAtomicType(clang::QualType QT) const;
     bool isSyncType(clang::QualType QT) const;
 
+    // Phase 4: refined cross-thread sharing heuristics.
+    bool hasSharedOwnershipMembers(const clang::CXXRecordDecl *RD) const;
+    bool hasCallbackMembers(const clang::CXXRecordDecl *RD) const;
+    bool isSharedOwnershipType(clang::QualType QT) const;
+
 private:
 
     clang::ASTContext &ctx_;

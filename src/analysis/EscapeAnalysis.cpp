@@ -75,10 +75,11 @@ bool EscapeAnalysis::mayEscapeThread(const clang::CXXRecordDecl *RD) const {
     if (!RD)
         return false;
 
-    // Presence of atomics or sync primitives is strong evidence of cross-thread use.
     if (hasAtomicMembers(RD))
         return true;
     if (hasSyncPrimitives(RD))
+        return true;
+    if (hasSharedOwnershipMembers(RD))
         return true;
 
     return false;
@@ -116,6 +117,49 @@ bool EscapeAnalysis::isGlobalSharedMutable(const clang::VarDecl *VD) const {
         return false;
 
     return true;
+}
+
+bool EscapeAnalysis::isSharedOwnershipType(clang::QualType QT) const {
+    std::string name = QT.getCanonicalType().getAsString();
+    if (name.find("shared_ptr") != std::string::npos)
+        return true;
+    if (name.find("weak_ptr") != std::string::npos)
+        return true;
+    return false;
+}
+
+bool EscapeAnalysis::hasSharedOwnershipMembers(const clang::CXXRecordDecl *RD) const {
+    if (!RD || !RD->isCompleteDefinition())
+        return false;
+
+    for (const auto *field : RD->fields()) {
+        if (isSharedOwnershipType(field->getType()))
+            return true;
+    }
+
+    for (const auto &base : RD->bases()) {
+        if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
+            if (hasSharedOwnershipMembers(baseRD))
+                return true;
+        }
+    }
+
+    return false;
+}
+
+bool EscapeAnalysis::hasCallbackMembers(const clang::CXXRecordDecl *RD) const {
+    if (!RD || !RD->isCompleteDefinition())
+        return false;
+
+    for (const auto *field : RD->fields()) {
+        std::string typeName = field->getType().getCanonicalType().getAsString();
+        if (typeName.find("std::function") != std::string::npos)
+            return true;
+        if (field->getType()->isFunctionPointerType())
+            return true;
+    }
+
+    return false;
 }
 
 } // namespace faultline
