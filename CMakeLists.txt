@@ -48,6 +48,8 @@ set(FAULTLINE_SOURCES
     src/rules/FL041_ContendedQueue.cpp
     src/rules/FL050_DeepConditionalTree.cpp
     src/rules/FL090_HazardAmplification.cpp
+    src/ir/IRAnalyzer.cpp
+    src/ir/DiagnosticRefiner.cpp
 )
 
 add_executable(faultline ${FAULTLINE_SOURCES})

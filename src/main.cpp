@@ -2,15 +2,24 @@
 #include "faultline/core/Config.h"
 #include "faultline/core/Diagnostic.h"
 #include "faultline/core/Severity.h"
+#include "faultline/ir/IRAnalyzer.h"
+#include "faultline/ir/DiagnosticRefiner.h"
 #include "faultline/output/OutputFormatter.h"
 
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
+#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/FileSystem.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -40,6 +49,18 @@ static llvm::cl::opt<std::string> MinSev(
     "min-severity",
     llvm::cl::desc("Minimum severity to report (Informational|Medium|High|Critical)"),
     llvm::cl::init("Informational"),
+    llvm::cl::cat(FaultlineCat));
+
+static llvm::cl::opt<bool> NoIR(
+    "no-ir",
+    llvm::cl::desc("Disable LLVM IR analysis pass (AST-only mode)"),
+    llvm::cl::cat(FaultlineCat));
+
+static llvm::cl::opt<std::string> IROpt(
+    "ir-opt",
+    llvm::cl::desc("Optimization level for IR emission (O0|O1|O2). "
+                    "O0 confirms structural patterns; O1+ shows optimizer effects"),
+    llvm::cl::init("O0"),
     llvm::cl::cat(FaultlineCat));
 
 static faultline::Severity parseSeverity(const std::string &s) {
@@ -75,6 +96,69 @@ int main(int argc, const char **argv) {
     faultline::FaultlineActionFactory factory(cfg, diagnostics);
 
     int ret = tool.run(&factory);
+
+    // --- IR analysis pass ---
+    // Emit LLVM IR via clang subprocess, then parse with IRReader.
+    // This avoids ClangTool's incomplete codegen backend initialization.
+    if (!NoIR && ret == 0) {
+        // Locate clang++ binary.
+        std::string clangBin;
+        for (const char *candidate : {"clang++", "clang++-18", "clang++-17",
+                                       "clang++-16", "clang++-15"}) {
+            std::string probe = std::string("which ") + candidate + " >/dev/null 2>&1";
+            if (std::system(probe.c_str()) == 0) {
+                clangBin = candidate;
+                break;
+            }
+        }
+
+        if (clangBin.empty()) {
+            llvm::errs() << "faultline: warning: clang++ not found, "
+                         << "skipping IR analysis pass\n";
+        } else {
+            faultline::IRAnalyzer irAnalyzer;
+            llvm::LLVMContext llvmCtx;
+
+            for (const auto &srcPath : parser->getSourcePathList()) {
+                auto cmds = parser->getCompilations()
+                                .getCompileCommands(srcPath);
+                std::string extraFlags;
+                for (const auto &cmd : cmds) {
+                    for (const auto &arg : cmd.CommandLine) {
+                        if (arg.starts_with("-std=") || arg.starts_with("-D") ||
+                            arg.starts_with("-I") || arg.starts_with("-isystem"))
+                            extraFlags += " " + arg;
+                    }
+                }
+
+                llvm::SmallString<128> tmpPath;
+                if (llvm::sys::fs::createTemporaryFile("faultline-ir", "ll",
+                                                        tmpPath))
+                    continue;
+
+                std::string optFlag = "-" + IROpt.getValue();
+                std::string clangCmd = clangBin + " -S -emit-llvm " + optFlag + " " +
+                                       extraFlags +
+                                       " -o " + std::string(tmpPath) +
+                                       " " + srcPath + " 2>/dev/null";
+                int clangRet = std::system(clangCmd.c_str());
+
+                if (clangRet == 0) {
+                    llvm::SMDiagnostic parseErr;
+                    auto mod = llvm::parseIRFile(tmpPath, parseErr, llvmCtx);
+                    if (mod)
+                        irAnalyzer.analyzeModule(*mod);
+                }
+
+                llvm::sys::fs::remove(tmpPath);
+            }
+
+            if (!irAnalyzer.profiles().empty()) {
+                faultline::DiagnosticRefiner refiner(irAnalyzer.profiles());
+                refiner.refine(diagnostics);
+            }
+        }
+    }
 
     // Filter by minimum severity.
     diagnostics.erase(
