@@ -13,7 +13,7 @@ Built on Clang/LLVM. Targets x86-64 / 64B cache lines / TSO memory model.
 ### Ubuntu/Debian
 
 ```bash
-apt install llvm-dev libclang-dev clang cmake
+apt install llvm-18-dev libclang-18-dev clang-18 cmake
 ```
 
 ### Arch
@@ -26,20 +26,14 @@ pacman -S llvm clang cmake
 
 ```bash
 mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm-18
 make -j$(nproc)
-```
-
-If LLVM is installed in a non-standard location:
-
-```bash
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/llvm
 ```
 
 ## Usage
 
 ```bash
-# Analyze a single file (requires compile_commands.json or -- flags)
+# Analyze source files
 ./faultline /path/to/source.cpp -- -std=c++20
 
 # With config
@@ -51,14 +45,82 @@ cmake .. -DCMAKE_PREFIX_PATH=/path/to/llvm
 # Filter by severity
 ./faultline --min-severity=High /path/to/source.cpp --
 
+# AST-only mode (skip IR analysis)
+./faultline --no-ir /path/to/source.cpp --
+
+# IR analysis at O1 (shows optimizer effects)
+./faultline --ir-opt=O1 /path/to/source.cpp --
+
 # With compilation database
 cd /project/build
 /path/to/faultline /project/src/hot_path.cpp
 ```
 
-## Hot Path Annotation
+## Rules
 
-Mark functions as latency-critical:
+### Structural Cache Risks
+
+| ID | Title | Severity | Mechanism |
+|----|-------|----------|-----------|
+| FL001 | Cache Line Spanning Struct | High/Critical | L1D pressure, coherence invalidation surface |
+| FL002 | False Sharing Candidate | Critical | MESI invalidation ping-pong on shared cache line |
+
+### Synchronization Risks
+
+| ID | Title | Severity | Mechanism |
+|----|-------|----------|-----------|
+| FL010 | Overly Strong Atomic Ordering | High/Critical | Store buffer drain from unnecessary seq_cst fences |
+| FL011 | Atomic Contention Hotspot | Critical | Cache line ownership thrashing via RFO |
+| FL012 | Lock in Hot Path | Critical | Lock convoy, futex syscall, context switch |
+
+### Memory Allocation Risks
+
+| ID | Title | Severity | Mechanism |
+|----|-------|----------|-----------|
+| FL020 | Heap Allocation in Hot Path | Critical | Allocator lock contention, TLB pressure, page faults |
+| FL021 | Large Stack Frame | Medium/Critical | TLB pressure, L1D capacity, stack page faults |
+
+### Dispatch Risks
+
+| ID | Title | Severity | Mechanism |
+|----|-------|----------|-----------|
+| FL030 | Virtual Dispatch in Hot Path | High/Critical | BTB misprediction, pipeline flush |
+| FL031 | std::function in Hot Path | High/Critical | Type-erased indirect call, potential heap alloc |
+
+### Structural Design Risks
+
+| ID | Title | Severity | Mechanism |
+|----|-------|----------|-----------|
+| FL040 | Centralized Mutable Global State | High/Critical | NUMA remote access, cache line contention |
+| FL041 | Contended Queue Pattern | High/Critical | Head/tail cache line bouncing |
+| FL060 | NUMA-Unfriendly Shared Structure | High/Critical | Remote memory access penalty on multi-socket |
+| FL061 | Centralized Dispatcher Bottleneck | High/Critical | I-cache pressure, BTB contention from fan-out |
+
+### Branching Risks
+
+| ID | Title | Severity | Mechanism |
+|----|-------|----------|-----------|
+| FL050 | Deep Conditional Tree | Medium/High | Branch misprediction chains |
+
+### Interaction Rules
+
+| ID | Title | Severity | Mechanism |
+|----|-------|----------|-----------|
+| FL090 | Hazard Amplification | Critical | Nonlinear compound risk from interacting hazards |
+
+## IR Analysis Layer
+
+Faultline includes an LLVM IR analysis pass that refines AST-layer findings:
+
+- **Stack frame sizing**: Precise alloca-based measurement vs AST heuristic
+- **Atomic confirmation**: Verifies seq_cst instructions are actually emitted
+- **Heap allocation**: Confirms alloc/free calls survive inlining
+- **Indirect calls**: Counts remaining indirect calls post-devirtualization
+- **Fence detection**: Identifies explicit fence instructions in lowered IR
+
+The IR pass emits LLVM IR via `clang -emit-llvm` and parses it with LLVM's IRReader. Default optimization level is `-O0` (structural confirmation). Use `--ir-opt=O1` to see optimizer effects.
+
+## Hot Path Annotation
 
 ```cpp
 [[clang::annotate("faultline_hot")]]
@@ -83,28 +145,22 @@ hot_file_patterns:
 | 1    | Hazards detected |
 | 2    | Tool error |
 
-## Test
-
-```bash
-./faultline ../test/samples/fl001_test.cpp -- -std=c++20
-```
-
-Expected: `LargeOrder` flagged High, `AtomicHeavy` flagged Critical, `SmallOrder` clean.
-
 ## Project Structure
 
 ```
 include/faultline/
   core/           Severity, Diagnostic, Rule, RuleRegistry, Config, HotPathOracle
-  analysis/       FaultlineAction, ASTConsumer, StructLayoutVisitor
+  analysis/       FaultlineAction, ASTConsumer, StructLayoutVisitor, EscapeAnalysis
+  ir/             IRAnalyzer, IRFunctionProfile, DiagnosticRefiner
   output/         CLI and JSON formatters
 src/
   core/           Core implementations
-  analysis/       AST traversal and consumer
+  analysis/       AST traversal, escape analysis
+  ir/             IR analysis and diagnostic refinement
   output/         Output formatting
-  rules/          Individual rule implementations (FL001, ...)
+  rules/          15 rule implementations (FL001–FL090)
   main.cpp        CLI driver
-test/samples/     Test input files
+test/samples/     Test inputs including HFT order engine case study
 ```
 
 ## Documentation
