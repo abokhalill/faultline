@@ -48,9 +48,12 @@ void DiagnosticRefiner::refine(std::vector<Diagnostic> &diagnostics) const {
     for (auto &diag : diagnostics) {
         if (diag.ruleID == "FL010") refineFL010(diag);
         else if (diag.ruleID == "FL011") refineFL011(diag);
+        else if (diag.ruleID == "FL012") refineFL012(diag);
         else if (diag.ruleID == "FL020") refineFL020(diag);
         else if (diag.ruleID == "FL021") refineFL021(diag);
         else if (diag.ruleID == "FL030") refineFL030(diag);
+        else if (diag.ruleID == "FL031") refineFL031(diag);
+        else if (diag.ruleID == "FL090") refineFL090(diag);
     }
 }
 
@@ -223,6 +226,81 @@ void DiagnosticRefiner::refineFL030(Diagnostic &diag) const {
         diag.escalations.push_back(
             "IR refinement: all calls devirtualized to direct — "
             "BTB pressure eliminated by compiler");
+    }
+}
+
+void DiagnosticRefiner::refineFL031(Diagnostic &diag) const {
+    auto funcName = extractFunctionName(diag);
+    const auto *profile = findProfile(funcName);
+    if (!profile)
+        return;
+
+    // std::function invocation compiles to an indirect call.
+    if (profile->indirectCallCount > 0) {
+        diag.confidence = std::min(diag.confidence + 0.10, 0.95);
+        diag.escalations.push_back(
+            "IR confirmed: " + std::to_string(profile->indirectCallCount) +
+            " indirect call(s) — type-erased dispatch not eliminated");
+    } else {
+        diag.confidence = std::max(diag.confidence - 0.20, 0.35);
+        diag.escalations.push_back(
+            "IR refinement: no indirect calls found — "
+            "std::function may have been devirtualized or inlined");
+    }
+}
+
+void DiagnosticRefiner::refineFL012(Diagnostic &diag) const {
+    auto funcName = extractFunctionName(diag);
+    const auto *profile = findProfile(funcName);
+    if (!profile)
+        return;
+
+    // Mutex lock compiles to atomic cmpxchg or call to pthread_mutex_lock.
+    bool hasMutexCall = false;
+    bool hasAtomicCmpXchg = false;
+    for (const auto &csi : profile->heapAllocCalls) {
+        if (csi.calleeName.find("pthread_mutex") != std::string::npos ||
+            csi.calleeName.find("__gthread_mutex") != std::string::npos)
+            hasMutexCall = true;
+    }
+    for (const auto &ai : profile->atomics) {
+        if (ai.op == IRAtomicInfo::CmpXchg)
+            hasAtomicCmpXchg = true;
+    }
+
+    if (hasMutexCall || hasAtomicCmpXchg) {
+        diag.confidence = std::min(diag.confidence + 0.05, 0.95);
+        std::string detail;
+        if (hasMutexCall) detail = "pthread_mutex call";
+        else detail = "atomic cmpxchg (lock internals)";
+        diag.escalations.push_back(
+            "IR confirmed: " + detail + " present in lowered IR");
+    }
+}
+
+void DiagnosticRefiner::refineFL090(Diagnostic &diag) const {
+    // FL090 is struct-level, not function-level. Scan all profiles for
+    // aggregate IR signals that correlate with the compound hazard.
+    unsigned totalAtomicWrites = 0;
+    unsigned totalIndirectCalls = 0;
+    unsigned totalFences = 0;
+
+    for (const auto &[name, profile] : profiles_) {
+        for (const auto &ai : profile.atomics) {
+            if (ai.op == IRAtomicInfo::Store || ai.op == IRAtomicInfo::RMW ||
+                ai.op == IRAtomicInfo::CmpXchg)
+                ++totalAtomicWrites;
+        }
+        totalIndirectCalls += profile.indirectCallCount;
+        totalFences += profile.fenceCount;
+    }
+
+    if (totalAtomicWrites > 0 || totalFences > 0) {
+        std::ostringstream ss;
+        ss << "IR aggregate: " << totalAtomicWrites << " atomic write(s), "
+           << totalFences << " fence(s), "
+           << totalIndirectCalls << " indirect call(s) across module";
+        diag.escalations.push_back(ss.str());
     }
 }
 
