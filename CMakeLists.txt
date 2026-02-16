@@ -52,6 +52,12 @@ set(FAULTLINE_SOURCES
     src/rules/FL061_CentralizedDispatcher.cpp
     src/ir/IRAnalyzer.cpp
     src/ir/DiagnosticRefiner.cpp
+    src/hypothesis/HypothesisTemplate.cpp
+    src/hypothesis/HypothesisConstructor.cpp
+    src/hypothesis/MeasurementPlan.cpp
+    src/hypothesis/ExperimentSynthesizer.cpp
+    src/hypothesis/CalibrationFeedback.cpp
+    src/hypothesis/InteractionModel.cpp
 )
 
 add_executable(faultline ${FAULTLINE_SOURCES})
