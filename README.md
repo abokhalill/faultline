@@ -1,35 +1,99 @@
 # Faultline
 
-Compile-time structural latency landmine detector for C++ systems.
+Structural latency hazard analyzer for C++ on **Linux x86-64**.
 
-Built on Clang/LLVM. Targets **x86-64 / 64B cache lines / TSO**.
+Faultline is built on Clang/LLVM and focused on **TSO, 64B cache lines, coherence traffic, and branch/allocator side effects** in low-latency systems.
 
-Faultline identifies source-level patterns that cause microarchitectural degradation — cache line contention, store buffer serialization, coherence storms, TLB pressure, branch misprediction — before the code reaches production.
-
-It does not guess. Every finding maps to a specific hardware mechanism on x86-64.
+It is not a style linter. It is a static structural analyzer that tries to map code shape to hardware risk before runtime profiling.
 
 ---
 
-## Platform Support
+## Core Thesis
+
+Low-latency failures in x86-64 systems are frequently locked in by source structure long before production load tests:
+
+- cache-line sharing patterns (false sharing, multi-line hot structs),
+- atomic ordering choices on TSO,
+- lock/allocator usage in hot code,
+- dispatch structures that stress branch prediction.
+
+Runtime tools (`perf`, production tracing) tell you what happened after integration. Faultline aims to catch structural hazards **at compile-analysis time**, where fixes are cheapest.
+
+### Platform model
 
 | Platform | Status | Notes |
-|----------|--------|-------|
-| **Linux x86-64** | Supported | Primary target. Fully verified. |
-| **WSL2** | Supported | Linux under the hood. |
-| **macOS (Intel)** | Unsupported | AST/IR analysis may build, but hardware model assumes x86-64 TSO. No `perf` support. |
-| **macOS (Apple Silicon)** | Unsupported | ARM uses 128B cache lines and a weak memory model. All hardware reasoning is wrong. |
-| **Windows (native)** | Unsupported | Build system and IR emission assume Unix toolchain. |
+|---|---|---|
+| Linux x86-64 | Supported | Primary model and assumptions |
+| WSL2 | Supported | Linux userspace/kernel path |
+| macOS Intel | Not supported | No validated PMU/runtime assumptions |
+| macOS Apple Silicon | Not supported | Different cache-line and memory model |
+| Windows native | Not supported | Build and IR-emission path assumes Unix tooling |
 
-Faultline's hardware model — 64B cache lines, TSO store buffer semantics, MESI coherence costs, x86-64 PMU counters — is x86-64 Linux specific. Running it on other platforms would produce diagnostics with incorrect hardware reasoning.
+---
+
+## Differentiation
+
+Faultline is complementary to existing tools, not a replacement.
+
+| Tool | What it does well | What it cannot do alone | Where Faultline fits |
+|---|---|---|---|
+| `pahole` | Post-build struct layout introspection (DWARF/BTF) | No hot-path semantics, no atomic ordering analysis, no function-level hazard attribution | Faultline reasons on AST/IR semantics and emits code-location diagnostics |
+| `perf` / PMU tracing | Ground-truth runtime counters, latency distribution, bottleneck attribution | Requires runnable workload; discovers issues late; weak compile-time prevention | Faultline is pre-runtime structural triage; hypothesis subsystem can generate perf experiments |
+| `llvm-mca` | Throughput/latency modeling for instruction blocks | No whole-program sharing/topology/layout semantics; no thread-coherence modeling | Faultline operates at source/IR structure level across declarations and functions |
+
+**Pipeline position:** source/compile-analysis phase.  
+Faultline detects structural risk candidates; runtime tools validate impact magnitude.
+
+---
+
+## How It Works 
+
+## 1) Clang AST pass (structural detection)
+
+- Entry point: `ClangTool` + `FaultlineActionFactory`.
+- `FaultlineASTConsumer::HandleTranslationUnit` walks top-level decls, classifies hot-path functions, then runs all registered rules.
+- Rule contract: `Rule::analyze(const Decl*, ASTContext&, HotPathOracle&, vector<Diagnostic>&)`.
+
+### Key APIs used
+
+- `ASTContext::getASTRecordLayout` for record size and field offsets.
+- `SourceManager` for stable file/line/column diagnostics.
+- `RecursiveASTVisitor` per rule for function-body pattern scanning.
+
+## 2) Optional LLVM IR pass (post-lowering refinement)
+
+- Faultline emits `.ll` via external `clang++ -S -emit-llvm` per source file.
+- Parses IR using `llvm::parseIRFile`.
+- `IRAnalyzer` inspects:
+  - `AllocaInst` (stack footprint),
+  - atomic `LoadInst`/`StoreInst`/`AtomicRMWInst`/`AtomicCmpXchgInst`,
+  - `FenceInst`,
+  - direct/indirect call sites.
+- `DiagnosticRefiner` adjusts confidence/escalations based on IR evidence.
+
+## 3) Data layout and ordering boundaries
+
+- Layout in AST rules uses target ABI through Clang record layout APIs.
+- Ordering inspection at IR level uses LLVM atomic ordering enums.
+- Current model is **AST-first + IR refinement**, not a full site-precise lowering proof engine.
+
+## 4) Hot-path selection
+
+- `[[clang::annotate("faultline_hot")]]`
+- glob patterns (`hot_function_patterns`, `hot_file_patterns`) in config
+
+---
+
+## Build and Run
 
 ## Requirements
 
 | Dependency | Version |
-|------------|---------|
-| OS | Linux x86-64 (or WSL2) |
-| LLVM/Clang | 16+ (dev libraries) |
+|---|---|
+| Linux x86-64 | required |
+| LLVM/Clang | 16+ |
 | CMake | 3.20+ |
-| C++ Standard | C++20 |
+| C++ | C++20 |
 
 ```bash
 # Ubuntu/Debian
@@ -42,210 +106,153 @@ pacman -S llvm clang cmake
 ## Build
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 ```
 
-If cmake cannot find LLVM, specify the prefix path for your install:
+If LLVM is not auto-detected:
 
 ```bash
-# Ubuntu/Debian (llvm-18-dev)
-cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm-18
-
-# Arch / Fedora (system LLVM)
-cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/cmake/llvm
-
-# Custom install
-cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/llvm
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm-18
 ```
 
 ## Usage
 
 ```bash
-./faultline /path/to/source.cpp -- -std=c++20
-./faultline --config=../faultline.config.yaml /path/to/source.cpp --
-./faultline --json /path/to/source.cpp --
-./faultline --min-severity=High /path/to/source.cpp --
-./faultline --no-ir /path/to/source.cpp --          # AST-only, skip IR pass
-./faultline --ir-opt=O1 /path/to/source.cpp --      # IR at -O1 (optimizer effects)
-```
-
-With a compilation database:
-
-```bash
-cd /project/build && /path/to/faultline /project/src/hot_path.cpp
+./build/faultline /path/to/source.cpp -- -std=c++20
+./build/faultline --config=./faultline.config.yaml /path/to/source.cpp --
+./build/faultline --json /path/to/source.cpp --
+./build/faultline --min-severity=High /path/to/source.cpp --
+./build/faultline --no-ir /path/to/source.cpp --
+./build/faultline --ir-opt=O1 /path/to/source.cpp --
 ```
 
 ---
 
-## What It Detects
+## Rule Surface (Current)
 
-### Landmine: False Sharing
+| ID | Hazard |
+|---|---|
+| FL001 | Cache line spanning struct |
+| FL002 | False sharing candidate |
+| FL010 | Overly strong atomic ordering |
+| FL011 | Atomic contention hotspot |
+| FL012 | Lock in hot path |
+| FL020 | Heap allocation in hot path |
+| FL021 | Large stack frame |
+| FL030 | Virtual dispatch in hot path |
+| FL031 | `std::function` in hot path |
+| FL040 | Centralized mutable global state |
+| FL041 | Contended queue pattern |
+| FL050 | Deep conditional tree |
+| FL060 | NUMA-unfriendly shared structure |
+| FL061 | Centralized dispatcher bottleneck |
+| FL090 | Hazard amplification |
 
-Two atomics on the same cache line. Two threads writing to different fields. MESI invalidation ping-pong on every write.
+---
+
+## Before vs After Examples
+
+## 1) Cache-line footprint / split risk (FL001)
+
+### Before
 
 ```cpp
-struct SequenceCounters {
-    std::atomic<uint64_t> inboundSeq;   // Thread A writes
-    std::atomic<uint64_t> outboundSeq;  // Thread B writes
+struct OrderBookLevel {
+    uint64_t px[8];
+    uint64_t qty[8];
+    uint64_t flags[4];
 };
-// sizeof = 16B. Both fields share one 64B cache line.
-// Every write by Thread A invalidates Thread B's L1 copy. And vice versa.
-// Cost: 40-100ns per write (intra-socket), 120-300ns (cross-socket).
+// sizeof = 160B (spans 3 cache lines)
 ```
 
-Faultline output:
+### Faultline diagnostic (example)
 
+```text
+[HIGH] FL001 — Cache Line Spanning Struct
+  Evidence: sizeof(OrderBookLevel)=160B; lines_spanned=3
 ```
+
+### After
+
+```cpp
+struct alignas(64) OrderBookHot {
+    uint64_t px[4];
+    uint64_t qty[4];
+};
+
+struct OrderBookCold {
+    uint64_t px[4];
+    uint64_t qty[4];
+    uint64_t flags[4];
+};
+```
+
+### Why latency can improve
+
+Hot-path accesses touch fewer lines, reducing L1D pressure and coherence surface for write-heavy members.
+
+## 2) False sharing (FL002 / FL041)
+
+### Before
+
+```cpp
+struct Counters {
+    std::atomic<uint64_t> head;
+    std::atomic<uint64_t> tail;
+};
+```
+
+### Faultline diagnostic (example)
+
+```text
 [CRITICAL] FL002 — False Sharing Candidate
-  Location: order_engine.cpp:32 (SequenceCounters)
-  Hardware: MESI invalidation ping-pong across cores due to shared cache line
-            writes. Each write by one core forces invalidation of the line in
-            all other cores' L1/L2, triggering RFO traffic.
-  Evidence: sizeof=16B; mutable_fields=2; atomics=yes; thread_escape=true
-  Mitigation: Separate fields with alignas(64) padding.
-  Confidence: 0.87
+  Evidence: sizeof=16B; mutable_fields=[head,tail]; atomics=yes; thread_escape=true
 ```
 
-Fix:
+### After
 
 ```cpp
-struct SequenceCounters {
-    alignas(64) std::atomic<uint64_t> inboundSeq;
-    alignas(64) std::atomic<uint64_t> outboundSeq;
+struct Counters {
+    alignas(64) std::atomic<uint64_t> head;
+    alignas(64) std::atomic<uint64_t> tail;
 };
-// Each field on its own cache line. Zero cross-core invalidation.
 ```
 
-### Landmine: Unnecessary Store Buffer Drain
+### Why latency can improve
 
-`memory_order_seq_cst` is the default for `std::atomic`. On x86-64 TSO, `seq_cst` stores emit `XCHG` or `MOV` + `MFENCE`, draining the store buffer and serializing the pipeline. `acquire`/`release` compiles to plain `MOV` — zero overhead on TSO.
+Separating independent writers onto different lines reduces cross-core ownership transfer (RFO/HITM traffic).
+
+## 3) TSO ordering misuse risk (FL010)
+
+### Before
 
 ```cpp
 [[clang::annotate("faultline_hot")]]
-void updateSequence(std::atomic<uint64_t>& seq) {
-    uint64_t s = seq.load();           // seq_cst load: free on x86 (plain MOV)
-    seq.store(s + 1);                  // seq_cst store: XCHG → store buffer drain
+void publish(std::atomic<uint64_t>& seq, uint64_t v) {
+    seq.store(v); // implicit seq_cst
 }
-// In a 10M iteration loop: 200M-400M cycles of pure serialization overhead.
 ```
 
-Faultline output:
+### Faultline diagnostic (example)
 
-```
+```text
 [HIGH] FL010 — Overly Strong Atomic Ordering
-  Location: engine.cpp:4 (updateSequence)
-  Hardware: Full memory fence emitted for seq_cst store causes pipeline
-            serialization and store buffer drain. On x86-64 TSO, release
-            ordering provides equivalent visibility guarantees for stores
-            with zero fence overhead.
-  Evidence: ordering=seq_cst; operation=store; in_hot_path=true
-  Mitigation: Use memory_order_release for stores, memory_order_acquire for loads.
-  Confidence: 0.91
+  Evidence: ordering=seq_cst; function=publish
 ```
 
-### Landmine: Heap Allocation in Hot Path
-
-`new`/`malloc` in a tight loop: allocator lock contention, TLB misses on new pages, potential kernel transition via `mmap`.
+### After
 
 ```cpp
 [[clang::annotate("faultline_hot")]]
-void processBatch(const uint64_t* ids, int count) {
-    for (int i = 0; i < count; ++i) {
-        auto* tmp = new uint64_t(ids[i]);  // malloc per iteration
-        process(*tmp);
-        delete tmp;
-    }
+void publish(std::atomic<uint64_t>& seq, uint64_t v) {
+    seq.store(v, std::memory_order_release);
 }
 ```
 
-```
-[CRITICAL] FL020 — Heap Allocation in Hot Path
-  Location: engine.cpp:3 (processBatch)
-  Hardware: Allocator lock contention. TLB pressure from new page mappings.
-            Potential minor page fault (1-10µs kernel transition).
-  Evidence: allocation_site=new; in_loop=true; in_hot_path=true
-  Escalation: [allocation_in_loop]
-  Mitigation: Preallocate. Use arena/slab allocator. Object pool.
-  Confidence: 0.93
-```
+### Why latency can improve
 
-### Landmine: Compound Hazard
-
-Multiple hazards on the same structure produce super-additive tail latency. A 192-byte struct with atomics, thread escape, and loop access combines cache spanning + coherence traffic + contention into a single amplified cost.
-
-```cpp
-struct MarketDataLevel {
-    std::atomic<uint64_t> bidPrice;
-    std::atomic<uint64_t> askPrice;
-    std::atomic<uint64_t> bidQty;
-    std::atomic<uint64_t> askQty;
-    uint64_t bidOrders[10];
-    uint64_t askOrders[10];
-    uint64_t timestamps[4];
-};
-// sizeof = 192B = 3 cache lines.
-// Atomics span multiple lines → 3 separate RFO transactions per write.
-// Cross-socket: 3 × 200ns = 600ns per atomic update.
-```
-
-```
-[CRITICAL] FL090 — Hazard Amplification
-  Location: market_data.cpp:1 (MarketDataLevel)
-  Hardware: Multiple interacting latency multipliers: cache line spanning (3 lines)
-            + atomic contention + thread escape. Compound coherence cost is
-            super-additive.
-  Evidence: sizeof=192B; cache_lines=3; atomics=4; thread_escape=true
-  Confidence: 0.89
-```
-
----
-
-## Rules
-
-| ID | Hazard | Severity | x86-64 Mechanism |
-|----|--------|----------|-----------------|
-| FL001 | Cache Line Spanning Struct | High/Critical | L1D pressure, multi-line coherence surface |
-| FL002 | False Sharing Candidate | Critical | MESI RFO ping-pong on shared cache line |
-| FL010 | Overly Strong Atomic Ordering | High/Critical | `MFENCE`/`XCHG` store buffer drain (TSO-specific) |
-| FL011 | Atomic Contention Hotspot | Critical | Cache line ownership thrashing, RFO storms |
-| FL012 | Lock in Hot Path | Critical | Futex syscall, context switch, cache cold restart |
-| FL020 | Heap Allocation in Hot Path | Critical | Allocator contention, dTLB pressure, page faults |
-| FL021 | Large Stack Frame | Medium/Critical | dTLB pressure, L1D capacity exhaustion |
-| FL030 | Virtual Dispatch in Hot Path | High/Critical | BTB misprediction, pipeline flush (14-20 cycles) |
-| FL031 | std::function in Hot Path | High/Critical | Type-erased indirect call, potential heap alloc |
-| FL040 | Centralized Mutable Global State | High/Critical | NUMA remote access, cache line contention |
-| FL041 | Contended Queue Pattern | High/Critical | Head/tail cache line bouncing |
-| FL050 | Deep Conditional Tree | Medium/High | Branch misprediction chains |
-| FL060 | NUMA-Unfriendly Shared Structure | High/Critical | Remote DRAM penalty (2-5x local latency) |
-| FL061 | Centralized Dispatcher Bottleneck | High/Critical | I-cache pressure, BTB contention from fan-out |
-| FL090 | Hazard Amplification | Critical | Super-additive compound risk |
-
-Every rule maps to a specific hardware subsystem: cache, coherence protocol, store buffer, TLB, branch predictor, NUMA interconnect, or allocator. If a pattern cannot be tied to a hardware mechanism, it is not a rule.
-
----
-
-## Analysis Layers
-
-### Layer 1: AST (Structural Semantics)
-
-Clang AST traversal via `RecursiveASTVisitor`. Detects structural patterns: struct layout, atomic operations, lock acquisitions, allocation sites, dispatch patterns. Uses `ASTRecordLayout` for precise `sizeof` computation. Escape analysis infers thread visibility from `std::atomic`, `std::mutex`, `std::shared_ptr` members and global mutability.
-
-### Layer 2: IR (Lowered Behavior)
-
-LLVM IR emission via `clang -emit-llvm -S`. Parses with `llvm::parseIRFile()`. Validates AST findings against lowered code:
-
-- Confirms `seq_cst` fence emission (not all `seq_cst` ops emit fences on x86)
-- Confirms heap allocations survive inlining
-- Confirms indirect calls survive devirtualization
-- Precise stack frame sizing via `AllocaInst`
-
-Default: `-O0` (structural confirmation). Use `--ir-opt=O1` to see optimizer effects.
-
-### Layer 3: Hypothesis Engine
-
-Converts findings into falsifiable statistical hypotheses. Generates self-contained experiment bundles (treatment + control microbenchmarks) with PMU counter collection scripts. Feeds results back into calibration.
+On x86-64 TSO, weaker ordering for simple publish patterns can avoid unnecessary global-order constraints, reducing serialization pressure in hot loops.
 
 ---
 
@@ -253,10 +260,10 @@ Converts findings into falsifiable statistical hypotheses. Generates self-contai
 
 ```cpp
 [[clang::annotate("faultline_hot")]]
-void onMarketData(const MDUpdate& update) { ... }
+void onMarketData(const Update& u);
 ```
 
-Or via config:
+Or config:
 
 ```yaml
 hot_function_patterns:
@@ -266,14 +273,20 @@ hot_file_patterns:
   - "*/hot_path/*"
 ```
 
-Non-hot code is analyzed with reduced severity.
+---
+
+## Boundaries (Important)
+
+- Faultline is static analysis. It does not directly measure runtime PMU events.
+- Some hazards (NUMA remoteness, LFB pressure, prefetch pollution) require runtime validation.
+- IR refinement improves confidence but is not yet a full source-to-lowered site-bijective proof.
 
 ---
 
 ## Exit Codes
 
 | Code | Meaning |
-|------|---------|
-| 0 | No hazards at or above minimum severity |
-| 1 | Hazards detected |
-| 2 | Tool error |
+|---|---|
+| 0 | No findings at or above min severity |
+| 1 | Findings emitted |
+| 2 | Tool failure |
