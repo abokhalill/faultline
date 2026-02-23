@@ -31,8 +31,21 @@ pacman -S llvm clang cmake
 
 ```bash
 mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm-18
+cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
+```
+
+If cmake cannot find LLVM, specify the prefix path for your install:
+
+```bash
+# Ubuntu/Debian (llvm-18-dev)
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm-18
+
+# Arch / Fedora (system LLVM)
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/cmake/llvm
+
+# Custom install
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/llvm
 ```
 
 ## Usage
