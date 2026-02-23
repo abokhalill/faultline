@@ -2,6 +2,8 @@
 #include "faultline/core/Config.h"
 #include "faultline/core/Diagnostic.h"
 #include "faultline/core/Severity.h"
+#include "faultline/hypothesis/CalibrationFeedback.h"
+#include "faultline/hypothesis/HypothesisConstructor.h"
 #include "faultline/ir/IRAnalyzer.h"
 #include "faultline/ir/DiagnosticRefiner.h"
 #include "faultline/output/OutputFormatter.h"
@@ -55,6 +57,12 @@ static llvm::cl::opt<std::string> MinEvidence(
     "min-evidence",
     llvm::cl::desc("Minimum evidence tier to report (proven|likely|speculative)"),
     llvm::cl::init("speculative"),
+    llvm::cl::cat(FaultlineCat));
+
+static llvm::cl::opt<std::string> CalibrationStore(
+    "calibration-store",
+    llvm::cl::desc("Path to calibration feedback store for false-positive suppression"),
+    llvm::cl::value_desc("path"),
     llvm::cl::cat(FaultlineCat));
 
 static llvm::cl::opt<bool> NoIR(
@@ -169,6 +177,36 @@ int main(int argc, const char **argv) {
                 faultline::DiagnosticRefiner refiner(irAnalyzer.profiles());
                 refiner.refine(diagnostics);
             }
+        }
+    }
+
+    // --- Calibration-based false-positive suppression ---
+    std::unique_ptr<faultline::CalibrationFeedbackStore> calStore;
+    if (!CalibrationStore.empty()) {
+        calStore = std::make_unique<faultline::CalibrationFeedbackStore>(
+            CalibrationStore);
+    }
+
+    unsigned suppressed = 0;
+    if (calStore) {
+        diagnostics.erase(
+            std::remove_if(diagnostics.begin(), diagnostics.end(),
+                           [&](const faultline::Diagnostic &d) {
+                               auto hc = faultline::HypothesisConstructor
+                                   ::mapRuleToHazardClass(d.ruleID);
+                               auto features = faultline::HypothesisConstructor
+                                   ::extractFeatures(d);
+                               if (calStore->isKnownFalsePositive(features, hc)) {
+                                   ++suppressed;
+                                   return true;
+                               }
+                               return false;
+                           }),
+            diagnostics.end());
+
+        if (suppressed > 0) {
+            llvm::errs() << "faultline: suppressed " << suppressed
+                         << " diagnostic(s) via calibration feedback\n";
         }
     }
 
