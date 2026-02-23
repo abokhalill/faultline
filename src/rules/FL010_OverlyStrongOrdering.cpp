@@ -16,10 +16,13 @@ namespace faultline {
 
 namespace {
 
+enum class AtomicOpClass { Load, Store, RMW };
+
 struct SeqCstSite {
     clang::SourceLocation loc;
-    std::string atomicOp;   // "load", "store", "fetch_add", "exchange", etc.
+    std::string atomicOp;
     std::string varName;
+    AtomicOpClass opClass = AtomicOpClass::RMW;
     unsigned inLoop = 0;
 };
 
@@ -97,7 +100,13 @@ public:
             varName = DRE->getDecl()->getNameAsString();
         }
 
-        sites_.push_back({E->getBeginLoc(), methodName, varName, inLoop_});
+        AtomicOpClass opClass = AtomicOpClass::RMW;
+        if (methodName == "load")
+            opClass = AtomicOpClass::Load;
+        else if (methodName == "store")
+            opClass = AtomicOpClass::Store;
+
+        sites_.push_back({E->getBeginLoc(), methodName, varName, opClass, inLoop_});
         return true;
     }
 
@@ -125,8 +134,7 @@ public:
             default: return true;
         }
 
-        // These operators always use seq_cst — no way to specify order.
-        sites_.push_back({E->getBeginLoc(), opName, "<atomic>", inLoop_});
+        sites_.push_back({E->getBeginLoc(), opName, "<atomic>", AtomicOpClass::RMW, inLoop_});
         return true;
     }
 
@@ -172,11 +180,11 @@ public:
     Severity getBaseSeverity() const override { return Severity::High; }
 
     std::string_view getHardwareMechanism() const override {
-        return "memory_order_seq_cst emits full memory fence (MFENCE or "
-               "LOCK-prefixed instruction on x86-64). Forces store buffer "
-               "drain and pipeline serialization. On TSO, acquire/release "
-               "semantics are free for loads/stores — seq_cst pays unnecessary "
-               "fence cost.";
+        return "On x86-64 TSO: seq_cst stores lower to XCHG (implicit LOCK, "
+               "store buffer drain). seq_cst loads lower to plain MOV (no "
+               "additional cost over acquire). seq_cst RMW lowers to LOCK-prefixed "
+               "instruction (same as acq_rel RMW). The actionable cost is on "
+               "stores where release ordering would emit plain MOV.";
     }
 
     void analyze(const clang::Decl *D,
@@ -201,27 +209,44 @@ public:
         unsigned atomicCount = visitor.sites().size();
 
         for (const auto &site : visitor.sites()) {
-            Severity sev = Severity::High;
-            std::vector<std::string> escalations;
+            // seq_cst loads are free on x86-64 TSO (plain MOV, same as acquire).
+            if (site.opClass == AtomicOpClass::Load)
+                continue;
 
-            if (site.inLoop) {
+            // seq_cst RMW lowers to LOCK-prefixed op, same as acq_rel RMW.
+            // Still flag but at reduced severity — the cost delta is zero on
+            // x86-64, though weaker ordering enables compiler reordering.
+            bool isStore = (site.opClass == AtomicOpClass::Store);
+
+            Severity sev = isStore ? Severity::High : Severity::Medium;
+            std::vector<std::string> escalations;
+            double confidence = isStore ? 0.85 : 0.55;
+
+            if (site.inLoop && isStore) {
                 sev = Severity::Critical;
+                confidence = 0.90;
                 escalations.push_back(
-                    "seq_cst atomic inside loop: repeated store buffer drains, "
-                    "sustained pipeline serialization");
+                    "seq_cst store inside loop: XCHG per iteration, "
+                    "sustained store buffer drain");
+            } else if (site.inLoop) {
+                sev = Severity::High;
+                escalations.push_back(
+                    "seq_cst RMW inside loop: LOCK-prefixed op per iteration "
+                    "(same cost as acq_rel on x86-64, but prevents compiler "
+                    "reordering optimizations)");
             }
 
             if (atomicCount > 1) {
                 escalations.push_back(
-                    "Multiple seq_cst atomics in same function: compounding "
-                    "fence overhead per invocation");
+                    std::to_string(atomicCount) +
+                    " seq_cst operations in function: cumulative serialization");
             }
 
             Diagnostic diag;
             diag.ruleID    = "FL010";
             diag.title     = "Overly Strong Atomic Ordering";
             diag.severity  = sev;
-            diag.confidence = 0.80;
+            diag.confidence = confidence;
 
             if (site.loc.isValid()) {
                 diag.location.file   = SM.getFilename(SM.getSpellingLoc(site.loc)).str();
@@ -230,28 +255,45 @@ public:
             }
 
             std::ostringstream hw;
-            hw << "atomic " << site.atomicOp << " on '" << site.varName
-               << "' uses seq_cst ordering in hot function '"
-               << FD->getQualifiedNameAsString()
-               << "'. On x86-64 TSO, this emits MFENCE/LOCK prefix forcing "
-               << "store buffer drain (~20-50 cycle penalty). "
-               << "acquire/release is free for loads/stores on TSO.";
+            if (isStore) {
+                hw << "seq_cst store on '" << site.varName
+                   << "' in '" << FD->getQualifiedNameAsString()
+                   << "': lowers to XCHG on x86-64 (implicit LOCK prefix, "
+                   << "store buffer drain). release ordering would emit "
+                   << "plain MOV with zero fence cost on TSO.";
+            } else {
+                hw << "seq_cst " << site.atomicOp << " on '" << site.varName
+                   << "' in '" << FD->getQualifiedNameAsString()
+                   << "': lowers to LOCK-prefixed instruction on x86-64. "
+                   << "On TSO, acq_rel RMW emits the same LOCK-prefixed op "
+                   << "— no runtime cost difference, but seq_cst prevents "
+                   << "compiler reordering across the operation.";
+            }
             diag.hardwareReasoning = hw.str();
 
             std::ostringstream ev;
             ev << "op=" << site.atomicOp
+               << "; op_class=" << (isStore ? "store" : "rmw")
                << "; var=" << site.varName
                << "; ordering=seq_cst"
                << "; function=" << FD->getQualifiedNameAsString()
                << "; in_loop=" << (site.inLoop ? "yes" : "no")
-               << "; total_atomics_in_func=" << atomicCount;
+               << "; total_seq_cst_in_func=" << atomicCount;
             diag.structuralEvidence = ev.str();
 
-            diag.mitigation =
-                "Use memory_order_acquire for loads, memory_order_release for "
-                "stores. Use memory_order_acq_rel for RMW operations. "
-                "Use memory_order_relaxed where ordering is not required. "
-                "On x86-64 TSO, acquire/release have zero fence cost.";
+            if (isStore) {
+                diag.mitigation =
+                    "Use memory_order_release for stores where total order is "
+                    "not required. On x86-64 TSO, release stores emit plain MOV "
+                    "(zero fence cost). Verify no downstream load depends on "
+                    "SC total order before weakening.";
+            } else {
+                diag.mitigation =
+                    "Use memory_order_acq_rel for RMW if total order is not "
+                    "required. On x86-64, runtime cost is identical (LOCK prefix "
+                    "either way), but weaker ordering enables compiler "
+                    "reordering optimizations around the operation.";
+            }
 
             diag.escalations = std::move(escalations);
             out.push_back(std::move(diag));
