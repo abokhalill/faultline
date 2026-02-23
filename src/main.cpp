@@ -157,7 +157,7 @@ int main(int argc, const char **argv) {
                     continue;
 
                 std::string optFlag = "-" + IROpt.getValue();
-                std::string clangCmd = clangBin + " -S -emit-llvm " + optFlag + " " +
+                std::string clangCmd = clangBin + " -S -emit-llvm -g " + optFlag + " " +
                                        extraFlags +
                                        " -o " + std::string(tmpPath) +
                                        " " + srcPath + " 2>/dev/null";

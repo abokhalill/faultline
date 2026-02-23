@@ -24,6 +24,8 @@ struct IRAtomicInfo {
     Op op;
     unsigned ordering = 0; // llvm::AtomicOrdering as unsigned
     bool isInLoop = false;
+    std::string sourceFile;
+    unsigned sourceLine = 0;
 };
 
 struct IRFunctionProfile {

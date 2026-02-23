@@ -7,6 +7,7 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
+#include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Demangle/Demangle.h>
 
@@ -69,6 +70,17 @@ bool IRAnalyzer::isInLoop(const llvm::BasicBlock *BB,
     return false;
 }
 
+static void extractDebugLoc(const llvm::Instruction &I,
+                            std::string &file, unsigned &line) {
+    const auto &DL = I.getDebugLoc();
+    if (!DL)
+        return;
+    if (auto *scope = DL->getScope()) {
+        file = scope->getFilename().str();
+        line = DL.getLine();
+    }
+}
+
 void IRAnalyzer::analyzeFunction(const llvm::Function &F) {
     IRFunctionProfile profile;
     profile.mangledName = F.getName().str();
@@ -120,6 +132,7 @@ void IRAnalyzer::analyzeFunction(const llvm::Function &F) {
                     ai.op = IRAtomicInfo::Load;
                     ai.ordering = static_cast<unsigned>(LI->getOrdering());
                     ai.isInLoop = bbInLoop;
+                    extractDebugLoc(I, ai.sourceFile, ai.sourceLine);
                     profile.atomics.push_back(ai);
                     if (LI->getOrdering() ==
                         llvm::AtomicOrdering::SequentiallyConsistent)
@@ -135,6 +148,7 @@ void IRAnalyzer::analyzeFunction(const llvm::Function &F) {
                     ai.op = IRAtomicInfo::Store;
                     ai.ordering = static_cast<unsigned>(SI->getOrdering());
                     ai.isInLoop = bbInLoop;
+                    extractDebugLoc(I, ai.sourceFile, ai.sourceLine);
                     profile.atomics.push_back(ai);
                     if (SI->getOrdering() ==
                         llvm::AtomicOrdering::SequentiallyConsistent)
@@ -149,6 +163,7 @@ void IRAnalyzer::analyzeFunction(const llvm::Function &F) {
                 ai.op = IRAtomicInfo::RMW;
                 ai.ordering = static_cast<unsigned>(RMW->getOrdering());
                 ai.isInLoop = bbInLoop;
+                extractDebugLoc(I, ai.sourceFile, ai.sourceLine);
                 profile.atomics.push_back(ai);
                 if (RMW->getOrdering() ==
                     llvm::AtomicOrdering::SequentiallyConsistent)
@@ -162,6 +177,7 @@ void IRAnalyzer::analyzeFunction(const llvm::Function &F) {
                 ai.op = IRAtomicInfo::CmpXchg;
                 ai.ordering = static_cast<unsigned>(CX->getSuccessOrdering());
                 ai.isInLoop = bbInLoop;
+                extractDebugLoc(I, ai.sourceFile, ai.sourceLine);
                 profile.atomics.push_back(ai);
                 if (CX->getSuccessOrdering() ==
                     llvm::AtomicOrdering::SequentiallyConsistent)
@@ -175,6 +191,7 @@ void IRAnalyzer::analyzeFunction(const llvm::Function &F) {
                 ai.op = IRAtomicInfo::Fence;
                 ai.ordering = static_cast<unsigned>(FI->getOrdering());
                 ai.isInLoop = bbInLoop;
+                extractDebugLoc(I, ai.sourceFile, ai.sourceLine);
                 profile.atomics.push_back(ai);
                 ++profile.fenceCount;
                 if (FI->getOrdering() ==

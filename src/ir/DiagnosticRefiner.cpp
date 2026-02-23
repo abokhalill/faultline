@@ -1,5 +1,7 @@
 #include "faultline/ir/DiagnosticRefiner.h"
 
+#include <llvm/IR/Instructions.h>
+
 #include <algorithm>
 #include <sstream>
 
@@ -63,15 +65,49 @@ void DiagnosticRefiner::refineFL010(Diagnostic &diag) const {
     if (!profile)
         return;
 
-    if (profile->seqCstCount > 0) {
-        // IR confirms seq_cst emission — boost confidence.
-        diag.confidence = std::min(diag.confidence + 0.10, 0.95);
+    unsigned diagLine = diag.location.line;
+    std::string diagFile = diag.location.file;
+
+    // Site-level correlation: find IR atomics at the exact source line.
+    bool siteConfirmed = false;
+    std::string siteOpName;
+    for (const auto &ai : profile->atomics) {
+        if (ai.sourceLine == 0)
+            continue;
+        bool lineMatch = (ai.sourceLine == diagLine);
+        bool fileMatch = diagFile.empty() || ai.sourceFile.empty() ||
+                         diagFile.find(ai.sourceFile) != std::string::npos ||
+                         ai.sourceFile.find(diagFile) != std::string::npos;
+        if (lineMatch && fileMatch) {
+            bool isSeqCst = (ai.ordering ==
+                static_cast<unsigned>(llvm::AtomicOrdering::SequentiallyConsistent));
+            if (isSeqCst) {
+                siteConfirmed = true;
+                switch (ai.op) {
+                    case IRAtomicInfo::Store:   siteOpName = "store"; break;
+                    case IRAtomicInfo::RMW:     siteOpName = "rmw"; break;
+                    case IRAtomicInfo::CmpXchg: siteOpName = "cmpxchg"; break;
+                    case IRAtomicInfo::Fence:   siteOpName = "fence"; break;
+                    default:                   siteOpName = "atomic"; break;
+                }
+                break;
+            }
+        }
+    }
+
+    if (siteConfirmed) {
+        diag.confidence = std::min(diag.confidence + 0.10, 0.98);
+        diag.evidenceTier = EvidenceTier::Proven;
+        diag.escalations.push_back(
+            "IR site-confirmed: seq_cst " + siteOpName +
+            " at line " + std::to_string(diagLine) +
+            " survives lowering");
+    } else if (profile->seqCstCount > 0) {
+        diag.confidence = std::min(diag.confidence + 0.05, 0.92);
         diag.escalations.push_back(
             "IR confirmed: " + std::to_string(profile->seqCstCount) +
-            " seq_cst instruction(s) emitted after lowering");
+            " seq_cst instruction(s) in function (no exact line match)");
     } else if (!profile->atomics.empty()) {
-        // Atomics present but no seq_cst — compiler may have relaxed ordering.
-        // Reduce confidence: AST saw seq_cst but IR didn't emit it.
         diag.confidence = std::max(diag.confidence - 0.20, 0.30);
         diag.escalations.push_back(
             "IR refinement: no seq_cst instructions emitted — "
@@ -93,23 +129,30 @@ void DiagnosticRefiner::refineFL011(Diagnostic &diag) const {
 
     unsigned atomicWriteCount = 0;
     unsigned loopAtomics = 0;
+    unsigned siteMatched = 0;
     for (const auto &ai : profile->atomics) {
         if (ai.op == IRAtomicInfo::Store || ai.op == IRAtomicInfo::RMW ||
             ai.op == IRAtomicInfo::CmpXchg) {
             ++atomicWriteCount;
             if (ai.isInLoop)
                 ++loopAtomics;
+            if (ai.sourceLine > 0)
+                ++siteMatched;
         }
     }
 
     if (atomicWriteCount > 0) {
         diag.confidence = std::min(diag.confidence + 0.10, 0.95);
+        if (siteMatched > 0)
+            diag.evidenceTier = EvidenceTier::Proven;
 
         std::ostringstream ss;
         ss << "IR confirmed: " << atomicWriteCount
            << " atomic write instruction(s)";
         if (loopAtomics > 0)
             ss << ", " << loopAtomics << " in loop back-edge blocks";
+        if (siteMatched > 0)
+            ss << " (" << siteMatched << " with debug-loc site mapping)";
         diag.escalations.push_back(ss.str());
     }
 }
@@ -255,17 +298,23 @@ void DiagnosticRefiner::refineFL012(Diagnostic &diag) const {
     if (!profile)
         return;
 
-    // Mutex lock compiles to atomic cmpxchg or call to pthread_mutex_lock.
+    unsigned diagLine = diag.location.line;
+
     bool hasMutexCall = false;
     bool hasAtomicCmpXchg = false;
+    bool siteCorrelated = false;
+
     for (const auto &csi : profile->heapAllocCalls) {
         if (csi.calleeName.find("pthread_mutex") != std::string::npos ||
             csi.calleeName.find("__gthread_mutex") != std::string::npos)
             hasMutexCall = true;
     }
     for (const auto &ai : profile->atomics) {
-        if (ai.op == IRAtomicInfo::CmpXchg)
+        if (ai.op == IRAtomicInfo::CmpXchg) {
             hasAtomicCmpXchg = true;
+            if (ai.sourceLine == diagLine && diagLine > 0)
+                siteCorrelated = true;
+        }
     }
 
     if (hasMutexCall || hasAtomicCmpXchg) {
@@ -273,6 +322,11 @@ void DiagnosticRefiner::refineFL012(Diagnostic &diag) const {
         std::string detail;
         if (hasMutexCall) detail = "pthread_mutex call";
         else detail = "atomic cmpxchg (lock internals)";
+
+        if (siteCorrelated) {
+            diag.evidenceTier = EvidenceTier::Proven;
+            detail += " at line " + std::to_string(diagLine);
+        }
         diag.escalations.push_back(
             "IR confirmed: " + detail + " present in lowered IR");
     }
