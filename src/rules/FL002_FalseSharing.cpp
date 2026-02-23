@@ -42,17 +42,24 @@ public:
 
         CacheLineMap map(RD, Ctx);
 
+        auto atomicPairs = map.atomicPairsOnSameLine();
         auto mutablePairs = map.mutablePairsOnSameLine();
         if (mutablePairs.empty())
             return;
 
-        bool hasAtomicPairs = !map.atomicPairsOnSameLine().empty();
+        bool hasAtomicPairs = !atomicPairs.empty();
         auto fsCandidateLines = map.falseSharingCandidateLines();
 
-        Severity sev = Severity::Critical;
+        // Without atomic pairs on the same line, we cannot statically prove
+        // that different threads write different fields. Require at least
+        // atomic fields in the struct for non-atomic-pair cases.
+        if (!hasAtomicPairs && map.totalAtomicFields() == 0)
+            return;
+
+        Severity sev = hasAtomicPairs ? Severity::Critical : Severity::High;
         std::vector<std::string> escalations;
 
-        for (const auto &pair : map.atomicPairsOnSameLine()) {
+        for (const auto &pair : atomicPairs) {
             escalations.push_back(
                 "atomic fields '" + pair.a->name + "' and '" + pair.b->name +
                 "' share line " + std::to_string(pair.lineIndex) +
@@ -68,11 +75,11 @@ public:
                 " non-atomic mutable field(s) — mixed write surface");
         }
 
-        double confidence = 0.60;
+        double confidence = 0.55;
         if (hasAtomicPairs)
             confidence = 0.88;
         else if (map.totalAtomicFields() > 0)
-            confidence = 0.78;
+            confidence = 0.68;
 
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();

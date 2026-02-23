@@ -36,6 +36,7 @@ struct Diagnostic {
     Severity       severity     = Severity::Informational;
     double         confidence   = 0.0; // [0.0, 1.0]
     EvidenceTier   evidenceTier = EvidenceTier::Speculative;
+    bool           suppressed   = false; // Set by IR refiner when evidence contradicts AST
     SourceLocation location;
     std::string    hardwareReasoning;
     std::string    structuralEvidence;

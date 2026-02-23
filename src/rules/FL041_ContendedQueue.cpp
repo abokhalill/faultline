@@ -42,13 +42,6 @@ public:
         if (atomicPairs.empty())
             return;
 
-        const auto &firstPair = atomicPairs.front();
-        std::string field1 = firstPair.a->name;
-        std::string field2 = firstPair.b->name;
-
-        Severity sev = Severity::High;
-        std::vector<std::string> escalations;
-
         std::string structName = RD->getNameAsString();
         bool looksLikeQueue =
             structName.find("queue") != std::string::npos ||
@@ -74,13 +67,22 @@ public:
             }
         }
 
-        if (looksLikeQueue || hasHeadTail) {
-            sev = Severity::Critical;
-            escalations.push_back(
-                "Structure appears to be a concurrent queue: head/tail "
-                "atomic indices on same cache line guarantee producer-consumer "
-                "cache line ping-pong");
-        }
+        // Require at least one queue heuristic signal. Without it, atomic
+        // pairs on the same line are already covered by FL002 (false sharing).
+        if (!looksLikeQueue && !hasHeadTail)
+            return;
+
+        const auto &firstPair = atomicPairs.front();
+        std::string field1 = firstPair.a->name;
+        std::string field2 = firstPair.b->name;
+
+        Severity sev = Severity::Critical;
+        std::vector<std::string> escalations;
+
+        escalations.push_back(
+            "Structure appears to be a concurrent queue: head/tail "
+            "atomic indices on same cache line guarantee producer-consumer "
+            "cache line ping-pong");
 
         for (const auto &pair : atomicPairs) {
             escalations.push_back(
@@ -96,7 +98,7 @@ public:
         diag.ruleID    = "FL041";
         diag.title     = "Contended Queue Pattern";
         diag.severity  = sev;
-        diag.confidence = (looksLikeQueue || hasHeadTail) ? 0.82 : 0.62;
+        diag.confidence = 0.82;
         diag.evidenceTier = EvidenceTier::Proven;
 
         if (loc.isValid()) {

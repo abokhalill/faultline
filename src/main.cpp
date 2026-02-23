@@ -210,11 +210,13 @@ int main(int argc, const char **argv) {
         }
     }
 
-    // Filter by minimum severity and evidence tier.
+    // Filter suppressed, minimum severity, and evidence tier.
     auto minTier = parseEvidenceTier(MinEvidence);
     diagnostics.erase(
         std::remove_if(diagnostics.begin(), diagnostics.end(),
                        [&](const faultline::Diagnostic &d) {
+                           if (d.suppressed)
+                               return true;
                            if (static_cast<uint8_t>(d.severity) <
                                static_cast<uint8_t>(cfg.minSeverity))
                                return true;

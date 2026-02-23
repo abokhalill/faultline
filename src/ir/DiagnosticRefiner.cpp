@@ -208,6 +208,17 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
         return;
 
     uint64_t irStackSize = profile->totalAllocaBytes;
+    constexpr uint64_t threshold = 2048;
+
+    // IR-precise frame below threshold: suppress the AST-based diagnostic.
+    if (irStackSize < threshold && irStackSize > 0) {
+        diag.suppressed = true;
+        diag.escalations.push_back(
+            "IR suppressed: actual stack frame " + std::to_string(irStackSize) +
+            "B (below " + std::to_string(threshold) +
+            "B threshold) — AST estimate was inaccurate");
+        return;
+    }
 
     // Replace AST estimate with IR-precise value.
     std::ostringstream ss;
@@ -232,6 +243,7 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
 
     if (irStackSize > 0) {
         diag.confidence = std::min(diag.confidence + 0.10, 0.95);
+        diag.evidenceTier = EvidenceTier::Proven;
 
         // Update evidence with IR-precise size.
         std::ostringstream newEv;
