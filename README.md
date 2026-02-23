@@ -10,14 +10,26 @@ It does not guess. Every finding maps to a specific hardware mechanism on x86-64
 
 ---
 
+## Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **Linux x86-64** | Supported | Primary target. Fully verified. |
+| **WSL2** | Supported | Linux under the hood. |
+| **macOS (Intel)** | Unsupported | AST/IR analysis may build, but hardware model assumes x86-64 TSO. No `perf` support. |
+| **macOS (Apple Silicon)** | Unsupported | ARM uses 128B cache lines and a weak memory model. All hardware reasoning is wrong. |
+| **Windows (native)** | Unsupported | Build system and IR emission assume Unix toolchain. |
+
+Faultline's hardware model — 64B cache lines, TSO store buffer semantics, MESI coherence costs, x86-64 PMU counters — is x86-64 Linux specific. Running it on other platforms would produce diagnostics with incorrect hardware reasoning.
+
 ## Requirements
 
 | Dependency | Version |
 |------------|---------|
+| OS | Linux x86-64 (or WSL2) |
 | LLVM/Clang | 16+ (dev libraries) |
 | CMake | 3.20+ |
 | C++ Standard | C++20 |
-| Target | x86-64 (64B cache lines, TSO memory model) |
 
 ```bash
 # Ubuntu/Debian
