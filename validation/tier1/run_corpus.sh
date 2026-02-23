@@ -2,21 +2,42 @@
 # Tier 1: Corpus-Scale Regression Harness
 # Runs faultline against real-world codebases and validates output properties.
 #
-# Usage: ./validation/tier1/run_corpus.sh [--corpus NAME]
-# Requires: built faultline binary, git, clang++, python3
+# Usage:
+#   ./validation/tier1/run_corpus.sh                # All corpora
+#   ./validation/tier1/run_corpus.sh --corpus folly  # Single external corpus
+#   ./validation/tier1/run_corpus.sh --help          # Show this help
+#
+# Exit codes:
+#   0  All assertions passed
+#   1  One or more assertions failed
+#
+# Requires: built faultline binary, git (for external corpora)
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-FAULTLINE="$ROOT_DIR/build/faultline"
-CORPUS_DIR="$ROOT_DIR/validation/tier1/corpora"
-RESULTS_DIR="$ROOT_DIR/validation/tier1/results"
-CORPUS_FILTER="${1:-}"
+readonly SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+readonly ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+readonly FAULTLINE="$ROOT_DIR/build/faultline"
+readonly CORPUS_DIR="$ROOT_DIR/validation/tier1/corpora"
+readonly RESULTS_DIR="$ROOT_DIR/validation/tier1/results"
 
-if [[ "$CORPUS_FILTER" == "--corpus" ]]; then
-    CORPUS_FILTER="${2:-}"
-fi
+usage() {
+    sed -n '2,/^$/s/^# \?//p' "$0"
+    exit 0
+}
+
+CORPUS_FILTER=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --help|-h) usage ;;
+        --corpus)  CORPUS_FILTER="$2"; shift 2 ;;
+        *)
+            echo "Unknown flag: $1" >&2
+            usage
+            ;;
+    esac
+done
 
 if [[ ! -x "$FAULTLINE" ]]; then
     echo "FATAL: faultline binary not found at $FAULTLINE" >&2

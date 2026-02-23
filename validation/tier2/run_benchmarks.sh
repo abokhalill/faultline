@@ -3,30 +3,51 @@
 # Builds paired benchmarks, runs faultline analysis, executes benchmarks
 # with perf counters, and validates claims against hardware evidence.
 #
-# Usage: ./validation/tier2/run_benchmarks.sh [--rule FLXXX] [--no-perf]
-# Requires: built faultline binary, clang++, perf (optional), python3 + scipy
+# Usage:
+#   ./validation/tier2/run_benchmarks.sh                # All rules, with perf
+#   ./validation/tier2/run_benchmarks.sh --no-perf      # Skip perf counters
+#   ./validation/tier2/run_benchmarks.sh --rule FL002   # Single rule
+#   ./validation/tier2/run_benchmarks.sh --help         # Show this help
+#
+# Exit codes:
+#   0  All assertions passed
+#   1  One or more assertions failed
+#
+# Requires: built faultline binary, clang++ (any version)
+# Optional: perf (hardware counters), python3 + scipy (statistical analysis)
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-FAULTLINE="$ROOT_DIR/build/faultline"
-BENCH_DIR="$SCRIPT_DIR/benchmarks"
-BUILD_DIR="$SCRIPT_DIR/build"
-RESULTS_DIR="$SCRIPT_DIR/results"
+readonly SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+readonly ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+readonly FAULTLINE="$ROOT_DIR/build/faultline"
+readonly BENCH_DIR="$SCRIPT_DIR/benchmarks"
+readonly BUILD_DIR="$SCRIPT_DIR/build"
+readonly RESULTS_DIR="$SCRIPT_DIR/results"
+
+usage() {
+    sed -n '2,/^$/s/^# \?//p' "$0"
+    exit 0
+}
+
 RULE_FILTER=""
 USE_PERF=true
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --rule) RULE_FILTER="$2"; shift 2 ;;
+        --help|-h) usage ;;
+        --rule)    RULE_FILTER="$2"; shift 2 ;;
         --no-perf) USE_PERF=false; shift ;;
-        *) shift ;;
+        *)
+            echo "Unknown flag: $1" >&2
+            usage
+            ;;
     esac
 done
 
 if [[ ! -x "$FAULTLINE" ]]; then
     echo "FATAL: faultline binary not found at $FAULTLINE" >&2
+    echo "       Run: cmake --build build -j\$(nproc)" >&2
     exit 1
 fi
 
@@ -113,7 +134,8 @@ run_benchmark_suite() {
 
     # Check: count diagnostics for this rule
     local diag_count
-    diag_count=$(grep -c "\"$rule\"" "$faultline_out" 2>/dev/null || echo 0)
+    diag_count=$(grep "\"$rule\"" "$faultline_out" 2>/dev/null | wc -l)
+    diag_count=$((diag_count + 0))
     echo "    Diagnostics emitted: $diag_count"
 
     # --- Phase 2: Build Benchmark ---
@@ -135,7 +157,7 @@ run_benchmark_suite() {
         return
     fi
     log_pass "$rule: benchmark executed"
-    cat "$bench_out" | sed 's/^/    /'
+    sed 's/^/    /' < "$bench_out"
 
     # --- Phase 4: Perf Counter Validation ---
     if $PERF_AVAILABLE; then

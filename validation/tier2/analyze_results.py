@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""
-Tier 2 Statistical Analysis: validates that benchmark timing deltas
-between hazardous and fixed variants are statistically significant.
+"""Tier 2 Statistical Analysis.
 
-Parses benchmark output files and runs paired t-tests.
+Validates that benchmark timing deltas between hazardous and fixed variants
+are statistically significant. Parses benchmark output files from
+run_benchmarks.sh and runs paired t-tests (α=0.01) with Cohen's d effect size.
+
+Usage:
+    python3 analyze_results.py [RESULTS_DIR]
+    python3 analyze_results.py --help
+
+When scipy is unavailable, falls back to reporting raw mean ratios.
 """
 
+import argparse
 import re
 import sys
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
 @dataclass
 class TrialResult:
@@ -125,7 +131,13 @@ def analyze_rule(rule_id: str, results_dir: str) -> tuple[bool, str]:
     return passed, msg
 
 def main():
-    results_dir = sys.argv[1] if len(sys.argv) > 1 else "validation/tier2/results"
+    parser = argparse.ArgumentParser(
+        description="Tier 2 statistical analysis of benchmark results.")
+    parser.add_argument(
+        "results_dir", nargs="?", default="validation/tier2/results",
+        help="Directory containing *_bench.txt files (default: validation/tier2/results)")
+    args = parser.parse_args()
+    results_dir = args.results_dir
 
     print("Faultline Tier 2: Statistical Analysis")
     print("=" * 50)
