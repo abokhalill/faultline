@@ -1,12 +1,12 @@
 #include "faultline/core/Rule.h"
 #include "faultline/core/RuleRegistry.h"
 #include "faultline/core/HotPathOracle.h"
+#include "faultline/analysis/CacheLineMap.h"
 #include "faultline/analysis/EscapeAnalysis.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
-#include <clang/AST/RecordLayout.h>
 #include <clang/Basic/SourceManager.h>
 
 #include <sstream>
@@ -36,56 +36,43 @@ public:
         if (RD->isImplicit() || RD->isLambda())
             return;
 
-        const auto &layout = Ctx.getASTRecordLayout(RD);
-        uint64_t sizeBytes = layout.getSize().getQuantity();
-
-        // False sharing is relevant when struct fits within or near a single
-        // cache line — multiple fields contend on the same line.
-        // Structs > 128B are FL001 territory.
-        if (sizeBytes > 128)
-            return;
-
         EscapeAnalysis escape(Ctx);
-
-        // Count mutable non-const fields.
-        unsigned mutableCount = 0;
-        bool hasAtomics = false;
-        std::vector<std::string> mutableFields;
-
-        for (const auto *field : RD->fields()) {
-            if (escape.isFieldMutable(field)) {
-                ++mutableCount;
-                mutableFields.push_back(field->getNameAsString());
-            }
-            if (escape.isAtomicType(field->getType())) {
-                hasAtomics = true;
-            }
-        }
-
-        // Need 2+ mutable fields for false sharing risk.
-        if (mutableCount < 2)
-            return;
-
-        // Must show evidence of cross-thread usage.
         if (!escape.mayEscapeThread(RD))
             return;
+
+        CacheLineMap map(RD, Ctx);
+
+        auto mutablePairs = map.mutablePairsOnSameLine();
+        if (mutablePairs.empty())
+            return;
+
+        bool hasAtomicPairs = !map.atomicPairsOnSameLine().empty();
+        auto fsCandidateLines = map.falseSharingCandidateLines();
 
         Severity sev = Severity::Critical;
         std::vector<std::string> escalations;
 
-        if (hasAtomics) {
+        for (const auto &pair : map.atomicPairsOnSameLine()) {
             escalations.push_back(
-                "Contains std::atomic fields: guaranteed cross-core "
-                "cache line invalidation on write");
+                "atomic fields '" + pair.a->name + "' and '" + pair.b->name +
+                "' share line " + std::to_string(pair.lineIndex) +
+                ": guaranteed cross-core invalidation on write");
         }
 
-        // Check if fields that should be on separate lines are packed together.
-        // If struct <= 64B, all mutable fields share a single cache line.
-        if (sizeBytes <= 64) {
+        for (auto lineIdx : fsCandidateLines) {
+            const auto &bucket = map.buckets()[lineIdx];
             escalations.push_back(
-                "All mutable fields packed within single 64B cache line: "
-                "maximum invalidation surface");
+                "line " + std::to_string(lineIdx) + ": " +
+                std::to_string(bucket.atomicCount) + " atomic + " +
+                std::to_string(bucket.mutableCount - bucket.atomicCount) +
+                " non-atomic mutable field(s) — mixed write surface");
         }
+
+        double confidence = 0.60;
+        if (hasAtomicPairs)
+            confidence = 0.88;
+        else if (map.totalAtomicFields() > 0)
+            confidence = 0.78;
 
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
@@ -94,7 +81,7 @@ public:
         diag.ruleID    = "FL002";
         diag.title     = "False Sharing Candidate";
         diag.severity  = sev;
-        diag.confidence = hasAtomics ? 0.85 : 0.65;
+        diag.confidence = confidence;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
@@ -103,37 +90,29 @@ public:
         }
 
         std::ostringstream hw;
-        hw << "Struct '" << RD->getNameAsString() << "' (" << sizeBytes
-           << "B) contains " << mutableCount
-           << " mutable fields with cross-thread escape evidence. "
-           << "Concurrent writes to different fields will trigger MESI "
-           << "invalidation storms on the shared cache line.";
+        hw << "Struct '" << RD->getNameAsString() << "' ("
+           << map.recordSizeBytes() << "B, "
+           << map.linesSpanned() << " line(s)): "
+           << mutablePairs.size() << " mutable field pair(s) share cache line(s) "
+           << "with thread-escape evidence. Concurrent writes to co-located "
+           << "fields trigger MESI invalidation per write.";
         diag.hardwareReasoning = hw.str();
 
         std::ostringstream ev;
-        ev << "sizeof=" << sizeBytes << "B; mutable_fields=[";
-        for (size_t i = 0; i < mutableFields.size(); ++i) {
-            ev << mutableFields[i];
-            if (i + 1 < mutableFields.size()) ev << ", ";
-        }
-        ev << "]; thread_escape=true; atomics=" << (hasAtomics ? "yes" : "no");
+        ev << "sizeof=" << map.recordSizeBytes() << "B"
+           << "; lines=" << map.linesSpanned()
+           << "; mutable_pairs_same_line=" << mutablePairs.size()
+           << "; atomic_pairs_same_line=" << map.atomicPairsOnSameLine().size()
+           << "; thread_escape=true"
+           << "; atomics=" << (map.totalAtomicFields() > 0 ? "yes" : "no");
         diag.structuralEvidence = ev.str();
 
         diag.mitigation =
-            "Pad fields to separate 64B cache lines. "
-            "Use alignas(64) on independently-written fields. "
-            "Consider per-thread/per-core storage.";
+            "Pad independently-written fields to separate 64B cache lines "
+            "with alignas(64). Consider per-thread/per-core replicas.";
 
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));
-    }
-
-private:
-    bool isAtomicType(clang::QualType QT) const {
-        QT = QT.getCanonicalType();
-        if (QT.getAsString().find("atomic") != std::string::npos)
-            return true;
-        return QT->isAtomicType();
     }
 };
 

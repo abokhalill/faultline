@@ -1,12 +1,11 @@
 #include "faultline/core/Rule.h"
 #include "faultline/core/RuleRegistry.h"
 #include "faultline/core/HotPathOracle.h"
-#include "faultline/analysis/EscapeAnalysis.h"
+#include "faultline/analysis/CacheLineMap.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
-#include <clang/AST/RecordLayout.h>
 #include <clang/Basic/SourceManager.h>
 
 #include <sstream>
@@ -37,56 +36,19 @@ public:
         if (RD->isImplicit() || RD->isLambda())
             return;
 
-        // Heuristic: look for structs with 2+ atomic integer fields
-        // that look like head/tail indices (common queue pattern).
-        EscapeAnalysis escape(Ctx);
+        CacheLineMap map(RD, Ctx);
 
-        struct AtomicField {
-            const clang::FieldDecl *decl;
-            uint64_t offsetBits;
-        };
-
-        std::vector<AtomicField> atomicFields;
-        const auto &layout = Ctx.getASTRecordLayout(RD);
-
-        unsigned idx = 0;
-        for (const auto *field : RD->fields()) {
-            if (escape.isAtomicType(field->getType())) {
-                uint64_t offset = layout.getFieldOffset(idx);
-                atomicFields.push_back({field, offset});
-            }
-            ++idx;
-        }
-
-        // Need at least 2 atomic fields for queue contention pattern.
-        if (atomicFields.size() < 2)
+        auto atomicPairs = map.atomicPairsOnSameLine();
+        if (atomicPairs.empty())
             return;
 
-        // Check if any pair of atomic fields share a cache line (64B = 512 bits).
-        bool hasSameLineAtomics = false;
-        std::string field1, field2;
-
-        for (size_t i = 0; i < atomicFields.size(); ++i) {
-            for (size_t j = i + 1; j < atomicFields.size(); ++j) {
-                uint64_t line_i = atomicFields[i].offsetBits / 512;
-                uint64_t line_j = atomicFields[j].offsetBits / 512;
-                if (line_i == line_j) {
-                    hasSameLineAtomics = true;
-                    field1 = atomicFields[i].decl->getNameAsString();
-                    field2 = atomicFields[j].decl->getNameAsString();
-                    break;
-                }
-            }
-            if (hasSameLineAtomics) break;
-        }
-
-        if (!hasSameLineAtomics)
-            return;
+        const auto &firstPair = atomicPairs.front();
+        std::string field1 = firstPair.a->name;
+        std::string field2 = firstPair.b->name;
 
         Severity sev = Severity::High;
         std::vector<std::string> escalations;
 
-        // Check for queue-like naming heuristic.
         std::string structName = RD->getNameAsString();
         bool looksLikeQueue =
             structName.find("queue") != std::string::npos ||
@@ -96,18 +58,18 @@ public:
             structName.find("ring") != std::string::npos ||
             structName.find("Ring") != std::string::npos;
 
-        // Check field names for head/tail pattern.
         bool hasHeadTail = false;
-        for (const auto &af : atomicFields) {
-            std::string name = af.decl->getNameAsString();
-            if (name.find("head") != std::string::npos ||
-                name.find("tail") != std::string::npos ||
-                name.find("read") != std::string::npos ||
-                name.find("write") != std::string::npos ||
-                name.find("push") != std::string::npos ||
-                name.find("pop") != std::string::npos ||
-                name.find("front") != std::string::npos ||
-                name.find("back") != std::string::npos) {
+        for (const auto &f : map.fields()) {
+            if (!f.isAtomic) continue;
+            const auto &n = f.name;
+            if (n.find("head") != std::string::npos ||
+                n.find("tail") != std::string::npos ||
+                n.find("read") != std::string::npos ||
+                n.find("write") != std::string::npos ||
+                n.find("push") != std::string::npos ||
+                n.find("pop") != std::string::npos ||
+                n.find("front") != std::string::npos ||
+                n.find("back") != std::string::npos) {
                 hasHeadTail = true;
             }
         }
@@ -120,10 +82,12 @@ public:
                 "cache line ping-pong");
         }
 
-        escalations.push_back(
-            "Atomic fields '" + field1 + "' and '" + field2 +
-            "' share a cache line: concurrent writes from different cores "
-            "will trigger MESI invalidation on every operation");
+        for (const auto &pair : atomicPairs) {
+            escalations.push_back(
+                "atomic fields '" + pair.a->name + "' and '" + pair.b->name +
+                "' share line " + std::to_string(pair.lineIndex) +
+                ": concurrent writes trigger MESI invalidation");
+        }
 
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
@@ -132,7 +96,7 @@ public:
         diag.ruleID    = "FL041";
         diag.title     = "Contended Queue Pattern";
         diag.severity  = sev;
-        diag.confidence = (looksLikeQueue || hasHeadTail) ? 0.80 : 0.60;
+        diag.confidence = (looksLikeQueue || hasHeadTail) ? 0.82 : 0.62;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
@@ -140,21 +104,22 @@ public:
             diag.location.column = SM.getSpellingColumnNumber(loc);
         }
 
-        uint64_t sizeBytes = layout.getSize().getQuantity();
-
         std::ostringstream hw;
-        hw << "Struct '" << structName << "' (" << sizeBytes
-           << "B) has " << atomicFields.size()
-           << " atomic fields with '" << field1 << "' and '" << field2
+        hw << "Struct '" << structName << "' ("
+           << map.recordSizeBytes() << "B, "
+           << map.linesSpanned() << " line(s)) has "
+           << map.totalAtomicFields() << " atomic field(s) with '"
+           << field1 << "' and '" << field2
            << "' on the same cache line. Under MPMC workload, every "
            << "enqueue/dequeue triggers cross-core RFO for the shared line.";
         diag.hardwareReasoning = hw.str();
 
         std::ostringstream ev;
         ev << "struct=" << structName
-           << "; sizeof=" << sizeBytes << "B"
-           << "; atomic_fields=" << atomicFields.size()
-           << "; same_line_pair=[" << field1 << ", " << field2 << "]"
+           << "; sizeof=" << map.recordSizeBytes() << "B"
+           << "; lines=" << map.linesSpanned()
+           << "; atomic_fields=" << map.totalAtomicFields()
+           << "; atomic_pairs_same_line=" << atomicPairs.size()
            << "; queue_heuristic=" << (looksLikeQueue ? "yes" : "no")
            << "; head_tail_names=" << (hasHeadTail ? "yes" : "no");
         diag.structuralEvidence = ev.str();

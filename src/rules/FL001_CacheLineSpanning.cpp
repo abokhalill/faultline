@@ -2,12 +2,11 @@
 #include "faultline/core/RuleRegistry.h"
 #include "faultline/core/HotPathOracle.h"
 #include "faultline/core/Config.h"
+#include "faultline/analysis/CacheLineMap.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
-#include <clang/AST/RecordLayout.h>
-#include <clang/AST/Type.h>
 #include <clang/Basic/SourceManager.h>
 
 #include <sstream>
@@ -33,44 +32,49 @@ public:
         const auto *RD = llvm::dyn_cast_or_null<clang::CXXRecordDecl>(D);
         if (!RD || !RD->isCompleteDefinition())
             return;
-
         if (RD->isImplicit() || RD->isLambda())
             return;
 
-        const auto &layout = Ctx.getASTRecordLayout(RD);
-        uint64_t sizeBytes = layout.getSize().getQuantity();
+        CacheLineMap map(RD, Ctx);
 
-        // Threshold: struct exceeds single 64B cache line.
-        if (sizeBytes <= 64)
+        if (map.linesSpanned() <= 1)
             return;
+
+        uint64_t sizeBytes = map.recordSizeBytes();
+        uint64_t lines = map.linesSpanned();
 
         Severity sev = Severity::High;
         std::vector<std::string> escalations;
 
-        if (sizeBytes > 128) {
+        if (lines >= 3) {
             sev = Severity::Critical;
             escalations.push_back(
-                "sizeof > 128B: spans 3+ cache lines, elevated eviction pressure");
+                "spans " + std::to_string(lines) +
+                " cache lines: elevated L1D eviction pressure");
         }
 
-        // Check for atomic fields — escalation per RULEBOOK.
-        bool hasAtomics = false;
-        for (const auto *field : RD->fields()) {
-            auto qt = field->getType().getCanonicalType();
-            if (qt.getAsString().find("atomic") != std::string::npos) {
-                hasAtomics = true;
-                break;
+        auto straddlers = map.straddlingFields();
+        if (!straddlers.empty()) {
+            for (const auto *f : straddlers) {
+                escalations.push_back(
+                    "field '" + f->name + "' straddles line boundary at offset " +
+                    std::to_string(f->offsetBytes) + "B (" +
+                    std::to_string(f->sizeBytes) + "B): split load/store penalty");
             }
         }
 
-        if (hasAtomics) {
+        if (map.totalAtomicFields() > 0) {
             sev = Severity::Critical;
+            unsigned atomicLines = 0;
+            for (const auto &b : map.buckets()) {
+                if (b.atomicCount > 0) ++atomicLines;
+            }
             escalations.push_back(
-                "Contains atomic fields: coherence traffic amplified across "
-                "spanned cache lines (MESI RFO storms)");
+                std::to_string(map.totalAtomicFields()) +
+                " atomic field(s) across " + std::to_string(atomicLines) +
+                " line(s): RFO traffic on each distinct line");
         }
 
-        // Build diagnostic.
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
 
@@ -78,7 +82,8 @@ public:
         diag.ruleID    = "FL001";
         diag.title     = "Cache Line Spanning Struct";
         diag.severity  = sev;
-        diag.confidence = hasAtomics ? 0.90 : 0.75;
+        diag.confidence = (map.totalAtomicFields() > 0) ? 0.90 :
+                          (!straddlers.empty() ? 0.82 : 0.72);
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
@@ -88,16 +93,21 @@ public:
 
         std::ostringstream hw;
         hw << "Struct '" << RD->getNameAsString() << "' occupies "
-           << sizeBytes << "B, spanning "
-           << ((sizeBytes + 63) / 64) << " cache line(s). "
-           << "Each access may touch multiple lines, increasing "
-           << "L1D pressure and coherence invalidation surface.";
+           << sizeBytes << "B across " << lines << " cache line(s).";
+        if (!straddlers.empty())
+            hw << " " << straddlers.size()
+               << " field(s) straddle line boundaries (split load/store).";
+        if (map.totalAtomicFields() > 0)
+            hw << " Atomic fields span multiple lines: each line requires "
+               << "independent RFO ownership transfer.";
         diag.hardwareReasoning = hw.str();
 
         std::ostringstream ev;
-        ev << "sizeof(" << RD->getNameAsString() << ") = " << sizeBytes
-           << "B; cache_line = 64B; lines_spanned = "
-           << ((sizeBytes + 63) / 64);
+        ev << "sizeof=" << sizeBytes << "B"
+           << "; lines_spanned=" << lines
+           << "; straddling_fields=" << straddlers.size()
+           << "; atomic_fields=" << map.totalAtomicFields()
+           << "; mutable_fields=" << map.totalMutableFields();
         diag.structuralEvidence = ev.str();
 
         diag.mitigation =
@@ -106,7 +116,6 @@ public:
             "Apply alignas(64) to isolate write-heavy sub-structs.";
 
         diag.escalations = std::move(escalations);
-
         out.push_back(std::move(diag));
     }
 };

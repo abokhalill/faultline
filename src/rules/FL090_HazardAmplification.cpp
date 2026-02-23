@@ -1,84 +1,17 @@
 #include "faultline/core/Rule.h"
 #include "faultline/core/RuleRegistry.h"
 #include "faultline/core/HotPathOracle.h"
+#include "faultline/analysis/CacheLineMap.h"
 #include "faultline/analysis/EscapeAnalysis.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
-#include <clang/AST/RecordLayout.h>
-#include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/Basic/SourceManager.h>
 
 #include <sstream>
 
 namespace faultline {
-
-namespace {
-
-// Check if a type is referenced inside any loop body within a function.
-class LoopUsageVisitor : public clang::RecursiveASTVisitor<LoopUsageVisitor> {
-public:
-    explicit LoopUsageVisitor(const clang::CXXRecordDecl *Target)
-        : target_(Target) {}
-
-    bool VisitDeclRefExpr(clang::DeclRefExpr *E) {
-        if (!inLoop_)
-            return true;
-        auto QT = E->getType().getCanonicalType();
-        if (const auto *RD = QT->getAsCXXRecordDecl()) {
-            if (RD->getCanonicalDecl() == target_->getCanonicalDecl())
-                usedInLoop_ = true;
-        }
-        return true;
-    }
-
-    bool VisitMemberExpr(clang::MemberExpr *E) {
-        if (!inLoop_)
-            return true;
-        if (const auto *FD = llvm::dyn_cast<clang::FieldDecl>(E->getMemberDecl())) {
-            if (const auto *parent = llvm::dyn_cast<clang::CXXRecordDecl>(FD->getParent())) {
-                if (parent->getCanonicalDecl() == target_->getCanonicalDecl())
-                    usedInLoop_ = true;
-            }
-        }
-        return true;
-    }
-
-    bool TraverseForStmt(clang::ForStmt *S) {
-        ++inLoop_;
-        bool r = clang::RecursiveASTVisitor<LoopUsageVisitor>::TraverseForStmt(S);
-        --inLoop_;
-        return r;
-    }
-    bool TraverseWhileStmt(clang::WhileStmt *S) {
-        ++inLoop_;
-        bool r = clang::RecursiveASTVisitor<LoopUsageVisitor>::TraverseWhileStmt(S);
-        --inLoop_;
-        return r;
-    }
-    bool TraverseDoStmt(clang::DoStmt *S) {
-        ++inLoop_;
-        bool r = clang::RecursiveASTVisitor<LoopUsageVisitor>::TraverseDoStmt(S);
-        --inLoop_;
-        return r;
-    }
-    bool TraverseCXXForRangeStmt(clang::CXXForRangeStmt *S) {
-        ++inLoop_;
-        bool r = clang::RecursiveASTVisitor<LoopUsageVisitor>::TraverseCXXForRangeStmt(S);
-        --inLoop_;
-        return r;
-    }
-
-    bool usedInLoop() const { return usedInLoop_; }
-
-private:
-    const clang::CXXRecordDecl *target_;
-    unsigned inLoop_ = 0;
-    bool usedInLoop_ = false;
-};
-
-} // anonymous namespace
 
 class FL090_HazardAmplification : public Rule {
 public:
@@ -88,10 +21,9 @@ public:
 
     std::string_view getHardwareMechanism() const override {
         return "Multiple interacting latency multipliers on a single structure: "
-               "cache line spanning + atomic contention + cross-thread sharing + "
-               "loop usage. Each hazard compounds nonlinearly under load. "
-               "Coherence storms, store buffer saturation, and TLB pressure "
-               "interact to produce catastrophic tail latency.";
+               "cache line spanning + atomic contention + cross-thread sharing. "
+               "Each hazard compounds under load. Coherence storms, store buffer "
+               "saturation, and TLB pressure interact to produce tail latency.";
     }
 
     void analyze(const clang::Decl *D,
@@ -105,59 +37,62 @@ public:
         if (RD->isImplicit() || RD->isLambda())
             return;
 
-        const auto &layout = Ctx.getASTRecordLayout(RD);
-        uint64_t sizeBytes = layout.getSize().getQuantity();
-
+        CacheLineMap map(RD, Ctx);
         EscapeAnalysis escape(Ctx);
 
-        // Per RULEBOOK FL090: all four signals must be present.
-        // 1. Struct > 128B
-        bool largeStruct = sizeBytes > 128;
-
-        // 2. Contains atomic
-        bool hasAtomics = escape.hasAtomicMembers(RD);
-
-        // 3. Shared across threads (escape analysis)
+        bool multiLine    = map.linesSpanned() >= 3;
+        bool hasAtomics   = map.totalAtomicFields() > 0;
         bool threadEscape = escape.mayEscapeThread(RD);
 
-        // Need at least 3 of the structural signals to flag.
-        // Loop usage is checked separately as it requires function-level analysis
-        // which we can't do from a record decl alone.
         unsigned signalCount = 0;
-        if (largeStruct) ++signalCount;
-        if (hasAtomics) ++signalCount;
+        if (multiLine)    ++signalCount;
+        if (hasAtomics)   ++signalCount;
         if (threadEscape) ++signalCount;
 
-        // Require all three structural signals.
         if (signalCount < 3)
             return;
 
         Severity sev = Severity::Critical;
         std::vector<std::string> escalations;
 
-        escalations.push_back(
-            "sizeof=" + std::to_string(sizeBytes) +
-            "B (>" + std::to_string(128) + "B): spans " +
-            std::to_string((sizeBytes + 63) / 64) + " cache lines");
-
-        escalations.push_back(
-            "Contains atomic fields: cross-core RFO traffic on every write");
-
-        escalations.push_back(
-            "Thread-escaping: coherence traffic amplified across all "
-            "participating cores");
-
-        // Count mutable fields for additional context.
-        unsigned mutableCount = 0;
-        for (const auto *field : RD->fields()) {
-            if (escape.isFieldMutable(field))
-                ++mutableCount;
+        unsigned atomicLines = 0;
+        unsigned hotLines = 0;
+        for (const auto &b : map.buckets()) {
+            if (b.atomicCount > 0) ++atomicLines;
+            if (b.mutableCount > 0) ++hotLines;
         }
 
-        if (mutableCount > 4) {
+        escalations.push_back(
+            std::to_string(map.recordSizeBytes()) + "B across " +
+            std::to_string(map.linesSpanned()) + " cache lines");
+
+        escalations.push_back(
+            std::to_string(map.totalAtomicFields()) + " atomic field(s) on " +
+            std::to_string(atomicLines) + " line(s): per-line RFO ownership transfer");
+
+        escalations.push_back(
+            "thread-escaping: coherence traffic amplified across participating cores");
+
+        auto straddlers = map.straddlingFields();
+        if (!straddlers.empty()) {
             escalations.push_back(
-                std::to_string(mutableCount) + " mutable fields: "
-                "wide write surface across multiple cache lines");
+                std::to_string(straddlers.size()) +
+                " field(s) straddle line boundaries: split load/store penalty "
+                "compounds with coherence cost");
+        }
+
+        if (map.totalMutableFields() > 4) {
+            escalations.push_back(
+                std::to_string(map.totalMutableFields()) + " mutable fields across " +
+                std::to_string(hotLines) + " line(s): wide write surface");
+        }
+
+        auto atomicPairs = map.atomicPairsOnSameLine();
+        if (!atomicPairs.empty()) {
+            escalations.push_back(
+                std::to_string(atomicPairs.size()) +
+                " atomic pair(s) share cache line(s): intra-line contention "
+                "adds to cross-line RFO cost");
         }
 
         const auto &SM = Ctx.getSourceManager();
@@ -167,7 +102,7 @@ public:
         diag.ruleID    = "FL090";
         diag.title     = "Hazard Amplification";
         diag.severity  = sev;
-        diag.confidence = 0.90;
+        diag.confidence = 0.88;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
@@ -176,23 +111,24 @@ public:
         }
 
         std::ostringstream hw;
-        hw << "Struct '" << RD->getNameAsString() << "' (" << sizeBytes
-           << "B) exhibits compound hazard: large footprint spanning "
-           << ((sizeBytes + 63) / 64) << " cache lines, atomic fields "
-           << "triggering cross-core RFO, and thread-escaping access pattern. "
-           << "Under multi-core contention, these hazards interact "
-           << "nonlinearly: coherence invalidation storms across multiple "
-           << "lines, store buffer saturation from atomic writes, and "
-           << "elevated LLC eviction pressure.";
+        hw << "Struct '" << RD->getNameAsString() << "' ("
+           << map.recordSizeBytes() << "B, "
+           << map.linesSpanned() << " lines) exhibits compound hazard: "
+           << map.totalAtomicFields() << " atomic field(s) across "
+           << atomicLines << " line(s) with thread-escape evidence. "
+           << "Under multi-core contention, per-line RFO ownership transfer "
+           << "and coherence invalidation interact across the full footprint.";
         diag.hardwareReasoning = hw.str();
 
         std::ostringstream ev;
         ev << "struct=" << RD->getNameAsString()
-           << "; sizeof=" << sizeBytes << "B"
-           << "; cache_lines=" << ((sizeBytes + 63) / 64)
-           << "; atomics=yes"
+           << "; sizeof=" << map.recordSizeBytes() << "B"
+           << "; cache_lines=" << map.linesSpanned()
+           << "; atomic_fields=" << map.totalAtomicFields()
+           << "; atomic_lines=" << atomicLines
+           << "; mutable_fields=" << map.totalMutableFields()
+           << "; straddling=" << straddlers.size()
            << "; thread_escape=yes"
-           << "; mutable_fields=" << mutableCount
            << "; signal_count=" << signalCount;
         diag.structuralEvidence = ev.str();
 
@@ -200,8 +136,7 @@ public:
             "Decompose into separate cache-line-aligned sub-structures. "
             "Isolate atomic fields with alignas(64) padding. "
             "Split hot (frequently written) and cold (rarely accessed) fields. "
-            "Consider per-core replicas with periodic merge. "
-            "AoS→SoA transformation to separate write-heavy channels.";
+            "Consider per-core replicas with periodic merge.";
 
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));
