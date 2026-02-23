@@ -6,6 +6,8 @@
 #include <clang/AST/DeclGroup.h>
 #include <clang/Basic/SourceManager.h>
 
+#include <unordered_set>
+
 namespace faultline {
 
 namespace {
@@ -27,6 +29,9 @@ void FaultlineASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     auto *TU = Ctx.getTranslationUnitDecl();
     const auto &SM = Ctx.getSourceManager();
 
+    std::unordered_set<std::string> disabled(config_.disabledRules.begin(),
+                                              config_.disabledRules.end());
+
     // First pass: collect hot-path annotations.
     for (auto *D : TU->decls()) {
         if (isInSystemHeader(D, SM))
@@ -35,12 +40,14 @@ void FaultlineASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
             oracle_.isFunctionHot(FD);
     }
 
-    // Second pass: run every registered rule on non-system decls.
+    // Second pass: run enabled rules on non-system decls.
     const auto &rules = RuleRegistry::instance().rules();
     for (auto *D : TU->decls()) {
         if (isInSystemHeader(D, SM))
             continue;
         for (const auto &rule : rules) {
+            if (disabled.count(std::string(rule->getID())))
+                continue;
             rule->analyze(D, Ctx, oracle_, diagnostics_);
         }
     }
