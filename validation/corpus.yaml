@@ -1,0 +1,58 @@
+# Corpus definitions for Tier 1 regression testing.
+# Each entry specifies a git repo, revision, and compilation flags.
+# The harness clones each repo, generates compile_commands.json, and
+# runs faultline against a representative subset of source files.
+
+corpora:
+  - name: folly
+    repo: https://github.com/facebook/folly.git
+    rev: main
+    paths:
+      - folly/concurrency/ConcurrentHashMap.h
+      - folly/MPMCQueue.h
+      - folly/ProducerConsumerQueue.h
+      - folly/AtomicHashMap.h
+      - folly/SharedMutex.h
+      - folly/synchronization/DistributedMutex.h
+      - folly/synchronization/Baton.h
+    flags: "-std=c++20 -I. -Ifolly"
+
+  - name: abseil
+    repo: https://github.com/abseil/abseil-cpp.git
+    rev: master
+    paths:
+      - absl/synchronization/mutex.h
+      - absl/synchronization/internal/graphcycles.cc
+      - absl/container/internal/raw_hash_set.h
+      - absl/base/internal/spinlock.h
+      - absl/strings/cord.h
+    flags: "-std=c++17 -I."
+
+  - name: seastar
+    repo: https://github.com/scylladb/seastar.git
+    rev: master
+    paths:
+      - include/seastar/core/reactor.hh
+      - include/seastar/core/smp.hh
+      - include/seastar/core/memory.hh
+      - include/seastar/core/queue.hh
+      - include/seastar/core/shared_ptr.hh
+    flags: "-std=c++20 -I. -Iinclude"
+
+  - name: liburing
+    repo: https://github.com/axboe/liburing.git
+    rev: master
+    paths:
+      - src/queue.c
+      - src/setup.c
+      - src/register.c
+    flags: "-std=c11 -I. -Isrc/include"
+
+  - name: dpdk-ring
+    repo: https://github.com/DPDK/dpdk.git
+    rev: main
+    paths:
+      - lib/ring/rte_ring.h
+      - lib/ring/rte_ring_elem.h
+      - lib/ring/rte_ring_core.h
+    flags: "-std=c11 -I. -Ilib/eal/include -Ilib/ring"
