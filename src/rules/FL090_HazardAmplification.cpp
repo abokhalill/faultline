@@ -103,6 +103,7 @@ public:
         diag.title     = "Hazard Amplification";
         diag.severity  = sev;
         diag.confidence = 0.88;
+        diag.evidenceTier = EvidenceTier::Likely;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

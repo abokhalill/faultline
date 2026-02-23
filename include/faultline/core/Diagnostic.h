@@ -2,10 +2,27 @@
 
 #include "faultline/core/Severity.h"
 
+#include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace faultline {
+
+enum class EvidenceTier : uint8_t {
+    Proven,       // Structurally guaranteed from layout/IR (e.g., sizeof, field offset)
+    Likely,       // Strong heuristic (e.g., escape analysis + atomic presence)
+    Speculative,  // Topology-dependent or requires runtime confirmation
+};
+
+constexpr std::string_view evidenceTierName(EvidenceTier t) {
+    switch (t) {
+        case EvidenceTier::Proven:      return "proven";
+        case EvidenceTier::Likely:      return "likely";
+        case EvidenceTier::Speculative: return "speculative";
+    }
+    return "speculative";
+}
 
 struct SourceLocation {
     std::string file;
@@ -18,6 +35,7 @@ struct Diagnostic {
     std::string    title;
     Severity       severity     = Severity::Informational;
     double         confidence   = 0.0; // [0.0, 1.0]
+    EvidenceTier   evidenceTier = EvidenceTier::Speculative;
     SourceLocation location;
     std::string    hardwareReasoning;
     std::string    structuralEvidence;

@@ -247,6 +247,7 @@ public:
             diag.title     = "Overly Strong Atomic Ordering";
             diag.severity  = sev;
             diag.confidence = confidence;
+            diag.evidenceTier = isStore ? EvidenceTier::Likely : EvidenceTier::Speculative;
 
             if (site.loc.isValid()) {
                 diag.location.file   = SM.getFilename(SM.getSpellingLoc(site.loc)).str();

@@ -71,6 +71,7 @@ public:
         diag.title     = "Centralized Mutable Global State";
         diag.severity  = sev;
         diag.confidence = hasAtomics ? 0.85 : 0.60;
+        diag.evidenceTier = hasAtomics ? EvidenceTier::Likely : EvidenceTier::Speculative;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

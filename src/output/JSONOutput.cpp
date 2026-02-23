@@ -34,6 +34,7 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
         os << "      \"title\": \"" << escape(d.title) << "\",\n";
         os << "      \"severity\": \"" << severityToString(d.severity) << "\",\n";
         os << "      \"confidence\": " << d.confidence << ",\n";
+        os << "      \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
         os << "      \"location\": {\n";
         os << "        \"file\": \"" << escape(d.location.file) << "\",\n";
         os << "        \"line\": " << d.location.line << ",\n";

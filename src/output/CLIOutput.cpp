@@ -20,7 +20,8 @@ std::string CLIOutputFormatter::format(const std::vector<Diagnostic> &diagnostic
         if (!d.mitigation.empty())
             os << "  Mitigation: " << d.mitigation << "\n";
 
-        os << "  Confidence: " << static_cast<int>(d.confidence * 100) << "%\n";
+        os << "  Confidence: " << static_cast<int>(d.confidence * 100) << "%"
+           << " [" << evidenceTierName(d.evidenceTier) << "]\n";
 
         for (const auto &esc : d.escalations)
             os << "  Escalation: " << esc << "\n";

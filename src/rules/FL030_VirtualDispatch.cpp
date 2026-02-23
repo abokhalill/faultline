@@ -139,6 +139,7 @@ public:
             diag.title     = "Virtual Dispatch in Hot Path";
             diag.severity  = sev;
             diag.confidence = 0.80;
+            diag.evidenceTier = EvidenceTier::Proven;
 
             if (site.loc.isValid()) {
                 diag.location.file   = SM.getFilename(SM.getSpellingLoc(site.loc)).str();

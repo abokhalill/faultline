@@ -146,6 +146,7 @@ public:
         diag.title     = "Centralized Dispatcher Bottleneck";
         diag.severity  = sev;
         diag.confidence = 0.55;
+        diag.evidenceTier = EvidenceTier::Speculative;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

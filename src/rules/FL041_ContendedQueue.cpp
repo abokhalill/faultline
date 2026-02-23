@@ -97,6 +97,7 @@ public:
         diag.title     = "Contended Queue Pattern";
         diag.severity  = sev;
         diag.confidence = (looksLikeQueue || hasHeadTail) ? 0.82 : 0.62;
+        diag.evidenceTier = EvidenceTier::Proven;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

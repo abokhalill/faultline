@@ -51,6 +51,12 @@ static llvm::cl::opt<std::string> MinSev(
     llvm::cl::init("Informational"),
     llvm::cl::cat(FaultlineCat));
 
+static llvm::cl::opt<std::string> MinEvidence(
+    "min-evidence",
+    llvm::cl::desc("Minimum evidence tier to report (proven|likely|speculative)"),
+    llvm::cl::init("speculative"),
+    llvm::cl::cat(FaultlineCat));
+
 static llvm::cl::opt<bool> NoIR(
     "no-ir",
     llvm::cl::desc("Disable LLVM IR analysis pass (AST-only mode)"),
@@ -68,6 +74,12 @@ static faultline::Severity parseSeverity(const std::string &s) {
     if (s == "High")          return faultline::Severity::High;
     if (s == "Medium")        return faultline::Severity::Medium;
     return faultline::Severity::Informational;
+}
+
+static faultline::EvidenceTier parseEvidenceTier(const std::string &s) {
+    if (s == "proven") return faultline::EvidenceTier::Proven;
+    if (s == "likely") return faultline::EvidenceTier::Likely;
+    return faultline::EvidenceTier::Speculative;
 }
 
 int main(int argc, const char **argv) {
@@ -160,12 +172,18 @@ int main(int argc, const char **argv) {
         }
     }
 
-    // Filter by minimum severity.
+    // Filter by minimum severity and evidence tier.
+    auto minTier = parseEvidenceTier(MinEvidence);
     diagnostics.erase(
         std::remove_if(diagnostics.begin(), diagnostics.end(),
                        [&](const faultline::Diagnostic &d) {
-                           return static_cast<uint8_t>(d.severity) <
-                                  static_cast<uint8_t>(cfg.minSeverity);
+                           if (static_cast<uint8_t>(d.severity) <
+                               static_cast<uint8_t>(cfg.minSeverity))
+                               return true;
+                           if (static_cast<uint8_t>(d.evidenceTier) >
+                               static_cast<uint8_t>(minTier))
+                               return true;
+                           return false;
                        }),
         diagnostics.end());
 

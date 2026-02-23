@@ -104,6 +104,7 @@ public:
         diag.title     = "Large Stack Frame";
         diag.severity  = sev;
         diag.confidence = 0.80;
+        diag.evidenceTier = EvidenceTier::Likely;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

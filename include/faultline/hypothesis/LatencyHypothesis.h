@@ -61,7 +61,7 @@ struct LatencyHypothesis {
 
     std::vector<ConfoundControl> confoundControls;
     std::vector<double> structuralFeatures;
-    EvidenceTier evidenceTier = EvidenceTier::Unknown;
+    EvidenceTier evidenceTier = EvidenceTier::Speculative;
 
     ExperimentVerdict verdict = ExperimentVerdict::Pending;
 };

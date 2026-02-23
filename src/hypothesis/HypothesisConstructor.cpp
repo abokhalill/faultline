@@ -49,7 +49,7 @@ EvidenceTier HypothesisConstructor::inferEvidenceTier(const Diagnostic &finding)
     if (ev.find("virtual_call=") != std::string::npos)
         return EvidenceTier::Likely;
 
-    return EvidenceTier::Unknown;
+    return EvidenceTier::Speculative;
 }
 
 std::vector<double> HypothesisConstructor::extractFeatures(const Diagnostic &finding) {

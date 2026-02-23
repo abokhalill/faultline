@@ -129,6 +129,7 @@ public:
             diag.title     = "Deep Conditional Tree in Hot Path";
             diag.severity  = sev;
             diag.confidence = 0.50; // Per RULEBOOK: Low-Medium
+            diag.evidenceTier = EvidenceTier::Speculative;
 
             if (site.loc.isValid()) {
                 diag.location.file   = SM.getFilename(SM.getSpellingLoc(site.loc)).str();

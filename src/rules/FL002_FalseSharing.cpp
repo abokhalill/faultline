@@ -82,6 +82,7 @@ public:
         diag.title     = "False Sharing Candidate";
         diag.severity  = sev;
         diag.confidence = confidence;
+        diag.evidenceTier = hasAtomicPairs ? EvidenceTier::Proven : EvidenceTier::Likely;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

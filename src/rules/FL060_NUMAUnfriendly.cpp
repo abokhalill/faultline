@@ -96,6 +96,7 @@ public:
         diag.title     = "NUMA-Unfriendly Shared Structure";
         diag.severity  = sev;
         diag.confidence = hasAtomics ? 0.70 : 0.50;
+        diag.evidenceTier = EvidenceTier::Speculative;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

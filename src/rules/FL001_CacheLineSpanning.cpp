@@ -84,6 +84,7 @@ public:
         diag.severity  = sev;
         diag.confidence = (map.totalAtomicFields() > 0) ? 0.90 :
                           (!straddlers.empty() ? 0.82 : 0.72);
+        diag.evidenceTier = EvidenceTier::Proven;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

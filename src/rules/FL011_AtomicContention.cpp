@@ -196,6 +196,7 @@ public:
         diag.title     = "Atomic Contention Hotspot";
         diag.severity  = sev;
         diag.confidence = hasLoopWrite ? 0.80 : 0.65;
+        diag.evidenceTier = EvidenceTier::Likely;
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
