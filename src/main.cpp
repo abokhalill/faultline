@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <future>
 #include <memory>
 #include <string>
 #include <vector>
@@ -143,14 +144,20 @@ int main(int argc, const char **argv) {
                          << "skipping IR analysis pass\n";
         } else {
             faultline::IRAnalyzer irAnalyzer;
-            llvm::LLVMContext llvmCtx;
+            std::string optFlag = "-" + IROpt.getValue();
+
+            // Build per-file compile commands.
+            struct IRJob {
+                std::string srcPath;
+                std::string clangCmd;
+                std::string tmpFile;
+            };
+            std::vector<IRJob> jobs;
 
             for (const auto &srcPath : parser->getSourcePathList()) {
                 auto cmds = parser->getCompilations()
                                 .getCompileCommands(srcPath);
 
-                // Reconstruct flags from compile_commands.json faithfully.
-                // Skip argv[0] (compiler), source file, -c, and -o <file>.
                 std::string extraFlags;
                 for (const auto &cmd : cmds) {
                     const auto &args = cmd.CommandLine;
@@ -158,7 +165,7 @@ int main(int argc, const char **argv) {
                         if (args[i] == "-c")
                             continue;
                         if (args[i] == "-o" && i + 1 < args.size()) {
-                            ++i; // skip output filename
+                            ++i;
                             continue;
                         }
                         if (args[i] == srcPath)
@@ -172,21 +179,33 @@ int main(int argc, const char **argv) {
                                                         tmpPath))
                     continue;
 
-                std::string optFlag = "-" + IROpt.getValue();
-                std::string clangCmd = clangBin + " -S -emit-llvm -g " + optFlag +
-                                       extraFlags +
-                                       " -o " + std::string(tmpPath) +
-                                       " " + srcPath + " 2>/dev/null";
-                int clangRet = std::system(clangCmd.c_str());
+                std::string cmd = clangBin + " -S -emit-llvm -g " + optFlag +
+                                  extraFlags +
+                                  " -o " + std::string(tmpPath) +
+                                  " " + srcPath + " 2>/dev/null";
+                jobs.push_back({srcPath, std::move(cmd), std::string(tmpPath)});
+            }
 
+            // Parallel IR emission: compile all source files concurrently.
+            std::vector<std::future<int>> compileFutures;
+            compileFutures.reserve(jobs.size());
+            for (const auto &job : jobs) {
+                compileFutures.push_back(std::async(std::launch::async,
+                    [](const std::string &c) { return std::system(c.c_str()); },
+                    job.clangCmd));
+            }
+
+            // Collect results and parse IR sequentially (LLVMContext is not thread-safe).
+            llvm::LLVMContext llvmCtx;
+            for (size_t i = 0; i < jobs.size(); ++i) {
+                int clangRet = compileFutures[i].get();
                 if (clangRet == 0) {
                     llvm::SMDiagnostic parseErr;
-                    auto mod = llvm::parseIRFile(tmpPath, parseErr, llvmCtx);
+                    auto mod = llvm::parseIRFile(jobs[i].tmpFile, parseErr, llvmCtx);
                     if (mod)
                         irAnalyzer.analyzeModule(*mod);
                 }
-
-                llvm::sys::fs::remove(tmpPath);
+                llvm::sys::fs::remove(jobs[i].tmpFile);
             }
 
             if (!irAnalyzer.profiles().empty()) {
