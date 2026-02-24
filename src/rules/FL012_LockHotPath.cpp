@@ -8,6 +8,7 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/ExprCXX.h>
 #include <clang/AST/RecursiveASTVisitor.h>
+#include <clang/AST/Stmt.h>
 #include <clang/Basic/SourceManager.h>
 
 #include <sstream>
@@ -47,6 +48,7 @@ public:
         bool nested = lockDepth_ > 0;
         sites_.push_back({E->getBeginLoc(), className + "::" + method, nested, inLoop_});
         ++lockDepth_;
+        ++scopeLockIncrements_;
         return true;
     }
 
@@ -66,8 +68,19 @@ public:
             bool nested = lockDepth_ > 0;
             sites_.push_back({E->getBeginLoc(), parent, nested, inLoop_});
             ++lockDepth_;
+            ++scopeLockIncrements_;
         }
         return true;
+    }
+
+    bool TraverseCompoundStmt(clang::CompoundStmt *S) {
+        unsigned savedDepth = lockDepth_;
+        unsigned savedIncrements = scopeLockIncrements_;
+        scopeLockIncrements_ = 0;
+        bool r = clang::RecursiveASTVisitor<LockVisitor>::TraverseCompoundStmt(S);
+        lockDepth_ = savedDepth;
+        scopeLockIncrements_ = savedIncrements;
+        return r;
     }
 
     bool TraverseForStmt(clang::ForStmt *S) {
@@ -101,6 +114,7 @@ private:
     std::vector<LockSite> sites_;
     unsigned inLoop_ = 0;
     unsigned lockDepth_ = 0;
+    unsigned scopeLockIncrements_ = 0;
 };
 
 } // anonymous namespace
