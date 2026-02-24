@@ -20,7 +20,9 @@
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/MD5.h>
 #include <llvm/Support/Program.h>
+#include <llvm/Support/Path.h>
 
 #include <algorithm>
 #include <chrono>
@@ -154,6 +156,7 @@ int main(int argc, const char **argv) {
             std::vector<std::string> argv;
             std::string irFile;
             std::string errFile;
+            bool cached = false;       // true if IR file already exists
         };
         std::vector<IRJob> jobs;
 
@@ -198,20 +201,38 @@ int main(int argc, const char **argv) {
                 }
             }
 
-            llvm::SmallString<128> irPath, errPath;
-            if (llvm::sys::fs::createTemporaryFile("faultline-ir", "ll", irPath))
-                continue;
-            if (llvm::sys::fs::createTemporaryFile("faultline-err", "log", errPath)) {
-                llvm::sys::fs::remove(irPath);
-                continue;
-            }
+            // Deterministic temp naming: MD5(source + compile args + tool version).
+            llvm::MD5 hasher;
+            auto srcBuf = llvm::MemoryBuffer::getFile(srcPath);
+            if (srcBuf)
+                hasher.update((*srcBuf)->getBuffer());
+            else
+                hasher.update(srcPath);
+            for (const auto &a : argv)
+                hasher.update(a);
+            hasher.update(faultline::kToolVersion);
+            llvm::MD5::MD5Result hashResult;
+            hasher.final(hashResult);
+            llvm::SmallString<32> hashStr;
+            llvm::MD5::stringifyResult(hashResult, hashStr);
+
+            llvm::SmallString<128> tmpDir;
+            llvm::sys::path::system_temp_directory(/*erasedOnReboot=*/true, tmpDir);
+            llvm::SmallString<128> irPath(tmpDir), errPath(tmpDir);
+            llvm::sys::path::append(irPath,
+                "faultline-" + std::string(hashStr) + ".ll");
+            llvm::sys::path::append(errPath,
+                "faultline-" + std::string(hashStr) + ".err");
+
+            // Incremental cache: reuse existing IR if hash matches.
+            bool cached = llvm::sys::fs::exists(irPath);
 
             argv.push_back("-o");
             argv.push_back(std::string(irPath));
             argv.push_back(srcPath);
 
             jobs.push_back({srcPath, compilerPath, std::move(argv),
-                            std::string(irPath), std::string(errPath)});
+                            std::string(irPath), std::string(errPath), cached});
 
             // Track unique compilers for provenance.
             bool seen = false;
@@ -239,6 +260,14 @@ int main(int argc, const char **argv) {
         futures.reserve(jobs.size());
 
         for (const auto &job : jobs) {
+            if (job.cached) {
+                // Cache hit: no compilation needed.
+                std::promise<IRResult> p;
+                p.set_value({0, {}});
+                futures.push_back(p.get_future());
+                continue;
+            }
+
             futures.push_back(std::async(std::launch::async,
                 [&sem](const std::string &program,
                        const std::vector<std::string> &argvOwned,
@@ -298,7 +327,10 @@ int main(int argc, const char **argv) {
                     irAnalyzer.analyzeModule(*mod);
             }
 
-            llvm::sys::fs::remove(jobs[i].irFile);
+            // Cached IR files are retained for future runs.
+            // Only clean up err files and failed non-cached IR.
+            if (!jobs[i].cached && result.exitCode != 0)
+                llvm::sys::fs::remove(jobs[i].irFile);
             llvm::sys::fs::remove(jobs[i].errFile);
         }
 
