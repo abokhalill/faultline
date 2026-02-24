@@ -29,6 +29,7 @@ public:
     void analyze(const clang::Decl *D,
                  clang::ASTContext &Ctx,
                  const HotPathOracle & /*Oracle*/,
+                 const Config & /*Cfg*/,
                  std::vector<Diagnostic> &out) override {
 
         const auto *VD = llvm::dyn_cast_or_null<clang::VarDecl>(D);

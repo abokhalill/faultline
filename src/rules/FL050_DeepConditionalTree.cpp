@@ -79,6 +79,7 @@ public:
     void analyze(const clang::Decl *D,
                  clang::ASTContext &Ctx,
                  const HotPathOracle &Oracle,
+                 const Config &Cfg,
                  std::vector<Diagnostic> &out) override {
 
         const auto *FD = llvm::dyn_cast_or_null<clang::FunctionDecl>(D);
@@ -88,7 +89,7 @@ public:
         if (!Oracle.isFunctionHot(FD))
             return;
 
-        const unsigned threshold = 4; // Per RULEBOOK: configurable
+        const unsigned threshold = Cfg.branchDepthWarn;
 
         BranchDepthVisitor visitor(threshold);
         visitor.TraverseStmt(FD->getBody());

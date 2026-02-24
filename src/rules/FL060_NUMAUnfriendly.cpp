@@ -29,6 +29,7 @@ public:
     void analyze(const clang::Decl *D,
                  clang::ASTContext &Ctx,
                  const HotPathOracle & /*Oracle*/,
+                 const Config &Cfg,
                  std::vector<Diagnostic> &out) override {
 
         const auto *RD = llvm::dyn_cast_or_null<clang::CXXRecordDecl>(D);
@@ -66,7 +67,7 @@ public:
         Severity sev = Severity::High;
         std::vector<std::string> escalations;
 
-        uint64_t cacheLines = (sizeBytes + 63) / 64;
+        uint64_t cacheLines = (sizeBytes + Cfg.cacheLineBytes - 1) / Cfg.cacheLineBytes;
 
         if (sizeBytes >= 4096) {
             sev = Severity::Critical;

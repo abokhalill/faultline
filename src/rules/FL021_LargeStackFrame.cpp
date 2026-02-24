@@ -30,6 +30,7 @@ public:
     void analyze(const clang::Decl *D,
                  clang::ASTContext &Ctx,
                  const HotPathOracle &Oracle,
+                 const Config &Cfg,
                  std::vector<Diagnostic> &out) override {
 
         const auto *FD = llvm::dyn_cast_or_null<clang::FunctionDecl>(D);
@@ -75,7 +76,7 @@ public:
             }
         }
 
-        const uint64_t threshold = 2048; // 2KB default per RULEBOOK
+        const uint64_t threshold = Cfg.stackFrameWarnBytes;
 
         if (totalBytes < threshold)
             return;
@@ -84,10 +85,11 @@ public:
         Severity sev = isHot ? Severity::High : Severity::Medium;
         std::vector<std::string> escalations;
 
-        if (totalBytes > 4096) {
+        if (totalBytes > Cfg.pageSize) {
             escalations.push_back(
-                "Stack frame exceeds page size (4KB): guaranteed TLB miss "
-                "on first access, potential page fault");
+                "Stack frame exceeds page size (" +
+                std::to_string(Cfg.pageSize / 1024) +
+                "KB): guaranteed TLB miss on first access, potential page fault");
             if (isHot)
                 sev = Severity::Critical;
         }
@@ -115,7 +117,7 @@ public:
         std::ostringstream hw;
         hw << "Function '" << FD->getQualifiedNameAsString()
            << "' estimated stack frame ~" << totalBytes
-           << "B. Spans ~" << ((totalBytes + 4095) / 4096)
+           << "B. Spans ~" << ((totalBytes + Cfg.pageSize - 1) / Cfg.pageSize)
            << " page(s). Large stack frames increase D-TLB working set, "
            << "pressure L1D capacity, and risk stack page faults "
            << "on deep call chains.";

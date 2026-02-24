@@ -1,5 +1,6 @@
 #pragma once
 
+#include "faultline/core/Config.h"
 #include "faultline/core/Diagnostic.h"
 #include "faultline/core/Severity.h"
 
@@ -25,11 +26,10 @@ public:
     virtual Severity getBaseSeverity() const = 0;
     virtual std::string_view getHardwareMechanism() const = 0;
 
-    // Run analysis on a single top-level declaration.
-    // Implementations append to `out` if hazards are found.
     virtual void analyze(const clang::Decl *D,
                          clang::ASTContext &Ctx,
                          const HotPathOracle &Oracle,
+                         const Config &Cfg,
                          std::vector<Diagnostic> &out) = 0;
 };
 

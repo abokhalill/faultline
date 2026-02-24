@@ -28,6 +28,7 @@ public:
     void analyze(const clang::Decl *D,
                  clang::ASTContext &Ctx,
                  const HotPathOracle & /*Oracle*/,
+                 const Config &Cfg,
                  std::vector<Diagnostic> &out) override {
 
         const auto *RD = llvm::dyn_cast_or_null<clang::CXXRecordDecl>(D);
@@ -40,7 +41,7 @@ public:
         if (!escape.mayEscapeThread(RD))
             return;
 
-        CacheLineMap map(RD, Ctx);
+        CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
 
         auto atomicPairs = map.atomicPairsOnSameLine();
         auto mutablePairs = map.mutablePairsOnSameLine();

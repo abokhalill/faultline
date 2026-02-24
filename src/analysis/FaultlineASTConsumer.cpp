@@ -48,7 +48,7 @@ void FaultlineASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
         for (const auto &rule : rules) {
             if (disabled.count(std::string(rule->getID())))
                 continue;
-            rule->analyze(D, Ctx, oracle_, diagnostics_);
+            rule->analyze(D, Ctx, oracle_, config_, diagnostics_);
         }
     }
 }
