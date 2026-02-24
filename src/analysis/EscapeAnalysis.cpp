@@ -2,33 +2,85 @@
 
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/AST/Type.h>
 
 namespace faultline {
 
 EscapeAnalysis::EscapeAnalysis(clang::ASTContext &Ctx) : ctx_(Ctx) {}
 
-bool EscapeAnalysis::isAtomicType(clang::QualType QT) const {
+namespace {
+
+// Resolve through typedefs/aliases to the underlying CXXRecordDecl.
+const clang::CXXRecordDecl *getUnderlyingRecord(clang::QualType QT) {
     QT = QT.getCanonicalType();
-    if (QT.getAsString().find("atomic") != std::string::npos)
+    QT = QT.getNonReferenceType();
+    if (const auto *TST = QT->getAs<clang::TemplateSpecializationType>()) {
+        if (auto TD = TST->getTemplateName().getAsTemplateDecl()) {
+            if (auto *RD = llvm::dyn_cast_or_null<clang::CXXRecordDecl>(
+                    TD->getTemplatedDecl()))
+                return RD;
+        }
+    }
+    return QT->getAsCXXRecordDecl();
+}
+
+bool isQualifiedNameOneOf(const clang::CXXRecordDecl *RD,
+                          const std::initializer_list<const char *> &names) {
+    if (!RD)
+        return false;
+    std::string qn = RD->getQualifiedNameAsString();
+    for (const char *n : names)
+        if (qn == n)
+            return true;
+    return false;
+}
+
+} // anonymous namespace
+
+bool EscapeAnalysis::isAtomicType(clang::QualType QT) const {
+    // C11 _Atomic qualifier.
+    if (QT.getCanonicalType()->isAtomicType())
         return true;
-    if (QT->isAtomicType())
+
+    // std::atomic<T> — match via template specialization.
+    const clang::CXXRecordDecl *RD = getUnderlyingRecord(QT);
+    if (isQualifiedNameOneOf(RD, {"std::atomic", "std::atomic_ref"}))
         return true;
+
+    // ClassTemplateSpecializationDecl path for instantiated types.
+    if (RD) {
+        if (const auto *CTSD = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(RD)) {
+            if (auto *TD = CTSD->getSpecializedTemplate()) {
+                std::string tn = TD->getQualifiedNameAsString();
+                if (tn == "std::atomic" || tn == "std::atomic_ref")
+                    return true;
+            }
+        }
+    }
+
     return false;
 }
 
 bool EscapeAnalysis::isSyncType(clang::QualType QT) const {
-    std::string name = QT.getCanonicalType().getAsString();
-    // std::mutex, std::recursive_mutex, std::shared_mutex, std::timed_mutex
-    if (name.find("mutex") != std::string::npos)
+    const clang::CXXRecordDecl *RD = getUnderlyingRecord(QT);
+    if (isQualifiedNameOneOf(RD, {
+            "std::mutex", "std::recursive_mutex",
+            "std::shared_mutex", "std::timed_mutex",
+            "std::recursive_timed_mutex", "std::shared_timed_mutex",
+            "std::condition_variable", "std::condition_variable_any",
+            "std::counting_semaphore", "std::binary_semaphore",
+            "std::latch", "std::barrier"}))
         return true;
-    // std::condition_variable
-    if (name.find("condition_variable") != std::string::npos)
-        return true;
-    // pthread_mutex_t, pthread_spinlock_t
-    if (name.find("pthread_mutex") != std::string::npos ||
-        name.find("pthread_spinlock") != std::string::npos)
-        return true;
+
+    // POSIX sync types (C structs, no CXXRecordDecl).
+    std::string canon = QT.getCanonicalType().getAsString();
+    for (const char *posix : {"pthread_mutex_t", "pthread_spinlock_t",
+                              "pthread_rwlock_t", "pthread_cond_t",
+                              "sem_t"})
+        if (canon.find(posix) != std::string::npos)
+            return true;
+
     return false;
 }
 
@@ -81,6 +133,8 @@ bool EscapeAnalysis::mayEscapeThread(const clang::CXXRecordDecl *RD) const {
         return true;
     if (hasSharedOwnershipMembers(RD))
         return true;
+    if (hasVolatileMembers(RD))
+        return true;
 
     return false;
 }
@@ -120,11 +174,20 @@ bool EscapeAnalysis::isGlobalSharedMutable(const clang::VarDecl *VD) const {
 }
 
 bool EscapeAnalysis::isSharedOwnershipType(clang::QualType QT) const {
-    std::string name = QT.getCanonicalType().getAsString();
-    if (name.find("shared_ptr") != std::string::npos)
+    const clang::CXXRecordDecl *RD = getUnderlyingRecord(QT);
+    if (isQualifiedNameOneOf(RD, {"std::shared_ptr", "std::weak_ptr"}))
         return true;
-    if (name.find("weak_ptr") != std::string::npos)
-        return true;
+
+    if (RD) {
+        if (const auto *CTSD = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(RD)) {
+            if (auto *TD = CTSD->getSpecializedTemplate()) {
+                std::string tn = TD->getQualifiedNameAsString();
+                if (tn == "std::shared_ptr" || tn == "std::weak_ptr")
+                    return true;
+            }
+        }
+    }
+
     return false;
 }
 
@@ -152,11 +215,39 @@ bool EscapeAnalysis::hasCallbackMembers(const clang::CXXRecordDecl *RD) const {
         return false;
 
     for (const auto *field : RD->fields()) {
-        std::string typeName = field->getType().getCanonicalType().getAsString();
-        if (typeName.find("std::function") != std::string::npos)
-            return true;
         if (field->getType()->isFunctionPointerType())
             return true;
+
+        const clang::CXXRecordDecl *FRD = getUnderlyingRecord(field->getType());
+        if (isQualifiedNameOneOf(FRD, {"std::function"}))
+            return true;
+        if (FRD) {
+            if (const auto *CTSD = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(FRD)) {
+                if (auto *TD = CTSD->getSpecializedTemplate()) {
+                    if (TD->getQualifiedNameAsString() == "std::function")
+                        return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+bool EscapeAnalysis::hasVolatileMembers(const clang::CXXRecordDecl *RD) const {
+    if (!RD || !RD->isCompleteDefinition())
+        return false;
+
+    for (const auto *field : RD->fields()) {
+        if (field->getType().isVolatileQualified())
+            return true;
+    }
+
+    for (const auto &base : RD->bases()) {
+        if (const auto *baseRD = base.getType()->getAsCXXRecordDecl()) {
+            if (hasVolatileMembers(baseRD))
+                return true;
+        }
     }
 
     return false;

@@ -44,6 +44,7 @@ public:
     bool hasSharedOwnershipMembers(const clang::CXXRecordDecl *RD) const;
     bool hasCallbackMembers(const clang::CXXRecordDecl *RD) const;
     bool isSharedOwnershipType(clang::QualType QT) const;
+    bool hasVolatileMembers(const clang::CXXRecordDecl *RD) const;
 
 private:
 
