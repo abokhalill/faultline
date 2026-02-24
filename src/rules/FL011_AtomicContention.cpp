@@ -198,6 +198,7 @@ public:
         diag.severity  = sev;
         diag.confidence = hasLoopWrite ? 0.80 : 0.65;
         diag.evidenceTier = EvidenceTier::Likely;
+        diag.functionName = FD->getQualifiedNameAsString();
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

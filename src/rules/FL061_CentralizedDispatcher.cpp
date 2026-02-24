@@ -148,6 +148,7 @@ public:
         diag.severity  = sev;
         diag.confidence = 0.55;
         diag.evidenceTier = EvidenceTier::Speculative;
+        diag.functionName = FD->getQualifiedNameAsString();
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();

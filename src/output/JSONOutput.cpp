@@ -40,6 +40,8 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
         os << "        \"line\": " << d.location.line << ",\n";
         os << "        \"column\": " << d.location.column << "\n";
         os << "      },\n";
+        if (!d.functionName.empty())
+            os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
         os << "      \"hardwareReasoning\": \"" << escape(d.hardwareReasoning) << "\",\n";
         os << "      \"structuralEvidence\": \"" << escape(d.structuralEvidence) << "\",\n";
         os << "      \"mitigation\": \"" << escape(d.mitigation) << "\",\n";

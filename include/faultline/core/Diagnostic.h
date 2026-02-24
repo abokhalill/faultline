@@ -38,6 +38,7 @@ struct Diagnostic {
     EvidenceTier   evidenceTier = EvidenceTier::Speculative;
     bool           suppressed   = false; // Set by IR refiner when evidence contradicts AST
     SourceLocation location;
+    std::string    functionName;         // Qualified name for IR correlation
     std::string    hardwareReasoning;
     std::string    structuralEvidence;
     std::string    mitigation;

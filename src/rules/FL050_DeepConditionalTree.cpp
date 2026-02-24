@@ -129,8 +129,9 @@ public:
             diag.ruleID    = "FL050";
             diag.title     = "Deep Conditional Tree in Hot Path";
             diag.severity  = sev;
-            diag.confidence = 0.50; // Per RULEBOOK: Low-Medium
+            diag.confidence = 0.50;
             diag.evidenceTier = EvidenceTier::Speculative;
+            diag.functionName = FD->getQualifiedNameAsString();
 
             if (site.loc.isValid()) {
                 diag.location.file   = SM.getFilename(SM.getSpellingLoc(site.loc)).str();

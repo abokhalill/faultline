@@ -31,6 +31,9 @@ private:
     // Find best matching profile for a function name.
     const IRFunctionProfile *findProfile(const std::string &funcName) const;
 
+    // Path suffix match: returns true if one path ends with the other's filename + dirs.
+    static bool filePathSuffixMatch(const std::string &a, const std::string &b);
+
     const IRAnalyzer::ProfileMap &profiles_;
 };
 

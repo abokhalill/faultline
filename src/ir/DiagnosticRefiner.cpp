@@ -10,9 +10,30 @@ namespace faultline {
 DiagnosticRefiner::DiagnosticRefiner(const IRAnalyzer::ProfileMap &profiles)
     : profiles_(profiles) {}
 
+bool DiagnosticRefiner::filePathSuffixMatch(const std::string &a,
+                                             const std::string &b) {
+    const std::string &longer  = (a.size() >= b.size()) ? a : b;
+    const std::string &shorter = (a.size() >= b.size()) ? b : a;
+
+    if (shorter.empty())
+        return false;
+
+    if (longer == shorter)
+        return true;
+
+    if (longer.size() <= shorter.size())
+        return false;
+
+    auto pos = longer.size() - shorter.size();
+    return longer.compare(pos, shorter.size(), shorter) == 0 &&
+           longer[pos - 1] == '/';
+}
+
 std::string DiagnosticRefiner::extractFunctionName(const Diagnostic &diag) const {
-    // Parse function name from structuralEvidence fields.
-    // Patterns: "function=X", "caller=X"
+    if (!diag.functionName.empty())
+        return diag.functionName;
+
+    // Legacy fallback: parse from structuralEvidence.
     for (const char *key : {"function=", "caller="}) {
         auto pos = diag.structuralEvidence.find(key);
         if (pos == std::string::npos)
@@ -31,14 +52,25 @@ const IRFunctionProfile *DiagnosticRefiner::findProfile(
     if (funcName.empty())
         return nullptr;
 
-    // Try exact match on demangled name first.
+    // Exact demangled name match.
     for (const auto &[mangled, profile] : profiles_) {
-        if (profile.demangledName == funcName ||
-            profile.demangledName.find(funcName) != std::string::npos)
+        if (profile.demangledName == funcName)
             return &profile;
     }
 
-    // Try mangled name.
+    // Qualified suffix match: "Foo::bar" matches "ns::Foo::bar".
+    // Require match at a namespace boundary (preceded by '::' or at start).
+    for (const auto &[mangled, profile] : profiles_) {
+        const auto &dn = profile.demangledName;
+        if (dn.size() > funcName.size()) {
+            auto pos = dn.size() - funcName.size();
+            if (dn.compare(pos, funcName.size(), funcName) == 0 &&
+                pos >= 2 && dn[pos - 1] == ':' && dn[pos - 2] == ':')
+                return &profile;
+        }
+    }
+
+    // Exact mangled name match.
     auto it = profiles_.find(funcName);
     if (it != profiles_.end())
         return &it->second;
@@ -76,8 +108,7 @@ void DiagnosticRefiner::refineFL010(Diagnostic &diag) const {
             continue;
         bool lineMatch = (ai.sourceLine == diagLine);
         bool fileMatch = diagFile.empty() || ai.sourceFile.empty() ||
-                         diagFile.find(ai.sourceFile) != std::string::npos ||
-                         ai.sourceFile.find(diagFile) != std::string::npos;
+                         filePathSuffixMatch(diagFile, ai.sourceFile);
         if (lineMatch && fileMatch) {
             bool isSeqCst = (ai.ordering ==
                 static_cast<unsigned>(llvm::AtomicOrdering::SequentiallyConsistent));
@@ -192,17 +223,7 @@ void DiagnosticRefiner::refineFL020(Diagnostic &diag) const {
 }
 
 void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
-    // Extract function name from evidence: "estimated_frame=..." doesn't have
-    // function= key, so parse from hardwareReasoning.
-    std::string funcName;
-    auto pos = diag.hardwareReasoning.find("Function '");
-    if (pos != std::string::npos) {
-        pos += 10; // strlen("Function '")
-        auto end = diag.hardwareReasoning.find('\'', pos);
-        if (end != std::string::npos)
-            funcName = diag.hardwareReasoning.substr(pos, end - pos);
-    }
-
+    auto funcName = extractFunctionName(diag);
     const auto *profile = findProfile(funcName);
     if (!profile)
         return;

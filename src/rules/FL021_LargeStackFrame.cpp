@@ -107,6 +107,7 @@ public:
         diag.severity  = sev;
         diag.confidence = 0.80;
         diag.evidenceTier = EvidenceTier::Likely;
+        diag.functionName = FD->getQualifiedNameAsString();
 
         if (loc.isValid()) {
             diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
