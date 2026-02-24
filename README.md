@@ -33,7 +33,7 @@ Runtime tools (`perf`, production tracing) tell you what happened after integrat
 
 ## Differentiation
 
-Faultline is complementary to existing tools, not a replacement.
+Faultline is complementary to existing tools.
 
 | Tool | What it does well | What it cannot do alone | Where Faultline fits |
 |---|---|---|---|
