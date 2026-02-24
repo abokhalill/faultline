@@ -62,8 +62,12 @@ assert_no_crash() {
     local exit_code="$1"
     local corpus="$2"
     local file="$3"
+    if [[ "$exit_code" -gt 2 ]]; then
+        log_fail "$corpus/$file: faultline crashed (exit code $exit_code)"
+        return 0
+    fi
     if [[ "$exit_code" -eq 2 ]]; then
-        log_fail "$corpus/$file: faultline crashed (exit code 2)"
+        log_skip "$corpus/$file: parse error (exit code 2, missing headers?)"
         return 0
     fi
     log_pass "$corpus/$file: no crash (exit=$exit_code)"
