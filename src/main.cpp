@@ -142,12 +142,22 @@ int main(int argc, const char **argv) {
             for (const auto &srcPath : parser->getSourcePathList()) {
                 auto cmds = parser->getCompilations()
                                 .getCompileCommands(srcPath);
+
+                // Reconstruct flags from compile_commands.json faithfully.
+                // Skip argv[0] (compiler), source file, -c, and -o <file>.
                 std::string extraFlags;
                 for (const auto &cmd : cmds) {
-                    for (const auto &arg : cmd.CommandLine) {
-                        if (arg.starts_with("-std=") || arg.starts_with("-D") ||
-                            arg.starts_with("-I") || arg.starts_with("-isystem"))
-                            extraFlags += " " + arg;
+                    const auto &args = cmd.CommandLine;
+                    for (size_t i = 1; i < args.size(); ++i) {
+                        if (args[i] == "-c")
+                            continue;
+                        if (args[i] == "-o" && i + 1 < args.size()) {
+                            ++i; // skip output filename
+                            continue;
+                        }
+                        if (args[i] == srcPath)
+                            continue;
+                        extraFlags += " " + args[i];
                     }
                 }
 
@@ -157,7 +167,7 @@ int main(int argc, const char **argv) {
                     continue;
 
                 std::string optFlag = "-" + IROpt.getValue();
-                std::string clangCmd = clangBin + " -S -emit-llvm -g " + optFlag + " " +
+                std::string clangCmd = clangBin + " -S -emit-llvm -g " + optFlag +
                                        extraFlags +
                                        " -o " + std::string(tmpPath) +
                                        " " + srcPath + " 2>/dev/null";
