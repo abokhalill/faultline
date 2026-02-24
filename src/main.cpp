@@ -2,6 +2,7 @@
 #include "faultline/core/Config.h"
 #include "faultline/core/Diagnostic.h"
 #include "faultline/core/Severity.h"
+#include "faultline/core/Version.h"
 #include "faultline/hypothesis/CalibrationFeedback.h"
 #include "faultline/hypothesis/HypothesisConstructor.h"
 #include "faultline/ir/IRAnalyzer.h"
@@ -22,6 +23,7 @@
 #include <llvm/Support/Program.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <future>
 #include <memory>
@@ -120,6 +122,18 @@ int main(int argc, const char **argv) {
         cfg.outputFile = OutputFile;
     cfg.minSeverity = parseSeverity(MinSev);
 
+    // Build execution metadata for output provenance.
+    faultline::ExecutionMetadata execMeta;
+    execMeta.toolVersion = faultline::kToolVersion;
+    execMeta.configPath = ConfigPath.getValue();
+    execMeta.irOptLevel = IROpt.getValue();
+    execMeta.irEnabled = !NoIR;
+    execMeta.timestampEpochSec = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    execMeta.sourceFiles.assign(parser->getSourcePathList().begin(),
+                                parser->getSourcePathList().end());
+
     // Run analysis.
     ClangTool tool(parser->getCompilations(), parser->getSourcePathList());
 
@@ -198,6 +212,13 @@ int main(int argc, const char **argv) {
 
             jobs.push_back({srcPath, compilerPath, std::move(argv),
                             std::string(irPath), std::string(errPath)});
+
+            // Track unique compilers for provenance.
+            bool seen = false;
+            for (const auto &ci : execMeta.compilers)
+                if (ci.path == compilerPath) { seen = true; break; }
+            if (!seen)
+                execMeta.compilers.push_back({compilerPath, {}});
         }
 
         if (jobs.empty() && !parser->getSourcePathList().empty()) {
@@ -358,7 +379,7 @@ int main(int argc, const char **argv) {
     else
         formatter = std::make_unique<faultline::CLIOutputFormatter>();
 
-    std::string output = formatter->format(diagnostics);
+    std::string output = formatter->format(diagnostics, execMeta);
 
     // Emit.
     if (cfg.outputFile.empty()) {
