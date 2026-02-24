@@ -19,12 +19,16 @@
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Program.h>
 
 #include <algorithm>
 #include <cstdlib>
 #include <future>
 #include <memory>
+#include <mutex>
+#include <semaphore>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace clang::tooling;
@@ -125,93 +129,161 @@ int main(int argc, const char **argv) {
     int ret = tool.run(&factory);
 
     // --- IR analysis pass ---
-    // Emit LLVM IR via clang subprocess, then parse with IRReader.
-    // This avoids ClangTool's incomplete codegen backend initialization.
+    // Emit LLVM IR via structured subprocess, then parse with IRReader.
     if (!NoIR && ret == 0) {
-        // Locate clang++ binary.
-        std::string clangBin;
-        for (const char *candidate : {"clang++", "clang++-18", "clang++-17",
-                                       "clang++-16", "clang++-15"}) {
-            std::string probe = std::string("which ") + candidate + " >/dev/null 2>&1";
-            if (std::system(probe.c_str()) == 0) {
-                clangBin = candidate;
-                break;
+        faultline::IRAnalyzer irAnalyzer;
+        std::string optLevel = "-" + IROpt.getValue();
+
+        struct IRJob {
+            std::string srcPath;
+            std::string compilerPath;  // resolved absolute path
+            std::vector<std::string> argv;
+            std::string irFile;
+            std::string errFile;
+        };
+        std::vector<IRJob> jobs;
+
+        for (const auto &srcPath : parser->getSourcePathList()) {
+            auto cmds = parser->getCompilations()
+                            .getCompileCommands(srcPath);
+            if (cmds.empty())
+                continue;
+
+            // Extract compiler from compile_commands.json argv[0].
+            const std::string &dbCompiler = cmds.front().CommandLine.front();
+            auto resolvedOrErr = llvm::sys::findProgramByName(dbCompiler);
+            if (!resolvedOrErr) {
+                llvm::errs() << "faultline: warning: cannot resolve compiler '"
+                             << dbCompiler << "' from compile_commands.json, "
+                             << "skipping IR for " << srcPath << "\n";
+                continue;
             }
+            std::string compilerPath = *resolvedOrErr;
+
+            // Build structured argv: compiler -S -emit-llvm -g -O<level>
+            //   + all original flags (skip argv[0], -c, -o <file>, source)
+            std::vector<std::string> argv;
+            argv.push_back(compilerPath);
+            argv.push_back("-S");
+            argv.push_back("-emit-llvm");
+            argv.push_back("-g");
+            argv.push_back(optLevel);
+
+            for (const auto &cmd : cmds) {
+                const auto &args = cmd.CommandLine;
+                for (size_t i = 1; i < args.size(); ++i) {
+                    if (args[i] == "-c")
+                        continue;
+                    if (args[i] == "-o" && i + 1 < args.size()) {
+                        ++i;
+                        continue;
+                    }
+                    if (args[i] == srcPath)
+                        continue;
+                    argv.push_back(args[i]);
+                }
+            }
+
+            llvm::SmallString<128> irPath, errPath;
+            if (llvm::sys::fs::createTemporaryFile("faultline-ir", "ll", irPath))
+                continue;
+            if (llvm::sys::fs::createTemporaryFile("faultline-err", "log", errPath)) {
+                llvm::sys::fs::remove(irPath);
+                continue;
+            }
+
+            argv.push_back("-o");
+            argv.push_back(std::string(irPath));
+            argv.push_back(srcPath);
+
+            jobs.push_back({srcPath, compilerPath, std::move(argv),
+                            std::string(irPath), std::string(errPath)});
         }
 
-        if (clangBin.empty()) {
-            llvm::errs() << "faultline: warning: clang++ not found, "
+        if (jobs.empty() && !parser->getSourcePathList().empty()) {
+            llvm::errs() << "faultline: warning: no compilable IR jobs, "
                          << "skipping IR analysis pass\n";
-        } else {
-            faultline::IRAnalyzer irAnalyzer;
-            std::string optFlag = "-" + IROpt.getValue();
+        }
 
-            // Build per-file compile commands.
-            struct IRJob {
-                std::string srcPath;
-                std::string clangCmd;
-                std::string tmpFile;
-            };
-            std::vector<IRJob> jobs;
+        // Bounded parallel IR emission.
+        unsigned maxWorkers = std::max(1u, std::thread::hardware_concurrency());
+        maxWorkers = std::min(maxWorkers, static_cast<unsigned>(jobs.size()));
+        std::counting_semaphore<> sem(maxWorkers);
 
-            for (const auto &srcPath : parser->getSourcePathList()) {
-                auto cmds = parser->getCompilations()
-                                .getCompileCommands(srcPath);
+        struct IRResult {
+            int exitCode = -1;
+            std::string errMsg;
+        };
+        std::vector<std::future<IRResult>> futures;
+        futures.reserve(jobs.size());
 
-                std::string extraFlags;
-                for (const auto &cmd : cmds) {
-                    const auto &args = cmd.CommandLine;
-                    for (size_t i = 1; i < args.size(); ++i) {
-                        if (args[i] == "-c")
-                            continue;
-                        if (args[i] == "-o" && i + 1 < args.size()) {
-                            ++i;
-                            continue;
-                        }
-                        if (args[i] == srcPath)
-                            continue;
-                        extraFlags += " " + args[i];
-                    }
+        for (const auto &job : jobs) {
+            futures.push_back(std::async(std::launch::async,
+                [&sem](const std::string &program,
+                       const std::vector<std::string> &argvOwned,
+                       const std::string &errFile) -> IRResult {
+                    sem.acquire();
+
+                    std::vector<llvm::StringRef> argRefs;
+                    argRefs.reserve(argvOwned.size());
+                    for (const auto &a : argvOwned)
+                        argRefs.push_back(a);
+
+                    // Redirect: stdin=none, stdout=none, stderr=errFile.
+                    llvm::StringRef errRedirect(errFile);
+                    std::optional<llvm::StringRef> redirects[] = {
+                        std::nullopt,   // stdin
+                        std::nullopt,   // stdout
+                        errRedirect     // stderr
+                    };
+
+                    IRResult result;
+                    bool failed = false;
+                    result.exitCode = llvm::sys::ExecuteAndWait(
+                        program, argRefs,
+                        /*Env=*/std::nullopt, redirects,
+                        /*SecondsToWait=*/120, /*MemoryLimit=*/0,
+                        &result.errMsg, &failed);
+                    if (failed)
+                        result.exitCode = -1;
+
+                    sem.release();
+                    return result;
+                },
+                job.compilerPath, job.argv, job.errFile));
+        }
+
+        // Collect results and parse IR sequentially (LLVMContext is not thread-safe).
+        llvm::LLVMContext llvmCtx;
+        for (size_t i = 0; i < jobs.size(); ++i) {
+            auto result = futures[i].get();
+
+            if (result.exitCode != 0) {
+                // Log compiler failure with captured stderr.
+                auto errBuf = llvm::MemoryBuffer::getFile(jobs[i].errFile);
+                if (errBuf && !(*errBuf)->getBuffer().empty()) {
+                    llvm::errs() << "faultline: IR emission failed for "
+                                 << jobs[i].srcPath << ":\n"
+                                 << (*errBuf)->getBuffer() << "\n";
+                } else if (!result.errMsg.empty()) {
+                    llvm::errs() << "faultline: IR emission failed for "
+                                 << jobs[i].srcPath << ": "
+                                 << result.errMsg << "\n";
                 }
-
-                llvm::SmallString<128> tmpPath;
-                if (llvm::sys::fs::createTemporaryFile("faultline-ir", "ll",
-                                                        tmpPath))
-                    continue;
-
-                std::string cmd = clangBin + " -S -emit-llvm -g " + optFlag +
-                                  extraFlags +
-                                  " -o " + std::string(tmpPath) +
-                                  " " + srcPath + " 2>/dev/null";
-                jobs.push_back({srcPath, std::move(cmd), std::string(tmpPath)});
+            } else {
+                llvm::SMDiagnostic parseErr;
+                auto mod = llvm::parseIRFile(jobs[i].irFile, parseErr, llvmCtx);
+                if (mod)
+                    irAnalyzer.analyzeModule(*mod);
             }
 
-            // Parallel IR emission: compile all source files concurrently.
-            std::vector<std::future<int>> compileFutures;
-            compileFutures.reserve(jobs.size());
-            for (const auto &job : jobs) {
-                compileFutures.push_back(std::async(std::launch::async,
-                    [](const std::string &c) { return std::system(c.c_str()); },
-                    job.clangCmd));
-            }
+            llvm::sys::fs::remove(jobs[i].irFile);
+            llvm::sys::fs::remove(jobs[i].errFile);
+        }
 
-            // Collect results and parse IR sequentially (LLVMContext is not thread-safe).
-            llvm::LLVMContext llvmCtx;
-            for (size_t i = 0; i < jobs.size(); ++i) {
-                int clangRet = compileFutures[i].get();
-                if (clangRet == 0) {
-                    llvm::SMDiagnostic parseErr;
-                    auto mod = llvm::parseIRFile(jobs[i].tmpFile, parseErr, llvmCtx);
-                    if (mod)
-                        irAnalyzer.analyzeModule(*mod);
-                }
-                llvm::sys::fs::remove(jobs[i].tmpFile);
-            }
-
-            if (!irAnalyzer.profiles().empty()) {
-                faultline::DiagnosticRefiner refiner(irAnalyzer.profiles());
-                refiner.refine(diagnostics);
-            }
+        if (!irAnalyzer.profiles().empty()) {
+            faultline::DiagnosticRefiner refiner(irAnalyzer.profiles());
+            refiner.refine(diagnostics);
         }
     }
 
