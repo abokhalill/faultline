@@ -122,6 +122,14 @@ private:
     static double computeLabelQuality(const ExperimentResult &result);
     bool validateSchema(const ExperimentResult &result) const;
 
+    // Euclidean distance between feature vectors (0.0 if mismatched dimensions).
+    static double featureDistance(const std::vector<double> &a,
+                                  const std::vector<double> &b);
+
+    // Neighborhood radius for feature matching. Entries within this distance
+    // are considered structurally similar.
+    static constexpr double kNeighborhoodRadius = 0.25;
+
     std::string storePath_;
     std::vector<LabeledRecord> records_;
 

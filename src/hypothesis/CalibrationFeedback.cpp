@@ -3,8 +3,21 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 
 namespace faultline {
+
+double CalibrationFeedbackStore::featureDistance(
+    const std::vector<double> &a, const std::vector<double> &b) {
+    if (a.size() != b.size() || a.empty())
+        return std::numeric_limits<double>::max();
+    double sum = 0.0;
+    for (size_t i = 0; i < a.size(); ++i) {
+        double d = a[i] - b[i];
+        sum += d * d;
+    }
+    return std::sqrt(sum);
+}
 
 CalibrationFeedbackStore::CalibrationFeedbackStore(const std::string &storePath)
     : storePath_(storePath) {}
@@ -105,10 +118,13 @@ std::optional<LabeledRecord> CalibrationFeedbackStore::ingest(
     records_.push_back(record);
 
     // Update false positive registry if refuted.
+    // Match on hazard class AND feature neighborhood.
     if (label == LabelValue::Negative) {
         bool found = false;
         for (auto &entry : falsePositiveRegistry_) {
-            if (entry.hazardClass == hazardClass) {
+            if (entry.hazardClass != hazardClass)
+                continue;
+            if (featureDistance(entry.features, featureVector) <= kNeighborhoodRadius) {
                 ++entry.refutationCount;
                 found = true;
                 break;
@@ -152,10 +168,10 @@ bool CalibrationFeedbackStore::isKnownFalsePositive(
     for (const auto &entry : falsePositiveRegistry_) {
         if (entry.hazardClass != hc)
             continue;
-        // Require >= 3 independent refutations per CALIBRATION_LOOP.md §8.
         if (entry.refutationCount < 3)
             continue;
-        return true;
+        if (featureDistance(entry.features, features) <= kNeighborhoodRadius)
+            return true;
     }
     return false;
 }
@@ -166,7 +182,9 @@ void CalibrationFeedbackStore::registerFalsePositive(
     const std::string &reason) {
 
     for (auto &entry : falsePositiveRegistry_) {
-        if (entry.hazardClass == hc) {
+        if (entry.hazardClass != hc)
+            continue;
+        if (featureDistance(entry.features, features) <= kNeighborhoodRadius) {
             entry.reason = reason;
             ++entry.refutationCount;
             return;
