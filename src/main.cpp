@@ -455,5 +455,13 @@ int main(int argc, const char **argv) {
         file << output;
     }
 
-    return ret == 0 ? (diagnostics.empty() ? 0 : 1) : 2;
+    // Exit codes:
+    //   0 = clean (no diagnostics)
+    //   1 = diagnostics found
+    //   2 = parse error (ClangTool failed to process input)
+    if (ret != 0) {
+        llvm::errs() << "faultline: warning: ClangTool returned non-zero ("
+                     << ret << "), input may have parse errors\n";
+    }
+    return diagnostics.empty() ? (ret == 0 ? 0 : 2) : 1;
 }
