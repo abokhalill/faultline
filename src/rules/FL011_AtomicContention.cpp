@@ -196,7 +196,7 @@ public:
         diag.ruleID    = "FL011";
         diag.title     = "Atomic Contention Hotspot";
         diag.severity  = sev;
-        diag.confidence = hasLoopWrite ? 0.80 : 0.65;
+        diag.confidence = hasLoopWrite ? 0.65 : 0.50;
         diag.evidenceTier = EvidenceTier::Likely;
         diag.functionName = FD->getQualifiedNameAsString();
 

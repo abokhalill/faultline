@@ -96,7 +96,7 @@ public:
         diag.ruleID    = "FL060";
         diag.title     = "NUMA-Unfriendly Shared Structure";
         diag.severity  = sev;
-        diag.confidence = hasAtomics ? 0.70 : 0.50;
+        diag.confidence = hasAtomics ? 0.55 : 0.35;
         diag.evidenceTier = EvidenceTier::Speculative;
 
         if (loc.isValid()) {

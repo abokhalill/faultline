@@ -139,8 +139,8 @@ public:
             diag.ruleID    = "FL030";
             diag.title     = "Virtual Dispatch in Hot Path";
             diag.severity  = sev;
-            diag.confidence = 0.80;
-            diag.evidenceTier = EvidenceTier::Proven;
+            diag.confidence = 0.70;
+            diag.evidenceTier = EvidenceTier::Likely;
             diag.functionName = FD->getQualifiedNameAsString();
 
             if (site.loc.isValid()) {

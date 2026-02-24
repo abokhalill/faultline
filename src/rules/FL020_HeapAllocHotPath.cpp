@@ -171,8 +171,8 @@ public:
             diag.ruleID    = "FL020";
             diag.title     = "Heap Allocation in Hot Path";
             diag.severity  = sev;
-            diag.confidence = 0.90;
-            diag.evidenceTier = EvidenceTier::Proven;
+            diag.confidence = 0.75;
+            diag.evidenceTier = EvidenceTier::Likely;
             diag.functionName = FD->getQualifiedNameAsString();
 
             if (site.loc.isValid()) {

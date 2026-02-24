@@ -170,8 +170,8 @@ public:
             diag.ruleID    = "FL012";
             diag.title     = "Lock in Hot Path";
             diag.severity  = sev;
-            diag.confidence = 0.85;
-            diag.evidenceTier = EvidenceTier::Proven;
+            diag.confidence = 0.75;
+            diag.evidenceTier = EvidenceTier::Likely;
             diag.functionName = FD->getQualifiedNameAsString();
 
             if (site.loc.isValid()) {
