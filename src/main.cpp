@@ -167,15 +167,33 @@ int main(int argc, const char **argv) {
                 continue;
 
             // Extract compiler from compile_commands.json argv[0].
+            // Fixed compilation databases (-- syntax) set argv[0] to the tool
+            // binary path, not a real compiler. Validate the resolved path is
+            // an actual executable before using it.
             const std::string &dbCompiler = cmds.front().CommandLine.front();
+            std::string compilerPath;
             auto resolvedOrErr = llvm::sys::findProgramByName(dbCompiler);
-            if (!resolvedOrErr) {
+            if (resolvedOrErr &&
+                llvm::sys::fs::can_execute(*resolvedOrErr)) {
+                compilerPath = *resolvedOrErr;
+            }
+            if (compilerPath.empty()) {
+                // Fallback: find a usable clang++ on PATH.
+                for (const char *fallback : {"clang++", "clang++-18",
+                                              "clang++-17", "clang++-16"}) {
+                    auto fb = llvm::sys::findProgramByName(fallback);
+                    if (fb && llvm::sys::fs::can_execute(*fb)) {
+                        compilerPath = *fb;
+                        break;
+                    }
+                }
+            }
+            if (compilerPath.empty()) {
                 llvm::errs() << "faultline: warning: cannot resolve compiler '"
-                             << dbCompiler << "' from compile_commands.json, "
-                             << "skipping IR for " << srcPath << "\n";
+                             << dbCompiler << "', skipping IR for "
+                             << srcPath << "\n";
                 continue;
             }
-            std::string compilerPath = *resolvedOrErr;
 
             // Build structured argv: compiler -S -emit-llvm -g -O<level>
             //   + all original flags (skip argv[0], -c, -o <file>, source)
