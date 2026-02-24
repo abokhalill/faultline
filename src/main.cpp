@@ -324,6 +324,16 @@ int main(int argc, const char **argv) {
                                    ::mapRuleToHazardClass(d.ruleID);
                                auto features = faultline::HypothesisConstructor
                                    ::extractFeatures(d);
+                               // Safety rail: never suppress high-severity
+                               // proven findings via calibration.
+                               bool highSev =
+                                   d.severity == faultline::Severity::Critical ||
+                                   d.severity == faultline::Severity::High;
+                               bool proven =
+                                   d.evidenceTier == faultline::EvidenceTier::Proven;
+                               if (highSev && proven)
+                                   return false;
+
                                if (calStore->isKnownFalsePositive(features, hc)) {
                                    ++suppressed;
                                    return true;
