@@ -62,14 +62,19 @@ Faultline detects structural risk candidates; runtime tools validate impact magn
 
 ## 2) Optional LLVM IR pass (post-lowering refinement)
 
-- Faultline emits `.ll` via external `clang++ -S -emit-llvm` per source file.
-- Parses IR using `llvm::parseIRFile`.
+- Compiler resolved from `compile_commands.json` argv[0] with PATH fallback.
+- IR emitted via `llvm::sys::ExecuteAndWait` (no shell interpolation).
+- Bounded parallelism: `std::counting_semaphore` capped at `hardware_concurrency()`.
+- Deterministic temp file naming via MD5(source content + compile args + tool version).
+- Incremental cache: identical inputs reuse prior IR without recompilation.
+- Stderr captured per subprocess and logged on failure.
+- Parses IR using `llvm::parseIRFile` (sequential — `LLVMContext` is not thread-safe).
 - `IRAnalyzer` inspects:
   - `AllocaInst` (stack footprint),
   - atomic `LoadInst`/`StoreInst`/`AtomicRMWInst`/`AtomicCmpXchgInst`,
   - `FenceInst`,
   - direct/indirect call sites.
-- `DiagnosticRefiner` adjusts confidence/escalations based on IR evidence.
+- `DiagnosticRefiner` adjusts confidence/escalations using named evidence constants (`ConfidenceModel.h`), with per-factor floor/ceiling bounds.
 
 ## 3) Data layout and ordering boundaries
 
@@ -121,10 +126,14 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/usr/lib/llvm
 ```bash
 ./build/faultline /path/to/source.cpp -- -std=c++20
 ./build/faultline --config=./faultline.config.yaml /path/to/source.cpp --
-./build/faultline --json /path/to/source.cpp --
+./build/faultline --format=json /path/to/source.cpp --
+./build/faultline --format=sarif /path/to/source.cpp --
+./build/faultline --output=report.sarif --format=sarif /path/to/source.cpp --
 ./build/faultline --min-severity=High /path/to/source.cpp --
+./build/faultline --min-evidence=proven /path/to/source.cpp --
 ./build/faultline --no-ir /path/to/source.cpp --
 ./build/faultline --ir-opt=O1 /path/to/source.cpp --
+./build/faultline --calibration-store=/path/to/store /path/to/source.cpp --
 ```
 
 ---
@@ -275,11 +284,57 @@ hot_file_patterns:
 
 ---
 
-## Boundaries (Important)
+## Output Formats
 
-- Faultline is static analysis. It does not directly measure runtime PMU events.
+| Format | Flag | Description |
+|---|---|---|
+| CLI | `--format=cli` (default) | Human-readable terminal output with severity, rule ID, location, evidence |
+| JSON | `--format=json` | Machine-readable; includes `metadata` block with tool version, timestamp, compiler paths, source files |
+| SARIF 2.1.0 | `--format=sarif` | GitHub/CI-compatible; `invocations` with execution provenance, `artifacts`, rule descriptors |
+
+All structured formats embed execution metadata for reproducibility.
+
+---
+
+## Evidence Model
+
+Every diagnostic carries three orthogonal quality signals:
+
+| Signal | Values | Meaning |
+|---|---|---|
+| **Severity** | Critical, High, Medium, Informational | Worst-case latency impact |
+| **Confidence** | 0.0–1.0 | Tool's belief the hazard is real at this site |
+| **Evidence Tier** | Proven, Likely, Speculative | Strength of structural/IR backing |
+
+IR refinement adjusts confidence using named evidence constants with per-factor floor/ceiling bounds. Adjustments are traceable via `escalations` in output.
+
+Calibration feedback (`--calibration-store`) suppresses known false positives via feature-neighborhood matching. **Safety rail:** Critical/High + Proven findings are never auto-suppressed.
+
+---
+
+## Validation
+
+```bash
+./validation/run.sh              # Both tiers
+./validation/run.sh --tier1      # Corpus regression (internal + external)
+./validation/run.sh --tier2      # Ground truth microbenchmarks
+```
+
+**Tier 1** runs faultline against internal test samples and external corpora (folly, abseil, seastar). Asserts: no crash, deterministic output, valid locations, distribution sanity, evidence parseability.
+
+**Tier 2** runs paired hazardous/fixed microbenchmarks per rule with hardware timing and optional `perf stat` counters. Statistical analysis via paired t-test when scipy is available.
+
+See `validation/README.md` for full details.
+
+---
+
+## Boundaries
+
+- Static analysis only. Does not measure runtime PMU events.
 - Some hazards (NUMA remoteness, LFB pressure, prefetch pollution) require runtime validation.
-- IR refinement improves confidence but is not yet a full source-to-lowered site-bijective proof.
+- IR refinement improves confidence but is not a full source-to-lowered site-bijective proof.
+- EscapeAnalysis uses AST-structural type matching (template specialization, qualified names), not interprocedural dataflow.
+- Incremental cache keys on source content + compile args + tool version; external header changes require cache invalidation.
 
 ---
 
@@ -289,4 +344,4 @@ hot_file_patterns:
 |---|---|
 | 0 | No findings at or above min severity |
 | 1 | Findings emitted |
-| 2 | Tool failure |
+| 2 | Input parse error (missing headers, invalid source) |
