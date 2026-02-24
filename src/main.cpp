@@ -36,9 +36,15 @@ static llvm::cl::opt<std::string> ConfigPath(
     llvm::cl::value_desc("file"),
     llvm::cl::cat(FaultlineCat));
 
+static llvm::cl::opt<std::string> OutputFormat(
+    "format",
+    llvm::cl::desc("Output format (cli|json|sarif)"),
+    llvm::cl::init("cli"),
+    llvm::cl::cat(FaultlineCat));
+
 static llvm::cl::opt<bool> JSONFlag(
     "json",
-    llvm::cl::desc("Emit JSON output"),
+    llvm::cl::desc("Emit JSON output (deprecated: use --format=json)"),
     llvm::cl::cat(FaultlineCat));
 
 static llvm::cl::opt<std::string> OutputFile(
@@ -249,8 +255,14 @@ int main(int argc, const char **argv) {
               });
 
     // Format output.
+    std::string fmt = OutputFormat.getValue();
+    if (JSONFlag && fmt == "cli")
+        fmt = "json"; // backward compat
+
     std::unique_ptr<faultline::OutputFormatter> formatter;
-    if (cfg.jsonOutput)
+    if (fmt == "sarif")
+        formatter = std::make_unique<faultline::SARIFOutputFormatter>();
+    else if (fmt == "json" || cfg.jsonOutput)
         formatter = std::make_unique<faultline::JSONOutputFormatter>();
     else
         formatter = std::make_unique<faultline::CLIOutputFormatter>();

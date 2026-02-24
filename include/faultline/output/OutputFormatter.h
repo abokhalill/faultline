@@ -23,4 +23,9 @@ public:
     std::string format(const std::vector<Diagnostic> &diagnostics) override;
 };
 
+class SARIFOutputFormatter : public OutputFormatter {
+public:
+    std::string format(const std::vector<Diagnostic> &diagnostics) override;
+};
+
 } // namespace faultline

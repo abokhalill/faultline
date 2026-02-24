@@ -31,6 +31,7 @@ set(FAULTLINE_SOURCES
     src/core/Config.cpp
     src/output/CLIOutput.cpp
     src/output/JSONOutput.cpp
+    src/output/SARIFOutput.cpp
     src/analysis/FaultlineAction.cpp
     src/analysis/FaultlineASTConsumer.cpp
     src/analysis/StructLayoutVisitor.cpp
