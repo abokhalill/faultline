@@ -1,4 +1,5 @@
 #include "faultline/ir/DiagnosticRefiner.h"
+#include "faultline/ir/ConfidenceModel.h"
 
 #include <llvm/IR/Instructions.h>
 
@@ -127,19 +128,25 @@ void DiagnosticRefiner::refineFL010(Diagnostic &diag) const {
     }
 
     if (siteConfirmed) {
-        diag.confidence = std::min(diag.confidence + 0.10, 0.98);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kSiteConfirmed,
+            evidence::kFloor, evidence::kCeilingSiteProven);
         diag.evidenceTier = EvidenceTier::Proven;
         diag.escalations.push_back(
             "IR site-confirmed: seq_cst " + siteOpName +
             " at line " + std::to_string(diagLine) +
             " survives lowering");
     } else if (profile->seqCstCount > 0) {
-        diag.confidence = std::min(diag.confidence + 0.05, 0.92);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kFunctionConfirmed,
+            evidence::kFloor, evidence::kCeilingModerate);
         diag.escalations.push_back(
             "IR confirmed: " + std::to_string(profile->seqCstCount) +
             " seq_cst instruction(s) in function (no exact line match)");
     } else if (!profile->atomics.empty()) {
-        diag.confidence = std::max(diag.confidence - 0.20, 0.30);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kOptimizedAway,
+            evidence::kFloorOptimizedAway, evidence::kCeilingSiteProven);
         diag.escalations.push_back(
             "IR refinement: no seq_cst instructions emitted — "
             "compiler may have optimized ordering");
@@ -173,7 +180,9 @@ void DiagnosticRefiner::refineFL011(Diagnostic &diag) const {
     }
 
     if (atomicWriteCount > 0) {
-        diag.confidence = std::min(diag.confidence + 0.10, 0.95);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kSiteConfirmed,
+            evidence::kFloor, evidence::kCeilingFuncLevel);
         if (siteMatched > 0)
             diag.evidenceTier = EvidenceTier::Proven;
 
@@ -205,7 +214,9 @@ void DiagnosticRefiner::refineFL020(Diagnostic &diag) const {
     }
 
     if (heapCalls > 0) {
-        diag.confidence = std::min(diag.confidence + 0.05, 0.98);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kHeapSurvived,
+            evidence::kFloor, evidence::kCeilingSiteProven);
 
         std::ostringstream ss;
         ss << "IR confirmed: " << heapCalls
@@ -214,8 +225,9 @@ void DiagnosticRefiner::refineFL020(Diagnostic &diag) const {
             ss << ", " << loopHeapCalls << " in loop blocks";
         diag.escalations.push_back(ss.str());
     } else {
-        // AST saw allocation but IR doesn't — may have been inlined/optimized away.
-        diag.confidence = std::max(diag.confidence - 0.15, 0.40);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kHeapEliminated,
+            evidence::kFloorHeapEliminated, evidence::kCeilingSiteProven);
         diag.escalations.push_back(
             "IR refinement: no heap alloc calls found after inlining — "
             "allocation may have been optimized away");
@@ -263,7 +275,9 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
     }
 
     if (irStackSize > 0) {
-        diag.confidence = std::min(diag.confidence + 0.10, 0.95);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kStackConfirmed,
+            evidence::kFloor, evidence::kCeilingFuncLevel);
         diag.evidenceTier = EvidenceTier::Proven;
 
         // Update evidence with IR-precise size.
@@ -290,15 +304,18 @@ void DiagnosticRefiner::refineFL030(Diagnostic &diag) const {
         return;
 
     if (profile->indirectCallCount > 0) {
-        diag.confidence = std::min(diag.confidence + 0.10, 0.95);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kIndirectConfirmed,
+            evidence::kFloor, evidence::kCeilingFuncLevel);
 
         std::ostringstream ss;
         ss << "IR confirmed: " << profile->indirectCallCount
            << " indirect call(s) remain after devirtualization";
         diag.escalations.push_back(ss.str());
     } else if (profile->directCallCount > 0) {
-        // All calls resolved to direct — devirtualization succeeded.
-        diag.confidence = std::max(diag.confidence - 0.25, 0.30);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kFullyDevirtualized,
+            evidence::kFloorDevirtualized, evidence::kCeilingSiteProven);
         diag.escalations.push_back(
             "IR refinement: all calls devirtualized to direct — "
             "BTB pressure eliminated by compiler");
@@ -313,12 +330,16 @@ void DiagnosticRefiner::refineFL031(Diagnostic &diag) const {
 
     // std::function invocation compiles to an indirect call.
     if (profile->indirectCallCount > 0) {
-        diag.confidence = std::min(diag.confidence + 0.10, 0.95);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kIndirectConfirmed,
+            evidence::kFloor, evidence::kCeilingFuncLevel);
         diag.escalations.push_back(
             "IR confirmed: " + std::to_string(profile->indirectCallCount) +
             " indirect call(s) — type-erased dispatch not eliminated");
     } else {
-        diag.confidence = std::max(diag.confidence - 0.20, 0.35);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kOptimizedAway,
+            evidence::kFloorIndirectGone, evidence::kCeilingSiteProven);
         diag.escalations.push_back(
             "IR refinement: no indirect calls found — "
             "std::function may have been devirtualized or inlined");
@@ -351,7 +372,9 @@ void DiagnosticRefiner::refineFL012(Diagnostic &diag) const {
     }
 
     if (hasMutexCall || hasAtomicCmpXchg) {
-        diag.confidence = std::min(diag.confidence + 0.05, 0.95);
+        diag.confidence = std::clamp(
+            diag.confidence + evidence::kLockConfirmed,
+            evidence::kFloor, evidence::kCeilingFuncLevel);
         std::string detail;
         if (hasMutexCall) detail = "pthread_mutex call";
         else detail = "atomic cmpxchg (lock internals)";
