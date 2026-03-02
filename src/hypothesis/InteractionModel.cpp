@@ -15,24 +15,20 @@ const InteractionEligibilityMatrix &InteractionEligibilityMatrix::instance() {
 }
 
 InteractionEligibilityMatrix::InteractionEligibilityMatrix() {
-    auto fsCounters = HypothesisTemplateRegistry::instance()
-                          .lookup(HazardClass::FalseSharing)->counterSet;
-    auto acCounters = HypothesisTemplateRegistry::instance()
-                          .lookup(HazardClass::AtomicContention)->counterSet;
-    auto aoCounters = HypothesisTemplateRegistry::instance()
-                          .lookup(HazardClass::AtomicOrdering)->counterSet;
-    auto numaCounters = HypothesisTemplateRegistry::instance()
-                            .lookup(HazardClass::NUMALocality)->counterSet;
-    auto lockCounters = HypothesisTemplateRegistry::instance()
-                            .lookup(HazardClass::LockContention)->counterSet;
-    auto heapCounters = HypothesisTemplateRegistry::instance()
-                            .lookup(HazardClass::HeapAllocation)->counterSet;
-    auto cgCounters = HypothesisTemplateRegistry::instance()
-                          .lookup(HazardClass::CacheGeometry)->counterSet;
-    auto vdCounters = HypothesisTemplateRegistry::instance()
-                          .lookup(HazardClass::VirtualDispatch)->counterSet;
-    auto dcCounters = HypothesisTemplateRegistry::instance()
-                          .lookup(HazardClass::DeepConditional)->counterSet;
+    auto safeCounters = [](HazardClass hc) -> PMUCounterSet {
+        const auto *tmpl = HypothesisTemplateRegistry::instance().lookup(hc);
+        return tmpl ? tmpl->counterSet : PMUCounterSet{};
+    };
+
+    auto fsCounters   = safeCounters(HazardClass::FalseSharing);
+    auto acCounters   = safeCounters(HazardClass::AtomicContention);
+    auto aoCounters   = safeCounters(HazardClass::AtomicOrdering);
+    auto numaCounters = safeCounters(HazardClass::NUMALocality);
+    auto lockCounters = safeCounters(HazardClass::LockContention);
+    auto heapCounters = safeCounters(HazardClass::HeapAllocation);
+    auto cgCounters   = safeCounters(HazardClass::CacheGeometry);
+    auto vdCounters   = safeCounters(HazardClass::VirtualDispatch);
+    auto dcCounters   = safeCounters(HazardClass::DeepConditional);
 
     templates_ = {
         {
