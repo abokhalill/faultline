@@ -163,6 +163,11 @@ static faultline::EvidenceTier parseEvidenceTier(const std::string &s) {
 }
 
 int main(int argc, const char **argv) {
+    llvm::cl::SetVersionPrinter([](llvm::raw_ostream &OS) {
+        OS << faultline::kToolName << " version " << faultline::kToolVersion
+           << " (output schema " << faultline::kOutputSchemaVersion << ")\n";
+    });
+
     auto parser = CommonOptionsParser::create(argc, argv, FaultlineCat);
     if (!parser) {
         llvm::errs() << parser.takeError();
@@ -696,8 +701,12 @@ int main(int argc, const char **argv) {
         formatter = std::make_unique<faultline::SARIFOutputFormatter>();
     else if (fmt == "json" || cfg.jsonOutput)
         formatter = std::make_unique<faultline::JSONOutputFormatter>();
-    else
+    else {
+        if (fmt != "cli")
+            llvm::errs() << "faultline: warning: unknown format '" << fmt
+                         << "', defaulting to cli\n";
         formatter = std::make_unique<faultline::CLIOutputFormatter>();
+    }
 
     std::string output = formatter->format(diagnostics, execMeta);
 
