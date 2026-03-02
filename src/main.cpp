@@ -7,6 +7,7 @@
 #include "faultline/hypothesis/HypothesisConstructor.h"
 #include "faultline/ir/IRAnalyzer.h"
 #include "faultline/ir/DiagnosticRefiner.h"
+#include "faultline/core/DiagnosticDedup.h"
 #include "faultline/output/OutputFormatter.h"
 
 #include <clang/Tooling/CommonOptionsParser.h>
@@ -386,6 +387,11 @@ int main(int argc, const char **argv) {
             refiner.refine(diagnostics);
         }
     }
+
+    // --- Cross-TU deduplication ---
+    // Struct-level rules emit identical diagnostics when the same header
+    // is included by multiple TUs. Merge duplicates, keep highest confidence.
+    faultline::deduplicateDiagnostics(diagnostics);
 
     // --- Calibration-based false-positive suppression ---
     std::unique_ptr<faultline::CalibrationFeedbackStore> calStore;

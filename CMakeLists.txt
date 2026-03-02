@@ -29,6 +29,7 @@ set(FAULTLINE_SOURCES
     src/core/Severity.cpp
     src/core/HotPathOracle.cpp
     src/core/Config.cpp
+    src/core/DiagnosticDedup.cpp
     src/output/CLIOutput.cpp
     src/output/JSONOutput.cpp
     src/output/SARIFOutput.cpp
