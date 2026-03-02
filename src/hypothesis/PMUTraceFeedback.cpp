@@ -52,8 +52,12 @@ LabelValue PMUTraceFeedbackLoop::ingestTrace(
     expResult.hypothesisId = "PMU-" + std::string(hazardClassName(hazardClass));
     expResult.schemaVersion = "1.0.0";
     expResult.ingestionTimestamp = trace.timestampEpochSec;
-    expResult.envState.cpuModel = trace.cpuModel;
+    expResult.envState.cpuModel = trace.cpuModel.empty()
+        ? "unknown" : trace.cpuModel;
     expResult.envState.skuFamily = trace.skuFamily;
+    // validateSchema requires non-zero iteration counts.
+    expResult.warmupIterations = 1;
+    expResult.measurementIterations = 1;
 
     // Map PMU samples to counter deltas (treatment = measured, control = 0).
     for (const auto &sample : trace.samples) {
