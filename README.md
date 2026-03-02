@@ -333,8 +333,8 @@ See `validation/README.md` for full details.
 - Static analysis only. Does not measure runtime PMU events.
 - Some hazards (NUMA remoteness, LFB pressure, prefetch pollution) require runtime validation.
 - IR refinement improves confidence but is not a full source-to-lowered site-bijective proof.
-- EscapeAnalysis uses AST-structural type matching (template specialization, qualified names), not interprocedural dataflow.
-- Incremental cache keys on source content + compile args + tool version; external header changes require cache invalidation.
+- EscapeAnalysis uses structural member inspection and TU-wide publication path scanning (std::thread/async/jthread args, global storage). Not full interprocedural dataflow.
+- Incremental cache keys on source content + mtime + compile args + tool version + .d dependency file if present. Use `--no-ir-cache` in CI for guaranteed header invalidation.
 
 ---
 
@@ -344,4 +344,5 @@ See `validation/README.md` for full details.
 |---|---|
 | 0 | No findings at or above min severity |
 | 1 | Findings emitted |
-| 2 | Input parse error (missing headers, invalid source) |
+| 2 | Input parse/compilation error (no findings) |
+| 3 | Tool infrastructure failure (output file, config) |

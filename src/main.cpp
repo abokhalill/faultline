@@ -479,18 +479,29 @@ int main(int argc, const char **argv) {
         if (EC) {
             llvm::errs() << "faultline: error: cannot open output file '"
                          << cfg.outputFile << "': " << EC.message() << "\n";
-            return 1;
+            return 3;
         }
         file << output;
     }
 
     // Exit codes:
-    //   0 = clean (no diagnostics)
-    //   1 = diagnostics found
-    //   2 = parse error (ClangTool failed to process input)
-    if (ret != 0) {
+    //   0 = clean (no diagnostics, no errors)
+    //   1 = diagnostics found (analysis succeeded, findings emitted)
+    //   2 = parse/compilation error (ClangTool failed, no findings)
+    //   3 = tool infrastructure failure (output file, config, etc.)
+    bool parseError = (ret != 0);
+    bool hasFindings = !diagnostics.empty();
+
+    if (parseError && hasFindings) {
         llvm::errs() << "faultline: warning: ClangTool returned non-zero ("
-                     << ret << "), input may have parse errors\n";
+                     << ret << "), some sources may have parse errors; "
+                     << diagnostics.size() << " finding(s) from successful parses\n";
+        return 1;
     }
-    return diagnostics.empty() ? (ret == 0 ? 0 : 2) : 1;
+    if (parseError) {
+        llvm::errs() << "faultline: error: ClangTool returned non-zero ("
+                     << ret << "), input has parse/compilation errors\n";
+        return 2;
+    }
+    return hasFindings ? 1 : 0;
 }
