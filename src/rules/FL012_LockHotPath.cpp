@@ -7,6 +7,7 @@
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/ExprCXX.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/SourceManager.h>
@@ -40,9 +41,23 @@ public:
             return true;
 
         std::string className = parent->getQualifiedNameAsString();
-        if (className.find("mutex") == std::string::npos &&
-            className.find("spinlock") == std::string::npos &&
-            className.find("shared_mutex") == std::string::npos)
+        static const char *mutexTypes[] = {
+            "std::mutex", "std::recursive_mutex",
+            "std::shared_mutex", "std::timed_mutex",
+            "std::recursive_timed_mutex", "std::shared_timed_mutex"
+        };
+        bool isMutex = false;
+        for (const auto *mt : mutexTypes) {
+            if (className == mt) { isMutex = true; break; }
+        }
+        // POSIX mutex types.
+        if (!isMutex) {
+            if (className.find("pthread_mutex_t") != std::string::npos ||
+                className.find("pthread_spinlock_t") != std::string::npos ||
+                className.find("pthread_rwlock_t") != std::string::npos)
+                isMutex = true;
+        }
+        if (!isMutex)
             return true;
 
         bool nested = lockDepth_ > 0;
@@ -59,11 +74,17 @@ public:
 
         std::string parent = CD->getParent()->getQualifiedNameAsString();
 
-        // RAII lock wrappers.
-        if (parent.find("lock_guard") != std::string::npos ||
-            parent.find("unique_lock") != std::string::npos ||
-            parent.find("shared_lock") != std::string::npos ||
-            parent.find("scoped_lock") != std::string::npos) {
+        // RAII lock wrappers — resolve through template specializations.
+        std::string resolvedName = parent;
+        if (const auto *CTSD = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+                CD->getParent())) {
+            if (auto *TD = CTSD->getSpecializedTemplate())
+                resolvedName = TD->getQualifiedNameAsString();
+        }
+        if (resolvedName == "std::lock_guard" ||
+            resolvedName == "std::unique_lock" ||
+            resolvedName == "std::shared_lock" ||
+            resolvedName == "std::scoped_lock") {
 
             bool nested = lockDepth_ > 0;
             sites_.push_back({E->getBeginLoc(), parent, nested, inLoop_});

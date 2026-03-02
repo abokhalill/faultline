@@ -7,6 +7,7 @@
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/ExprCXX.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Type.h>
 #include <clang/Basic/SourceManager.h>
@@ -42,10 +43,16 @@ public:
 
     bool VisitCXXConstructExpr(clang::CXXConstructExpr *E) {
         if (const auto *CD = E->getConstructor()) {
-            std::string parent = CD->getParent()->getQualifiedNameAsString();
-            if (parent.find("std::function") != std::string::npos) {
-                sites_.push_back({E->getBeginLoc(), StdFuncSite::Construct, inLoop_});
+            std::string templateName;
+            if (const auto *CTSD = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+                    CD->getParent())) {
+                if (auto *TD = CTSD->getSpecializedTemplate())
+                    templateName = TD->getQualifiedNameAsString();
             }
+            if (templateName.empty())
+                templateName = CD->getParent()->getQualifiedNameAsString();
+            if (templateName == "std::function")
+                sites_.push_back({E->getBeginLoc(), StdFuncSite::Construct, inLoop_});
         }
         return true;
     }
@@ -91,11 +98,29 @@ public:
 
     const std::vector<StdFuncSite> &sites() const { return sites_; }
 
-private:
-    bool isStdFunction(clang::QualType QT) const {
-        return QT.getAsString().find("std::function") != std::string::npos;
+    static bool isStdFunction(clang::QualType QT) {
+        QT = QT.getCanonicalType().getNonReferenceType();
+        const clang::CXXRecordDecl *RD = nullptr;
+        if (const auto *TST = QT->getAs<clang::TemplateSpecializationType>()) {
+            if (auto TD = TST->getTemplateName().getAsTemplateDecl())
+                RD = llvm::dyn_cast_or_null<clang::CXXRecordDecl>(
+                    TD->getTemplatedDecl());
+        }
+        if (!RD)
+            RD = QT->getAsCXXRecordDecl();
+        if (!RD)
+            return false;
+        if (RD->getQualifiedNameAsString() == "std::function")
+            return true;
+        if (const auto *CTSD =
+                llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(RD)) {
+            if (auto *TD = CTSD->getSpecializedTemplate())
+                return TD->getQualifiedNameAsString() == "std::function";
+        }
+        return false;
     }
 
+private:
     std::vector<StdFuncSite> sites_;
     unsigned inLoop_ = 0;
 };
@@ -132,8 +157,7 @@ public:
         // is the concern regardless of where it was constructed.
         bool hasStdFuncParam = false;
         for (const auto *param : FD->parameters()) {
-            clang::QualType QT = param->getType().getCanonicalType();
-            if (QT.getAsString().find("std::function") != std::string::npos) {
+            if (StdFuncVisitor::isStdFunction(param->getType())) {
                 hasStdFuncParam = true;
                 break;
             }

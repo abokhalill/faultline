@@ -7,6 +7,7 @@
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/ExprCXX.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/SourceManager.h>
@@ -48,8 +49,9 @@ public:
                 sites_.push_back({E->getBeginLoc(), name, inLoop_});
             }
 
-            if (name.find("make_shared") != std::string::npos ||
-                name.find("make_unique") != std::string::npos) {
+            if (name == "std::make_shared" || name == "std::make_unique" ||
+                name == "std::make_shared_for_overwrite" ||
+                name == "std::make_unique_for_overwrite") {
                 sites_.push_back({E->getBeginLoc(), name, inLoop_});
             }
         }
@@ -58,32 +60,35 @@ public:
 
     bool VisitCXXConstructExpr(clang::CXXConstructExpr *E) {
         if (const auto *CD = E->getConstructor()) {
-            std::string parent = CD->getParent()->getQualifiedNameAsString();
+            // Resolve template name through ClassTemplateSpecializationDecl.
+            std::string templateName;
+            if (const auto *CTSD = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
+                    CD->getParent())) {
+                if (auto *TD = CTSD->getSpecializedTemplate())
+                    templateName = TD->getQualifiedNameAsString();
+            }
+            if (templateName.empty())
+                templateName = CD->getParent()->getQualifiedNameAsString();
 
-            // std::function construction may heap-allocate for large callables.
-            if (parent.find("std::function") != std::string::npos) {
-                sites_.push_back({E->getBeginLoc(), "std::function ctor", inLoop_});
+            static const char *heapAllocTypes[] = {
+                "std::function",
+                "std::shared_ptr",
+                "std::vector", "std::map", "std::unordered_map",
+                "std::list", "std::deque", "std::set", "std::unordered_set",
+                "std::basic_string"
+            };
+
+            for (const auto *ht : heapAllocTypes) {
+                if (templateName == ht) {
+                    std::string label = std::string(ht) + " ctor";
+                    sites_.push_back({E->getBeginLoc(), label, inLoop_});
+                    break;
+                }
             }
 
-            // std::shared_ptr construction.
-            if (parent.find("std::shared_ptr") != std::string::npos) {
-                sites_.push_back({E->getBeginLoc(), "std::shared_ptr ctor", inLoop_});
-            }
-
-            // std::string construction (SSO may save us, but non-trivial strings allocate).
-            if (parent.find("std::basic_string") != std::string::npos ||
-                parent.find("std::__cxx11::basic_string") != std::string::npos) {
+            // libstdc++ mangled string path.
+            if (templateName == "std::__cxx11::basic_string")
                 sites_.push_back({E->getBeginLoc(), "std::string ctor", inLoop_});
-            }
-
-            // std::vector, std::map, std::unordered_map construction.
-            if (parent.find("std::vector") != std::string::npos ||
-                parent.find("std::map") != std::string::npos ||
-                parent.find("std::unordered_map") != std::string::npos ||
-                parent.find("std::list") != std::string::npos ||
-                parent.find("std::deque") != std::string::npos) {
-                sites_.push_back({E->getBeginLoc(), parent + " ctor", inLoop_});
-            }
         }
         return true;
     }
