@@ -24,6 +24,19 @@ constexpr std::string_view evidenceTierName(EvidenceTier t) {
     return "speculative";
 }
 
+constexpr bool operator<(EvidenceTier a, EvidenceTier b) {
+    return static_cast<uint8_t>(a) < static_cast<uint8_t>(b);
+}
+constexpr bool operator>(EvidenceTier a, EvidenceTier b) {
+    return static_cast<uint8_t>(a) > static_cast<uint8_t>(b);
+}
+constexpr bool operator<=(EvidenceTier a, EvidenceTier b) {
+    return static_cast<uint8_t>(a) <= static_cast<uint8_t>(b);
+}
+constexpr bool operator>=(EvidenceTier a, EvidenceTier b) {
+    return static_cast<uint8_t>(a) >= static_cast<uint8_t>(b);
+}
+
 struct SourceLocation {
     std::string file;
     unsigned line   = 0;

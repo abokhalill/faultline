@@ -22,6 +22,15 @@ constexpr std::string_view severityToString(Severity s) {
     return "Unknown";
 }
 
+constexpr bool operator<(Severity a, Severity b) {
+    return static_cast<uint8_t>(a) < static_cast<uint8_t>(b);
+}
+constexpr bool operator>(Severity a, Severity b) {
+    return static_cast<uint8_t>(a) > static_cast<uint8_t>(b);
+}
+constexpr bool operator<=(Severity a, Severity b) {
+    return static_cast<uint8_t>(a) <= static_cast<uint8_t>(b);
+}
 constexpr bool operator>=(Severity a, Severity b) {
     return static_cast<uint8_t>(a) >= static_cast<uint8_t>(b);
 }

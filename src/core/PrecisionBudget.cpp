@@ -13,33 +13,33 @@ PrecisionBudget::PrecisionBudget() {
         policies_[id] = {id, maxEmit, minConf, maxSev, 0.30};
     };
 
-    // Struct-level rules: proven by layout, high confidence.
+    // Struct-level rules: proven by layout, unlimited emission.
     add("FL001", 0, 0.40, Severity::Critical);
     add("FL002", 0, 0.50, Severity::Critical);
 
     // Atomic/ordering rules: moderate confidence needed.
-    add("FL010", 0, 0.45, Severity::Critical);
-    add("FL011", 0, 0.45, Severity::Critical);
-    add("FL012", 0, 0.45, Severity::Critical);
+    add("FL010", 50, 0.45, Severity::Critical);
+    add("FL011", 50, 0.45, Severity::Critical);
+    add("FL012", 50, 0.45, Severity::Critical);
 
     // Allocation/stack rules.
-    add("FL020", 0, 0.40, Severity::Critical);
-    add("FL021", 0, 0.35, Severity::High);
+    add("FL020", 100, 0.40, Severity::Critical);
+    add("FL021", 30, 0.35, Severity::High);
 
-    // Indirect dispatch rules: higher FP risk.
-    add("FL030", 0, 0.45, Severity::Critical);
-    add("FL031", 0, 0.45, Severity::High);
+    // Indirect dispatch rules: higher FP risk, tighter budget.
+    add("FL030", 30, 0.45, Severity::Critical);
+    add("FL031", 30, 0.45, Severity::High);
 
     // Global state / queue rules.
     add("FL040", 0, 0.50, Severity::Critical);
     add("FL041", 0, 0.50, Severity::Critical);
 
     // Branch depth: speculative, cap at Medium unless IR-confirmed.
-    add("FL050", 0, 0.30, Severity::High);
+    add("FL050", 20, 0.30, Severity::High);
 
     // NUMA rules: highly speculative without runtime data.
-    add("FL060", 0, 0.35, Severity::High);
-    add("FL061", 0, 0.40, Severity::High);
+    add("FL060", 20, 0.35, Severity::High);
+    add("FL061", 20, 0.40, Severity::High);
 
     // Compound hazard: requires multiple signals.
     add("FL090", 0, 0.55, Severity::Critical);
