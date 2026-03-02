@@ -8,6 +8,7 @@
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/Expr.h>
 #include <clang/AST/ExprCXX.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/RecordLayout.h>
 #include <clang/Basic/SourceManager.h>
@@ -24,6 +25,34 @@ struct AtomicWriteSite {
     std::string varName;
     unsigned inLoop = 0;
 };
+
+bool isStdAtomicType(clang::QualType QT) {
+    QT = QT.getCanonicalType().getNonReferenceType();
+    if (QT->isAtomicType())
+        return true;
+    const clang::CXXRecordDecl *RD = nullptr;
+    if (const auto *TST = QT->getAs<clang::TemplateSpecializationType>()) {
+        if (auto TD = TST->getTemplateName().getAsTemplateDecl())
+            RD = llvm::dyn_cast_or_null<clang::CXXRecordDecl>(
+                TD->getTemplatedDecl());
+    }
+    if (!RD)
+        RD = QT->getAsCXXRecordDecl();
+    if (!RD)
+        return false;
+    std::string qn = RD->getQualifiedNameAsString();
+    if (qn == "std::atomic" || qn == "std::atomic_ref")
+        return true;
+    if (const auto *CTSD =
+            llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(RD)) {
+        if (auto *TD = CTSD->getSpecializedTemplate()) {
+            std::string tn = TD->getQualifiedNameAsString();
+            if (tn == "std::atomic" || tn == "std::atomic_ref")
+                return true;
+        }
+    }
+    return false;
+}
 
 class AtomicWriteVisitor : public clang::RecursiveASTVisitor<AtomicWriteVisitor> {
 public:
@@ -52,8 +81,7 @@ public:
         if (!obj)
             return true;
 
-        std::string typeName = obj->getType().getCanonicalType().getAsString();
-        if (typeName.find("atomic") == std::string::npos)
+        if (!isStdAtomicType(obj->getType()))
             return true;
 
         std::string varName = "<unknown>";
@@ -72,9 +100,7 @@ public:
         if (E->getNumArgs() < 1)
             return true;
 
-        std::string typeName =
-            E->getArg(0)->getType().getCanonicalType().getAsString();
-        if (typeName.find("atomic") == std::string::npos)
+        if (!isStdAtomicType(E->getArg(0)->getType()))
             return true;
 
         auto op = E->getOperator();
