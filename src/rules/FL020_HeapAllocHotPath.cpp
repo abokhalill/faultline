@@ -183,6 +183,8 @@ public:
             double confidence = 0.75 * sevFactor;
             if (confidence < 0.20)
                 confidence = 0.20;
+            if (confidence > 1.0)
+                confidence = 1.0;
 
             std::vector<std::string> escalations;
 
