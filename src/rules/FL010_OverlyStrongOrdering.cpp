@@ -95,21 +95,43 @@ public:
             return true;
 
         // Determine if seq_cst is used (explicit or implicit default).
-        bool isSeqCst = true; // Default assumption: no order arg = seq_cst.
+        bool isSeqCst = true; // Default: no order arg = seq_cst.
 
-        // For load/store/exchange/fetch_*, the memory_order is typically
-        // the last argument. If it's explicitly relaxed/acquire/release/acq_rel,
-        // we don't flag.
+        // std::memory_order enum values (C++11 [atomics.order]):
+        //   relaxed=0, consume=1, acquire=2, release=3, acq_rel=4, seq_cst=5
         for (unsigned i = 0; i < E->getNumArgs(); ++i) {
             const auto *arg = E->getArg(i)->IgnoreImplicit();
-            if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(arg)) {
-                std::string argName = DRE->getDecl()->getNameAsString();
-                if (argName.find("relaxed") != std::string::npos ||
-                    argName.find("acquire") != std::string::npos ||
-                    argName.find("release") != std::string::npos ||
-                    argName.find("acq_rel") != std::string::npos ||
-                    argName.find("consume") != std::string::npos) {
+            clang::QualType argType = arg->getType().getCanonicalType();
+
+            // Only inspect arguments that are memory_order typed (enum/int).
+            std::string argTypeName = argType.getAsString();
+            bool isOrderArg =
+                argTypeName.find("memory_order") != std::string::npos ||
+                argType->isEnumeralType() || argType->isIntegerType();
+            if (!isOrderArg)
+                continue;
+
+            // Prefer constant evaluation: handles constexpr, enums, literals.
+            clang::Expr::EvalResult evalResult;
+            if (arg->EvaluateAsInt(evalResult, ctx_)) {
+                int64_t val = evalResult.Val.getInt().getExtValue();
+                if (val != 5) { // != seq_cst
                     isSeqCst = false;
+                    break;
+                }
+                continue;
+            }
+
+            // Fallback: match qualified name of referenced enumerator.
+            if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(arg)) {
+                std::string qn = DRE->getDecl()->getQualifiedNameAsString();
+                if (qn.find("memory_order_relaxed") != std::string::npos ||
+                    qn.find("memory_order_consume") != std::string::npos ||
+                    qn.find("memory_order_acquire") != std::string::npos ||
+                    qn.find("memory_order_release") != std::string::npos ||
+                    qn.find("memory_order_acq_rel") != std::string::npos) {
+                    isSeqCst = false;
+                    break;
                 }
             }
         }
