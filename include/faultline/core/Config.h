@@ -40,6 +40,10 @@ struct Config {
     // TLB
     size_t pageSize             = 4096;
 
+    // Profile-guided hotness (perf/LBR)
+    std::string perfProfilePath;          // Path to perf profile data
+    double hotnessThresholdPct  = 1.0;    // Functions with >= N% of samples are hot
+
     static Config loadFromFile(const std::string &path);
     static Config defaults();
 };

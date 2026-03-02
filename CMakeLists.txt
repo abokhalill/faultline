@@ -31,6 +31,7 @@ set(FAULTLINE_SOURCES
     src/core/Config.cpp
     src/core/DiagnosticDedup.cpp
     src/core/PerfProfileParser.cpp
+    src/core/PrecisionBudget.cpp
     src/output/CLIOutput.cpp
     src/output/JSONOutput.cpp
     src/output/SARIFOutput.cpp

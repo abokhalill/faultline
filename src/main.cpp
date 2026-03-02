@@ -9,6 +9,7 @@
 #include "faultline/ir/DiagnosticRefiner.h"
 #include "faultline/core/DiagnosticDedup.h"
 #include "faultline/core/PerfProfileParser.h"
+#include "faultline/core/PrecisionBudget.h"
 #include "faultline/output/OutputFormatter.h"
 
 #include <clang/Tooling/CommonOptionsParser.h>
@@ -427,6 +428,11 @@ int main(int argc, const char **argv) {
     // Struct-level rules emit identical diagnostics when the same header
     // is included by multiple TUs. Merge duplicates, keep highest confidence.
     faultline::deduplicateDiagnostics(diagnostics);
+
+    // --- Precision budget governance ---
+    // Per-rule confidence floors, severity caps, and emission limits.
+    faultline::PrecisionBudget precisionBudget;
+    precisionBudget.apply(diagnostics);
 
     // --- Calibration-based false-positive suppression ---
     std::unique_ptr<faultline::CalibrationFeedbackStore> calStore;
