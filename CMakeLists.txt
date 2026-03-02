@@ -41,6 +41,7 @@ set(FAULTLINE_SOURCES
     src/analysis/EscapeAnalysis.cpp
     src/analysis/CacheLineMap.cpp
     src/analysis/AllocatorTopology.cpp
+    src/analysis/NUMATopology.cpp
     src/rules/FL001_CacheLineSpanning.cpp
     src/rules/FL002_FalseSharing.cpp
     src/rules/FL020_HeapAllocHotPath.cpp

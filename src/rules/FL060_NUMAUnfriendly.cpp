@@ -2,6 +2,7 @@
 #include "faultline/core/RuleRegistry.h"
 #include "faultline/core/HotPathOracle.h"
 #include "faultline/analysis/EscapeAnalysis.h"
+#include "faultline/analysis/NUMATopology.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -64,6 +65,10 @@ public:
         if (mutableCount == 0 && !hasAtomics)
             return;
 
+        // Infer NUMA placement via first-touch policy analysis.
+        NUMAPlacement placement = NUMATopology::classifyStruct(RD, Ctx);
+        double hazardFactor = numaHazardFactor(placement);
+
         Severity sev = Severity::High;
         std::vector<std::string> escalations;
 
@@ -89,14 +94,40 @@ public:
                 "write surface amplifies remote store buffer pressure");
         }
 
+        // Placement-based modulation.
+        if (placement == NUMAPlacement::Explicit ||
+            placement == NUMAPlacement::LocalInit) {
+            // NUMA-aware allocation or thread-local: low risk.
+            if (sev > Severity::Medium)
+                sev = Severity::Medium;
+            escalations.push_back(
+                "numa-topology: placement=" +
+                std::string(numaPlacementName(placement)) +
+                ", reduced remote access risk");
+        } else if (placement == NUMAPlacement::Interleaved) {
+            escalations.push_back(
+                "numa-topology: interleaved placement, "
+                "balanced but still ~50% remote access");
+        } else if (placement == NUMAPlacement::MainThread) {
+            escalations.push_back(
+                "numa-topology: first-touch on main thread (socket 0), "
+                "remote for all worker threads on other sockets");
+        } else if (placement == NUMAPlacement::AnyThread) {
+            escalations.push_back(
+                "numa-topology: allocated by arbitrary thread, "
+                "unpredictable NUMA placement");
+        }
+
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
+
+        double baseConfidence = hasAtomics ? 0.55 : 0.35;
 
         Diagnostic diag;
         diag.ruleID    = "FL060";
         diag.title     = "NUMA-Unfriendly Shared Structure";
         diag.severity  = sev;
-        diag.confidence = hasAtomics ? 0.55 : 0.35;
+        diag.confidence = baseConfidence * hazardFactor;
         diag.evidenceTier = EvidenceTier::Speculative;
 
         if (loc.isValid()) {
@@ -121,7 +152,8 @@ public:
            << "; cache_lines=" << cacheLines
            << "; mutable_fields=" << mutableCount
            << "; atomics=" << (hasAtomics ? "yes" : "no")
-           << "; thread_escape=yes";
+           << "; thread_escape=yes"
+           << "; numa_placement=" << numaPlacementName(placement);
         diag.structuralEvidence = ev.str();
 
         diag.mitigation =
