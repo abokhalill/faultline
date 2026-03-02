@@ -87,7 +87,16 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
 
     std::vector<Diagnostic> synthesized;
 
-    for (const auto &[siteKey, indices] : siteGroups) {
+    // Deterministic iteration: sort site keys to avoid unordered_map
+    // iteration order nondeterminism.
+    std::vector<std::string> sortedKeys;
+    sortedKeys.reserve(siteGroups.size());
+    for (const auto &[key, _] : siteGroups)
+        sortedKeys.push_back(key);
+    std::sort(sortedKeys.begin(), sortedKeys.end());
+
+    for (const auto &siteKey : sortedKeys) {
+        const auto &indices = siteGroups.at(siteKey);
         if (indices.size() < 2)
             continue;
 
