@@ -16,7 +16,8 @@ public:
     using ProfileMap = std::unordered_map<std::string, IRFunctionProfile>;
 
     // Analyze a pre-built LLVM module.
-    void analyzeModule(const llvm::Module &M);
+    // Non-const: DominatorTree/LoopInfo require mutable Function.
+    void analyzeModule(llvm::Module &M);
 
     const ProfileMap &profiles() const { return profiles_; }
 
@@ -24,10 +25,9 @@ public:
     const IRFunctionProfile *lookup(const std::string &mangledName) const;
 
 private:
-    void analyzeFunction(const llvm::Function &F);
+    void analyzeFunction(llvm::Function &F);
     bool isHeapAllocFunction(llvm::StringRef name) const;
     bool isHeapFreeFunction(llvm::StringRef name) const;
-    bool isInLoop(const llvm::BasicBlock *BB, const llvm::Function &F) const;
 
     ProfileMap profiles_;
 };

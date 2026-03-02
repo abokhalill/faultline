@@ -13,8 +13,8 @@
 
 namespace faultline {
 
-void IRAnalyzer::analyzeModule(const llvm::Module &M) {
-    for (const auto &F : M) {
+void IRAnalyzer::analyzeModule(llvm::Module &M) {
+    for (auto &F : M) {
         if (F.isDeclaration())
             continue;
         analyzeFunction(F);
@@ -43,33 +43,6 @@ bool IRAnalyzer::isHeapFreeFunction(llvm::StringRef name) const {
            name.starts_with("_ZdlPv") || name.starts_with("_ZdaPv");
 }
 
-bool IRAnalyzer::isInLoop(const llvm::BasicBlock *BB,
-                           const llvm::Function &F) const {
-    // Lightweight loop detection: check if BB has a predecessor that
-    // is dominated by BB (back edge). This avoids requiring a full
-    // LoopInfo pass which needs a non-const Function.
-    // For a conservative heuristic, we check if any successor of BB
-    // has already been seen as a predecessor — indicating a cycle.
-    // Simplified: check if BB's terminator branches back to a block
-    // that dominates it or is BB itself.
-    const auto *TI = BB->getTerminator();
-    if (!TI)
-        return false;
-
-    for (unsigned i = 0; i < TI->getNumSuccessors(); ++i) {
-        const auto *succ = TI->getSuccessor(i);
-        // Self-loop.
-        if (succ == BB)
-            return true;
-        // Check if successor is a predecessor of BB (back edge heuristic).
-        for (const auto *pred : llvm::predecessors(BB)) {
-            if (pred == succ)
-                return true;
-        }
-    }
-    return false;
-}
-
 static void extractDebugLoc(const llvm::Instruction &I,
                             std::string &file, unsigned &line) {
     const auto &DL = I.getDebugLoc();
@@ -81,19 +54,22 @@ static void extractDebugLoc(const llvm::Instruction &I,
     }
 }
 
-void IRAnalyzer::analyzeFunction(const llvm::Function &F) {
+void IRAnalyzer::analyzeFunction(llvm::Function &F) {
     IRFunctionProfile profile;
     profile.mangledName = F.getName().str();
     profile.demangledName = llvm::demangle(profile.mangledName);
     profile.basicBlockCount = F.size();
 
-    // Collect back-edge blocks for loop detection.
+    // Build DominatorTree + LoopInfo for precise loop detection.
+    llvm::DominatorTree DT(F);
+    llvm::LoopInfo LI(DT);
+
     llvm::SmallPtrSet<const llvm::BasicBlock *, 16> loopBlocks;
     for (const auto &BB : F) {
-        if (isInLoop(&BB, F))
+        if (LI.getLoopFor(&BB))
             loopBlocks.insert(&BB);
     }
-    profile.loopCount = loopBlocks.size();
+    profile.loopCount = LI.getTopLevelLoopsVector().size();
 
     for (const auto &BB : F) {
         bool bbInLoop = loopBlocks.count(&BB) > 0;
