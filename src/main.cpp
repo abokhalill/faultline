@@ -10,6 +10,7 @@
 #include "faultline/core/DiagnosticDedup.h"
 #include "faultline/core/DiagnosticInteraction.h"
 #include "faultline/core/PerfProfileParser.h"
+#include "faultline/hypothesis/PMUTraceFeedback.h"
 #include "faultline/core/PrecisionBudget.h"
 #include "faultline/output/OutputFormatter.h"
 
@@ -132,6 +133,20 @@ static llvm::cl::opt<std::string> LinkedAllocator(
     llvm::cl::desc("Linked allocator library (tcmalloc|jemalloc|mimalloc). "
                     "Affects FL020 severity: thread-local cache allocators "
                     "reduce contention risk classification."),
+    llvm::cl::cat(FaultlineCat));
+
+static llvm::cl::opt<std::string> PMUTracePath(
+    "pmu-trace",
+    llvm::cl::desc("Path to production PMU trace data (JSON lines format). "
+                    "Each line: {\"function\", \"file\", \"line\", \"counters\": "
+                    "[{\"name\", \"value\", \"duration_ns\"}], ...}. "
+                    "Used for closed-loop learning to update hazard priors."),
+    llvm::cl::cat(FaultlineCat));
+
+static llvm::cl::opt<std::string> PMUPriorsPath(
+    "pmu-priors",
+    llvm::cl::desc("Path to load/save PMU-learned hazard priors. "
+                    "Priors persist across runs for incremental learning."),
     llvm::cl::cat(FaultlineCat));
 
 static faultline::Severity parseSeverity(const std::string &s) {
@@ -539,6 +554,28 @@ int main(int argc, const char **argv) {
             llvm::errs() << "faultline: suppressed " << suppressed
                          << " diagnostic(s) via calibration feedback\n";
         }
+    }
+
+    // --- Closed-loop PMU trace feedback ---
+    // Ingest production PMU traces to update hazard priors and adjust
+    // diagnostic confidence based on observed true/false positive rates.
+    if (!PMUTracePath.empty() && calStore) {
+        faultline::PMUTraceFeedbackLoop feedbackLoop(*calStore);
+
+        // Load persisted priors from previous runs.
+        if (!PMUPriorsPath.empty())
+            feedbackLoop.loadPriors(PMUPriorsPath);
+
+        // Apply learned priors to adjust diagnostic confidence.
+        for (auto &d : diagnostics) {
+            auto hc = faultline::HypothesisConstructor
+                ::mapRuleToHazardClass(d.ruleID);
+            d.confidence = feedbackLoop.adjustConfidence(d.confidence, hc);
+        }
+
+        // Save updated priors for next run.
+        if (!PMUPriorsPath.empty())
+            feedbackLoop.savePriors(PMUPriorsPath);
     }
 
     // Filter suppressed, minimum severity, and evidence tier.

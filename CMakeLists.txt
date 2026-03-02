@@ -65,6 +65,7 @@ set(FAULTLINE_SOURCES
     src/hypothesis/MeasurementPlan.cpp
     src/hypothesis/ExperimentSynthesizer.cpp
     src/hypothesis/CalibrationFeedback.cpp
+    src/hypothesis/PMUTraceFeedback.cpp
     src/hypothesis/InteractionModel.cpp
 )
 
