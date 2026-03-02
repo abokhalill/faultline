@@ -559,12 +559,92 @@ int main(int argc, const char **argv) {
     // --- Closed-loop PMU trace feedback ---
     // Ingest production PMU traces to update hazard priors and adjust
     // diagnostic confidence based on observed true/false positive rates.
-    if (!PMUTracePath.empty() && calStore) {
+    if (calStore && (!PMUTracePath.empty() || !PMUPriorsPath.empty())) {
         faultline::PMUTraceFeedbackLoop feedbackLoop(*calStore);
 
         // Load persisted priors from previous runs.
         if (!PMUPriorsPath.empty())
             feedbackLoop.loadPriors(PMUPriorsPath);
+
+        // Parse and ingest PMU trace file (JSON-lines: one record per line).
+        // Format: function<TAB>file<TAB>line<TAB>counter_name<TAB>value<TAB>duration_ns
+        // Multiple counter lines per function are accumulated.
+        if (!PMUTracePath.empty()) {
+            auto traceBuf = llvm::MemoryBuffer::getFile(PMUTracePath.getValue());
+            if (traceBuf) {
+                llvm::StringRef data = (*traceBuf)->getBuffer();
+                llvm::SmallVector<llvm::StringRef, 0> lines;
+                data.split(lines, '\n', /*MaxSplit=*/-1, /*KeepEmpty=*/false);
+
+                faultline::PMUTraceRecord currentRecord;
+                for (const auto &line : lines) {
+                    if (line.starts_with("#"))
+                        continue;
+
+                    llvm::SmallVector<llvm::StringRef, 6> fields;
+                    line.split(fields, '\t');
+                    if (fields.size() < 5)
+                        continue;
+
+                    std::string func = fields[0].str();
+                    std::string file = fields[1].str();
+                    unsigned srcLine = 0;
+                    fields[2].getAsInteger(10, srcLine);
+
+                    // If new function/location, ingest previous record.
+                    if (!currentRecord.functionName.empty() &&
+                        (currentRecord.functionName != func ||
+                         currentRecord.sourceLine != srcLine)) {
+                        // Correlate to diagnostics.
+                        for (const auto &d : diagnostics) {
+                            if (d.functionName == currentRecord.functionName ||
+                                (d.location.file == currentRecord.sourceFile &&
+                                 d.location.line == currentRecord.sourceLine)) {
+                                auto hc = faultline::HypothesisConstructor
+                                    ::mapRuleToHazardClass(d.ruleID);
+                                auto features = faultline::HypothesisConstructor
+                                    ::extractFeatures(d);
+                                feedbackLoop.ingestTrace(
+                                    currentRecord, hc, features);
+                                break;
+                            }
+                        }
+                        currentRecord = {};
+                    }
+
+                    currentRecord.functionName = func;
+                    currentRecord.sourceFile = file;
+                    currentRecord.sourceLine = srcLine;
+
+                    faultline::PMUSample sample;
+                    sample.counterName = fields[3].str();
+                    fields[4].getAsInteger(10, sample.value);
+                    if (fields.size() > 5)
+                        fields[5].getAsInteger(10, sample.duration_ns);
+                    currentRecord.samples.push_back(std::move(sample));
+                }
+
+                // Flush last record.
+                if (!currentRecord.functionName.empty()) {
+                    for (const auto &d : diagnostics) {
+                        if (d.functionName == currentRecord.functionName ||
+                            (d.location.file == currentRecord.sourceFile &&
+                             d.location.line == currentRecord.sourceLine)) {
+                            auto hc = faultline::HypothesisConstructor
+                                ::mapRuleToHazardClass(d.ruleID);
+                            auto features = faultline::HypothesisConstructor
+                                ::extractFeatures(d);
+                            feedbackLoop.ingestTrace(
+                                currentRecord, hc, features);
+                            break;
+                        }
+                    }
+                }
+            } else {
+                llvm::errs() << "faultline: warning: cannot read PMU trace '"
+                             << PMUTracePath.getValue() << "'\n";
+            }
+        }
 
         // Apply learned priors to adjust diagnostic confidence.
         for (auto &d : diagnostics) {

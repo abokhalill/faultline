@@ -121,8 +121,16 @@ bool PMUTraceFeedbackLoop::savePriors(const std::string &path) const {
     if (!out.is_open())
         return false;
 
+    // Sort keys for deterministic serialization.
+    std::vector<std::string> keys;
+    keys.reserve(priors_.size());
+    for (const auto &[name, _] : priors_)
+        keys.push_back(name);
+    std::sort(keys.begin(), keys.end());
+
     out << "# faultline PMU trace priors v1\n";
-    for (const auto &[name, prior] : priors_) {
+    for (const auto &name : keys) {
+        const auto &prior = priors_.at(name);
         out << name
             << " " << prior.priorConfidence
             << " " << prior.falsePositiveRate
