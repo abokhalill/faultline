@@ -211,7 +211,8 @@ public:
                << FD->getQualifiedNameAsString()
                << "'. Type erasure forces indirect call through function pointer "
                << "(BTB lookup, pipeline flush on mispredict). "
-               << "Prevents compiler inlining of the callable.";
+               << "Prevents compiler inlining of the callable. "
+               << "[Assumes: callable target varies at runtime, preventing devirtualization]";
             diag.hardwareReasoning = hw.str();
 
             diag.structuralEvidence = {
@@ -254,7 +255,8 @@ public:
             hw << "Hot function '" << FD->getQualifiedNameAsString()
                << "' accepts std::function parameter. Any caller invocation "
                << "routes through type-erased indirect call (BTB lookup, "
-               << "pipeline flush on mispredict). Prevents inlining.";
+               << "pipeline flush on mispredict). Prevents inlining. "
+               << "[Assumes: callable target varies at runtime, preventing devirtualization]";
             diag.hardwareReasoning = hw.str();
 
             diag.structuralEvidence = {

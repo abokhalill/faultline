@@ -143,7 +143,8 @@ public:
            << "On multi-socket systems, at least one socket accesses this "
            << "structure via remote NUMA interconnect. Each remote cache line "
            << "fetch adds ~100-300ns. Atomic operations on remote lines "
-           << "require interconnect round-trip.";
+           << "require interconnect round-trip. "
+           << "[Assumes: deployment target is multi-socket NUMA; single-socket systems are unaffected]";
         diag.hardwareReasoning = hw.str();
 
         diag.structuralEvidence = {

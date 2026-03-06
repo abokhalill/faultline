@@ -239,6 +239,7 @@ public:
                    << "trigger mmap/brk syscalls, fault new pages into the TLB, "
                    << "and fragment the heap reducing spatial locality.";
             }
+            hw << " [Assumes: allocation frequency is high at runtime on this path]";
             diag.hardwareReasoning = hw.str();
 
             diag.structuralEvidence = {

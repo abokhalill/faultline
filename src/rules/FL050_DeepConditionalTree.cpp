@@ -146,13 +146,15 @@ public:
                    << FD->getQualifiedNameAsString()
                    << "'. Non-constexpr switch generates indirect jump table. "
                    << "BTB must predict target from " << site.switchCases
-                   << " possibilities. I-cache footprint scales with case count.";
+                   << " possibilities. I-cache footprint scales with case count. "
+                   << "[Assumes: case distribution is non-uniform or unpredictable at runtime]";
             } else {
                 hw << "Conditional nesting depth " << site.depth
                    << " in hot function '" << FD->getQualifiedNameAsString()
                    << "'. Each nested branch is a prediction point. "
                    << "Deep trees create correlated misprediction chains "
-                   << "that defeat pattern-based predictors.";
+                   << "that defeat pattern-based predictors. "
+                   << "[Assumes: branch outcomes are not consistently predictable]";
             }
             diag.hardwareReasoning = hw.str();
 

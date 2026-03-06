@@ -153,7 +153,8 @@ public:
                << "' in hot function '" << FD->getQualifiedNameAsString()
                << "'. Requires vtable pointer dereference (potential L1D miss "
                << "if vtable is cold) followed by indirect branch. "
-               << "BTB misprediction flushes the entire pipeline.";
+               << "BTB misprediction flushes the entire pipeline. "
+               << "[Assumes: call site is polymorphic with multiple receiver types at runtime]";
             diag.hardwareReasoning = hw.str();
 
             diag.structuralEvidence = {

@@ -161,7 +161,8 @@ public:
            << "' exhibits centralized dispatcher pattern: " << reason
            << ". Single-point fan-out serializes all processing, "
            << "pressures I-cache with large dispatch body, and "
-           << "creates BTB contention from multiple indirect targets.";
+           << "creates BTB contention from multiple indirect targets. "
+           << "[Assumes: dispatcher handles high fan-in from multiple callers at runtime]";
         diag.hardwareReasoning = hw.str();
 
         diag.structuralEvidence = {

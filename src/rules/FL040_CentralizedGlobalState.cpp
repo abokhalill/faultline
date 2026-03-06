@@ -86,7 +86,8 @@ public:
            << "Accessible from any thread without confinement. "
            << "On multi-socket systems, remote NUMA access adds ~100-300ns. "
            << "Under multi-core write contention, cache line bouncing "
-           << "degrades linearly with core count.";
+           << "degrades linearly with core count. "
+           << "[Assumes: variable is accessed concurrently from multiple threads]";
         diag.hardwareReasoning = hw.str();
 
         diag.structuralEvidence = {

@@ -119,7 +119,8 @@ public:
            << map.totalAtomicFields() << " atomic field(s) across "
            << atomicLines << " line(s) with thread-escape evidence. "
            << "Under multi-core contention, per-line RFO ownership transfer "
-           << "and coherence invalidation interact across the full footprint.";
+           << "and coherence invalidation interact across the full footprint. "
+           << "[Assumes: struct is accessed concurrently from multiple cores under contention]";
         diag.hardwareReasoning = hw.str();
 
         diag.structuralEvidence = {

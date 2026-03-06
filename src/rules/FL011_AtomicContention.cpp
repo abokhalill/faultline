@@ -237,7 +237,8 @@ public:
            << "' contains " << writeCount << " atomic write(s). "
            << "Under multi-core contention, each write triggers RFO "
            << "cache line transfer. Multiple writes compound store buffer "
-           << "drain latency and coherence traffic.";
+           << "drain latency and coherence traffic. "
+           << "[Assumes: multiple cores concurrently execute this function]";
         diag.hardwareReasoning = hw.str();
 
         std::string opsStr;

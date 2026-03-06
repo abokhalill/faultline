@@ -206,7 +206,8 @@ public:
                << FD->getQualifiedNameAsString()
                << "'. Under contention, blocking mutex triggers futex "
                << "syscall and context switch (~1-10us). Even uncontended, "
-               << "LOCK CMPXCHG on mutex state drains store buffer.";
+               << "LOCK CMPXCHG on mutex state drains store buffer. "
+               << "[Assumes: lock is contended under production load]";
             diag.hardwareReasoning = hw.str();
 
             diag.structuralEvidence = {
