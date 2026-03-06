@@ -69,6 +69,7 @@ set(LSHAZ_SOURCES
     src/hypothesis/InteractionModel.cpp
     src/pipeline/ScanPipeline.cpp
     src/pipeline/CompileDBResolver.cpp
+    src/cli/ScanCommand.cpp
 )
 
 add_executable(lshaz ${LSHAZ_SOURCES})

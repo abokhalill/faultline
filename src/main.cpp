@@ -1,3 +1,5 @@
+#include "cli/ScanCommand.h"
+
 #include "lshaz/core/Config.h"
 #include "lshaz/core/Severity.h"
 #include "lshaz/core/Version.h"
@@ -9,6 +11,7 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <cstring>
 #include <memory>
 #include <string>
 
@@ -135,6 +138,11 @@ static lshaz::EvidenceTier parseEvidenceTier(const std::string &s) {
 }
 
 int main(int argc, const char **argv) {
+    // Subcommand dispatch: `lshaz scan ...` routes to the scan handler
+    // before LLVM's CommandLine parser consumes argv.
+    if (argc >= 2 && std::strcmp(argv[1], "scan") == 0)
+        return lshaz::runScanCommand(argc - 2, argv + 2);
+
     llvm::cl::SetVersionPrinter([](llvm::raw_ostream &OS) {
         OS << lshaz::kToolName << " version " << lshaz::kToolVersion
            << " (output schema " << lshaz::kOutputSchemaVersion << ")\n";
