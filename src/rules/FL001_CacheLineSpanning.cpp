@@ -104,13 +104,13 @@ public:
                << "independent RFO ownership transfer.";
         diag.hardwareReasoning = hw.str();
 
-        std::ostringstream ev;
-        ev << "sizeof=" << sizeBytes << "B"
-           << "; lines_spanned=" << lines
-           << "; straddling_fields=" << straddlers.size()
-           << "; atomic_fields=" << map.totalAtomicFields()
-           << "; mutable_fields=" << map.totalMutableFields();
-        diag.structuralEvidence = ev.str();
+        diag.structuralEvidence = {
+            {"sizeof", std::to_string(sizeBytes) + "B"},
+            {"lines_spanned", std::to_string(lines)},
+            {"straddling_fields", std::to_string(straddlers.size())},
+            {"atomic_fields", std::to_string(map.totalAtomicFields())},
+            {"mutable_fields", std::to_string(map.totalMutableFields())},
+        };
 
         diag.mitigation =
             "Split hot/cold fields into separate structs. "

@@ -138,7 +138,7 @@ std::string SARIFOutputFormatter::format(
         os << "        \"properties\": {\n";
         os << "          \"confidence\": " << safeDouble(d.confidence) << ",\n";
         os << "          \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
-        os << "          \"structuralEvidence\": \"" << sarifEscape(d.structuralEvidence) << "\",\n";
+        os << "          \"structuralEvidence\": \"" << sarifEscape(d.serializeEvidence()) << "\",\n";
         os << "          \"mitigation\": \"" << sarifEscape(d.mitigation) << "\"";
 
         if (!d.escalations.empty()) {
@@ -268,7 +268,7 @@ std::string SARIFOutputFormatter::format(
         os << "        \"properties\": {\n";
         os << "          \"confidence\": " << safeDouble(d.confidence) << ",\n";
         os << "          \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
-        os << "          \"structuralEvidence\": \"" << sarifEscape(d.structuralEvidence) << "\",\n";
+        os << "          \"structuralEvidence\": \"" << sarifEscape(d.serializeEvidence()) << "\",\n";
         os << "          \"mitigation\": \"" << sarifEscape(d.mitigation) << "\"";
 
         if (!d.escalations.empty()) {

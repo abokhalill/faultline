@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace lshaz {
@@ -53,11 +54,14 @@ struct Diagnostic {
     SourceLocation location;
     std::string    functionName;         // Qualified name for IR correlation
     std::string    hardwareReasoning;
-    std::string    structuralEvidence;
+    std::unordered_map<std::string, std::string> structuralEvidence;
     std::string    mitigation;
 
     // Escalation trace: why severity was raised from base.
     std::vector<std::string> escalations;
+
+    // Serialize structuralEvidence to "key=value; ..." for output/logging.
+    std::string serializeEvidence() const;
 };
 
 } // namespace lshaz

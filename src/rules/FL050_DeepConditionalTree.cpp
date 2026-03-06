@@ -156,14 +156,14 @@ public:
             }
             diag.hardwareReasoning = hw.str();
 
-            std::ostringstream ev;
-            ev << "function=" << FD->getQualifiedNameAsString()
-               << "; type=" << (site.isSwitchStmt ? "switch" : "nested_if")
-               << "; depth=" << site.depth
-               << "; max_depth=" << visitor.maxDepth();
+            diag.structuralEvidence = {
+                {"function", FD->getQualifiedNameAsString()},
+                {"type", site.isSwitchStmt ? "switch" : "nested_if"},
+                {"depth", std::to_string(site.depth)},
+                {"max_depth", std::to_string(visitor.maxDepth())},
+            };
             if (site.isSwitchStmt)
-                ev << "; cases=" << site.switchCases;
-            diag.structuralEvidence = ev.str();
+                diag.structuralEvidence["cases"] = std::to_string(site.switchCases);
 
             diag.mitigation =
                 "Use table-driven dispatch. "

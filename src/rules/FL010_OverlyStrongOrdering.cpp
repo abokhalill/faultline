@@ -321,15 +321,15 @@ public:
             }
             diag.hardwareReasoning = hw.str();
 
-            std::ostringstream ev;
-            ev << "op=" << site.atomicOp
-               << "; op_class=" << (isStore ? "store" : "rmw")
-               << "; var=" << site.varName
-               << "; ordering=seq_cst"
-               << "; function=" << FD->getQualifiedNameAsString()
-               << "; in_loop=" << (site.inLoop ? "yes" : "no")
-               << "; total_seq_cst_in_func=" << atomicCount;
-            diag.structuralEvidence = ev.str();
+            diag.structuralEvidence = {
+                {"op", site.atomicOp},
+                {"op_class", isStore ? "store" : "rmw"},
+                {"var", site.varName},
+                {"ordering", "seq_cst"},
+                {"function", FD->getQualifiedNameAsString()},
+                {"in_loop", site.inLoop ? "yes" : "no"},
+                {"total_seq_cst_in_func", std::to_string(atomicCount)},
+            };
 
             if (isStore) {
                 diag.mitigation =

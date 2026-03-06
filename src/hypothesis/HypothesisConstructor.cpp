@@ -27,27 +27,27 @@ HazardClass HypothesisConstructor::mapRuleToHazardClass(std::string_view ruleID)
 }
 
 EvidenceTier HypothesisConstructor::inferEvidenceTier(const Diagnostic &finding) {
-    auto ev = finding.structuralEvidence;
+    const auto &ev = finding.structuralEvidence;
+    auto has = [&](const char *k) { return ev.count(k) > 0; };
+    auto eq  = [&](const char *k, const char *v) {
+        auto it = ev.find(k);
+        return it != ev.end() && it->second == v;
+    };
 
     // Structural facts that are provable from AST alone.
-    if (ev.find("sizeof=") != std::string::npos ||
-        ev.find("cache_lines=") != std::string::npos ||
-        ev.find("estimated_frame=") != std::string::npos) {
-        // Size-based properties are provable.
-        if (ev.find("thread_escape=true") != std::string::npos ||
-            ev.find("atomics=yes") != std::string::npos) {
+    if (has("sizeof") || has("cache_lines") || has("estimated_frame")) {
+        if (eq("thread_escape", "true") || eq("atomics", "yes"))
             return EvidenceTier::Likely;
-        }
         return EvidenceTier::Proven;
     }
 
-    if (ev.find("ordering=seq_cst") != std::string::npos)
+    if (eq("ordering", "seq_cst"))
         return EvidenceTier::Proven;
 
-    if (ev.find("atomic_writes=") != std::string::npos)
+    if (has("atomic_writes"))
         return EvidenceTier::Likely;
 
-    if (ev.find("virtual_call=") != std::string::npos)
+    if (has("virtual_call"))
         return EvidenceTier::Likely;
 
     return EvidenceTier::Speculative;
@@ -60,15 +60,11 @@ std::vector<double> HypothesisConstructor::extractFeatures(const Diagnostic &fin
     features.push_back(finding.confidence);
     features.push_back(static_cast<double>(finding.escalations.size()));
 
-    // Parse numeric values from structural evidence where available.
+    // Extract numeric values from typed evidence map.
     auto extract = [&](const std::string &key) -> double {
-        auto pos = finding.structuralEvidence.find(key + "=");
-        if (pos == std::string::npos) return 0.0;
-        pos += key.size() + 1;
-        auto end = finding.structuralEvidence.find_first_of(";, ", pos);
-        std::string val = finding.structuralEvidence.substr(
-            pos, end == std::string::npos ? std::string::npos : end - pos);
-        // Strip trailing 'B' for byte values.
+        auto it = finding.structuralEvidence.find(key);
+        if (it == finding.structuralEvidence.end()) return 0.0;
+        std::string val = it->second;
         if (!val.empty() && val.back() == 'B') val.pop_back();
         try { return std::stod(val); } catch (...) { return 0.0; }
     };

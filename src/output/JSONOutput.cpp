@@ -64,7 +64,16 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
         os << "      },\n";
         os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
         os << "      \"hardwareReasoning\": \"" << escape(d.hardwareReasoning) << "\",\n";
-        os << "      \"structuralEvidence\": \"" << escape(d.structuralEvidence) << "\",\n";
+        os << "      \"structuralEvidence\": {";
+        {
+            bool first = true;
+            for (const auto &[k, v] : d.structuralEvidence) {
+                if (!first) os << ", ";
+                os << "\"" << escape(k) << "\": \"" << escape(v) << "\"";
+                first = false;
+            }
+        }
+        os << "},\n";
         os << "      \"mitigation\": \"" << escape(d.mitigation) << "\",\n";
 
         os << "      \"escalations\": [";
@@ -124,7 +133,16 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
         os << "      },\n";
         os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
         os << "      \"hardwareReasoning\": \"" << escape(d.hardwareReasoning) << "\",\n";
-        os << "      \"structuralEvidence\": \"" << escape(d.structuralEvidence) << "\",\n";
+        os << "      \"structuralEvidence\": {";
+        {
+            bool first = true;
+            for (const auto &[k, v] : d.structuralEvidence) {
+                if (!first) os << ", ";
+                os << "\"" << escape(k) << "\": \"" << escape(v) << "\"";
+                first = false;
+            }
+        }
+        os << "},\n";
         os << "      \"mitigation\": \"" << escape(d.mitigation) << "\",\n";
 
         os << "      \"escalations\": [";

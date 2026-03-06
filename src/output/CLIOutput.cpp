@@ -15,7 +15,7 @@ std::string CLIOutputFormatter::format(const std::vector<Diagnostic> &diagnostic
            << d.ruleID << " — " << d.title << "\n";
 
         os << "  Hardware: " << d.hardwareReasoning << "\n";
-        os << "  Evidence: " << d.structuralEvidence << "\n";
+        os << "  Evidence: " << d.serializeEvidence() << "\n";
 
         if (!d.mitigation.empty())
             os << "  Mitigation: " << d.mitigation << "\n";

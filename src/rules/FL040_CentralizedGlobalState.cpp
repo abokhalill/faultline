@@ -89,14 +89,14 @@ public:
            << "degrades linearly with core count.";
         diag.hardwareReasoning = hw.str();
 
-        std::ostringstream ev;
-        ev << "var=" << VD->getNameAsString()
-           << "; type=" << QT.getAsString()
-           << "; storage=global"
-           << "; const=no"
-           << "; thread_local=no"
-           << "; atomics=" << (hasAtomics ? "yes" : "no");
-        diag.structuralEvidence = ev.str();
+        diag.structuralEvidence = {
+            {"var", VD->getNameAsString()},
+            {"type", QT.getAsString()},
+            {"storage", "global"},
+            {"const", "no"},
+            {"thread_local", "no"},
+            {"atomics", hasAtomics ? "yes" : "no"},
+        };
 
         diag.mitigation =
             "Partition state per-thread or per-core. "

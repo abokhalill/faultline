@@ -146,15 +146,15 @@ public:
            << "require interconnect round-trip.";
         diag.hardwareReasoning = hw.str();
 
-        std::ostringstream ev;
-        ev << "struct=" << RD->getNameAsString()
-           << "; sizeof=" << sizeBytes << "B"
-           << "; cache_lines=" << cacheLines
-           << "; mutable_fields=" << mutableCount
-           << "; atomics=" << (hasAtomics ? "yes" : "no")
-           << "; thread_escape=yes"
-           << "; numa_placement=" << numaPlacementName(placement);
-        diag.structuralEvidence = ev.str();
+        diag.structuralEvidence = {
+            {"struct", RD->getNameAsString()},
+            {"sizeof", std::to_string(sizeBytes) + "B"},
+            {"cache_lines", std::to_string(cacheLines)},
+            {"mutable_fields", std::to_string(mutableCount)},
+            {"atomics", hasAtomics ? "yes" : "no"},
+            {"thread_escape", "yes"},
+            {"numa_placement", std::string(numaPlacementName(placement))},
+        };
 
         diag.mitigation =
             "Use numa_alloc_onnode() or mbind() for NUMA-aware placement. "

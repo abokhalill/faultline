@@ -107,14 +107,14 @@ public:
            << "fields trigger MESI invalidation per write.";
         diag.hardwareReasoning = hw.str();
 
-        std::ostringstream ev;
-        ev << "sizeof=" << map.recordSizeBytes() << "B"
-           << "; lines=" << map.linesSpanned()
-           << "; mutable_pairs_same_line=" << mutablePairs.size()
-           << "; atomic_pairs_same_line=" << map.atomicPairsOnSameLine().size()
-           << "; thread_escape=true"
-           << "; atomics=" << (map.totalAtomicFields() > 0 ? "yes" : "no");
-        diag.structuralEvidence = ev.str();
+        diag.structuralEvidence = {
+            {"sizeof", std::to_string(map.recordSizeBytes()) + "B"},
+            {"lines", std::to_string(map.linesSpanned())},
+            {"mutable_pairs_same_line", std::to_string(mutablePairs.size())},
+            {"atomic_pairs_same_line", std::to_string(map.atomicPairsOnSameLine().size())},
+            {"thread_escape", "true"},
+            {"atomics", map.totalAtomicFields() > 0 ? "yes" : "no"},
+        };
 
         diag.mitigation =
             "Pad independently-written fields to separate 64B cache lines "

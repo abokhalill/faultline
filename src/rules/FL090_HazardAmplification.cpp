@@ -122,17 +122,17 @@ public:
            << "and coherence invalidation interact across the full footprint.";
         diag.hardwareReasoning = hw.str();
 
-        std::ostringstream ev;
-        ev << "struct=" << RD->getNameAsString()
-           << "; sizeof=" << map.recordSizeBytes() << "B"
-           << "; cache_lines=" << map.linesSpanned()
-           << "; atomic_fields=" << map.totalAtomicFields()
-           << "; atomic_lines=" << atomicLines
-           << "; mutable_fields=" << map.totalMutableFields()
-           << "; straddling=" << straddlers.size()
-           << "; thread_escape=yes"
-           << "; signal_count=" << signalCount;
-        diag.structuralEvidence = ev.str();
+        diag.structuralEvidence = {
+            {"struct", RD->getNameAsString()},
+            {"sizeof", std::to_string(map.recordSizeBytes()) + "B"},
+            {"cache_lines", std::to_string(map.linesSpanned())},
+            {"atomic_fields", std::to_string(map.totalAtomicFields())},
+            {"atomic_lines", std::to_string(atomicLines)},
+            {"mutable_fields", std::to_string(map.totalMutableFields())},
+            {"straddling", std::to_string(straddlers.size())},
+            {"thread_escape", "yes"},
+            {"signal_count", std::to_string(signalCount)},
+        };
 
         diag.mitigation =
             "Decompose into separate cache-line-aligned sub-structures. "

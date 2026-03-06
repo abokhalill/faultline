@@ -34,16 +34,11 @@ std::string DiagnosticRefiner::extractFunctionName(const Diagnostic &diag) const
     if (!diag.functionName.empty())
         return diag.functionName;
 
-    // Legacy fallback: parse from structuralEvidence.
-    for (const char *key : {"function=", "caller="}) {
-        auto pos = diag.structuralEvidence.find(key);
-        if (pos == std::string::npos)
-            continue;
-        pos += std::strlen(key);
-        auto end = diag.structuralEvidence.find(';', pos);
-        if (end == std::string::npos)
-            end = diag.structuralEvidence.size();
-        return diag.structuralEvidence.substr(pos, end - pos);
+    // Fallback: look up from structuralEvidence map.
+    for (const char *key : {"function", "caller"}) {
+        auto it = diag.structuralEvidence.find(key);
+        if (it != diag.structuralEvidence.end() && !it->second.empty())
+            return it->second;
     }
     return {};
 }
@@ -267,12 +262,12 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
     diag.escalations.push_back(ss.str());
 
     // Adjust confidence based on IR/AST agreement.
-    // Parse AST estimate from evidence.
     uint64_t astEstimate = 0;
-    auto estPos = diag.structuralEvidence.find("estimated_frame=");
-    if (estPos != std::string::npos) {
-        estPos += 16;
-        astEstimate = std::stoull(diag.structuralEvidence.substr(estPos));
+    auto estIt = diag.structuralEvidence.find("estimated_frame");
+    if (estIt != diag.structuralEvidence.end()) {
+        std::string val = estIt->second;
+        if (!val.empty() && val.back() == 'B') val.pop_back();
+        try { astEstimate = std::stoull(val); } catch (...) {}
     }
 
     if (irStackSize > 0) {
@@ -281,14 +276,9 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
             evidence::kFloor, evidence::kCeilingFuncLevel);
         diag.evidenceTier = EvidenceTier::Proven;
 
-        // Update evidence with IR-precise size.
-        std::ostringstream newEv;
-        newEv << diag.structuralEvidence
-              << "; ir_frame=" << irStackSize << "B"
-              << "; ir_allocas=" << profile->allocas.size();
-        diag.structuralEvidence = newEv.str();
+        diag.structuralEvidence["ir_frame"] = std::to_string(irStackSize) + "B";
+        diag.structuralEvidence["ir_allocas"] = std::to_string(profile->allocas.size());
 
-        // If IR shows significantly different size, note it.
         if (astEstimate > 0 && irStackSize > astEstimate * 2) {
             diag.escalations.push_back(
                 "IR stack frame (" + std::to_string(irStackSize) +

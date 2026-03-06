@@ -118,15 +118,15 @@ public:
            << "enqueue/dequeue triggers cross-core RFO for the shared line.";
         diag.hardwareReasoning = hw.str();
 
-        std::ostringstream ev;
-        ev << "struct=" << structName
-           << "; sizeof=" << map.recordSizeBytes() << "B"
-           << "; lines=" << map.linesSpanned()
-           << "; atomic_fields=" << map.totalAtomicFields()
-           << "; atomic_pairs_same_line=" << atomicPairs.size()
-           << "; queue_heuristic=" << (looksLikeQueue ? "yes" : "no")
-           << "; head_tail_names=" << (hasHeadTail ? "yes" : "no");
-        diag.structuralEvidence = ev.str();
+        diag.structuralEvidence = {
+            {"struct", structName},
+            {"sizeof", std::to_string(map.recordSizeBytes()) + "B"},
+            {"lines", std::to_string(map.linesSpanned())},
+            {"atomic_fields", std::to_string(map.totalAtomicFields())},
+            {"atomic_pairs_same_line", std::to_string(atomicPairs.size())},
+            {"queue_heuristic", looksLikeQueue ? "yes" : "no"},
+            {"head_tail_names", hasHeadTail ? "yes" : "no"},
+        };
 
         diag.mitigation =
             "Pad head and tail indices to separate 64B cache lines using "

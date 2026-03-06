@@ -240,17 +240,17 @@ public:
            << "drain latency and coherence traffic.";
         diag.hardwareReasoning = hw.str();
 
-        std::ostringstream ev;
-        ev << "function=" << FD->getQualifiedNameAsString()
-           << "; atomic_writes=" << writeCount
-           << "; loop_writes=" << (hasLoopWrite ? "yes" : "no")
-           << "; ops=[";
+        std::string opsStr;
         for (size_t i = 0; i < visitor.sites().size(); ++i) {
-            ev << visitor.sites()[i].op << "(" << visitor.sites()[i].varName << ")";
-            if (i + 1 < visitor.sites().size()) ev << ", ";
+            opsStr += visitor.sites()[i].op + "(" + visitor.sites()[i].varName + ")";
+            if (i + 1 < visitor.sites().size()) opsStr += ", ";
         }
-        ev << "]";
-        diag.structuralEvidence = ev.str();
+        diag.structuralEvidence = {
+            {"function", FD->getQualifiedNameAsString()},
+            {"atomic_writes", std::to_string(writeCount)},
+            {"loop_writes", hasLoopWrite ? "yes" : "no"},
+            {"ops", opsStr},
+        };
 
         diag.mitigation =
             "Shard atomic state per-core to eliminate cross-core RFO. "

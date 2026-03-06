@@ -209,12 +209,12 @@ public:
                << "LOCK CMPXCHG on mutex state drains store buffer.";
             diag.hardwareReasoning = hw.str();
 
-            std::ostringstream ev;
-            ev << "lock_type=" << site.kind
-               << "; function=" << FD->getQualifiedNameAsString()
-               << "; nested=" << (site.isNested ? "yes" : "no")
-               << "; in_loop=" << (site.inLoop ? "yes" : "no");
-            diag.structuralEvidence = ev.str();
+            diag.structuralEvidence = {
+                {"lock_type", site.kind},
+                {"function", FD->getQualifiedNameAsString()},
+                {"nested", site.isNested ? "yes" : "no"},
+                {"in_loop", site.inLoop ? "yes" : "no"},
+            };
 
             diag.mitigation =
                 "Use lock-free data structures. "

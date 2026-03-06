@@ -156,12 +156,12 @@ public:
                << "BTB misprediction flushes the entire pipeline.";
             diag.hardwareReasoning = hw.str();
 
-            std::ostringstream ev;
-            ev << "virtual_call=" << site.className << "::" << site.methodName
-               << "; caller=" << FD->getQualifiedNameAsString()
-               << "; in_loop=" << (site.inLoop ? "yes" : "no")
-               << "; hot_path=true";
-            diag.structuralEvidence = ev.str();
+            diag.structuralEvidence = {
+                {"virtual_call", site.className + "::" + site.methodName},
+                {"caller", FD->getQualifiedNameAsString()},
+                {"in_loop", site.inLoop ? "yes" : "no"},
+                {"hot_path", "true"},
+            };
 
             diag.mitigation =
                 "Use CRTP for static polymorphism. "

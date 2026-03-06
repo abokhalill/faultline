@@ -214,12 +214,12 @@ public:
                << "Prevents compiler inlining of the callable.";
             diag.hardwareReasoning = hw.str();
 
-            std::ostringstream ev;
-            ev << "std_function_" << kindStr
-               << "; caller=" << FD->getQualifiedNameAsString()
-               << "; in_loop=" << (site.inLoop ? "yes" : "no")
-               << "; hot_path=true";
-            diag.structuralEvidence = ev.str();
+            diag.structuralEvidence = {
+                {"std_function_kind", kindStr},
+                {"caller", FD->getQualifiedNameAsString()},
+                {"in_loop", site.inLoop ? "yes" : "no"},
+                {"hot_path", "true"},
+            };
 
             diag.mitigation =
                 "Use template parameter for callable type. "
@@ -257,11 +257,11 @@ public:
                << "pipeline flush on mispredict). Prevents inlining.";
             diag.hardwareReasoning = hw.str();
 
-            std::ostringstream ev;
-            ev << "std_function_parameter"
-               << "; caller=" << FD->getQualifiedNameAsString()
-               << "; hot_path=true";
-            diag.structuralEvidence = ev.str();
+            diag.structuralEvidence = {
+                {"std_function_kind", "parameter"},
+                {"caller", FD->getQualifiedNameAsString()},
+                {"hot_path", "true"},
+            };
 
             diag.mitigation =
                 "Use template parameter for callable type. "

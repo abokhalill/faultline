@@ -241,13 +241,13 @@ public:
             }
             diag.hardwareReasoning = hw.str();
 
-            std::ostringstream ev;
-            ev << "alloc_type=" << site.kind
-               << "; allocator_class=" << allocatorClassName(ac)
-               << "; function=" << FD->getQualifiedNameAsString()
-               << "; in_loop=" << (site.inLoop ? "yes" : "no")
-               << "; hot_path=true";
-            diag.structuralEvidence = ev.str();
+            diag.structuralEvidence = {
+                {"alloc_type", site.kind},
+                {"allocator_class", std::string(allocatorClassName(ac))},
+                {"function", FD->getQualifiedNameAsString()},
+                {"in_loop", site.inLoop ? "yes" : "no"},
+                {"hot_path", "true"},
+            };
 
             diag.mitigation =
                 "Preallocate buffers. Use arena/slab/pool allocators. "

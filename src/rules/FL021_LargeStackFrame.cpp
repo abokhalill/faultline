@@ -124,17 +124,19 @@ public:
            << "on deep call chains.";
         diag.hardwareReasoning = hw.str();
 
-        std::ostringstream ev;
-        ev << "estimated_frame=" << totalBytes << "B; threshold=" << threshold << "B";
+        diag.structuralEvidence = {
+            {"estimated_frame", std::to_string(totalBytes) + "B"},
+            {"threshold", std::to_string(threshold) + "B"},
+        };
         if (!largeLocals.empty()) {
-            ev << "; large_locals=[";
+            std::string locals;
             for (size_t i = 0; i < largeLocals.size(); ++i) {
-                ev << largeLocals[i].first << "(" << largeLocals[i].second << "B)";
-                if (i + 1 < largeLocals.size()) ev << ", ";
+                locals += largeLocals[i].first + "(" +
+                          std::to_string(largeLocals[i].second) + "B)";
+                if (i + 1 < largeLocals.size()) locals += ", ";
             }
-            ev << "]";
+            diag.structuralEvidence["large_locals"] = locals;
         }
-        diag.structuralEvidence = ev.str();
 
         diag.mitigation =
             "Move large arrays to heap with arena allocator. "

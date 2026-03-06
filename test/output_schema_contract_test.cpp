@@ -45,7 +45,7 @@ lshaz::Diagnostic makeDiag(const char *rule, const char *func,
     d.location.column = 5;
     d.functionName = func;
     d.hardwareReasoning = "Test hardware reasoning";
-    d.structuralEvidence = "Test structural evidence";
+    d.structuralEvidence = {{"test_key", "test_value"}};
     d.mitigation = "Test mitigation";
     d.escalations.push_back("test-escalation");
     return d;
@@ -212,7 +212,7 @@ void testJSONControlCharEscape() {
     d.location.line = 1;
     d.location.column = 1;
     d.hardwareReasoning = "reason\twith\ttabs";
-    d.structuralEvidence = "ev";
+    d.structuralEvidence = {{"ev", "1"}};
     d.mitigation = "mit";
 
     lshaz::JSONOutputFormatter fmt;

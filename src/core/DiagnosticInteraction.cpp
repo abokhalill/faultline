@@ -54,23 +54,14 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
         siteGroups[diagnosticSiteKey(diagnostics[i])].push_back(i);
     }
 
-    // Also group struct-level diagnostics by struct name extracted
-    // from structural evidence (struct=Name pattern).
+    // Also group struct-level diagnostics by struct name from evidence map.
     std::unordered_map<std::string, std::vector<size_t>> structGroups;
     for (size_t i = 0; i < diagnostics.size(); ++i) {
         if (diagnostics[i].ruleID == "FL090" || diagnostics[i].ruleID == "FL091")
             continue;
-        const auto &ev = diagnostics[i].structuralEvidence;
-        auto pos = ev.find("struct=");
-        if (pos != std::string::npos) {
-            auto start = pos + 7;
-            auto end = ev.find(';', start);
-            std::string structName = (end != std::string::npos)
-                ? ev.substr(start, end - start)
-                : ev.substr(start);
-            if (!structName.empty())
-                structGroups["struct:" + structName].push_back(i);
-        }
+        auto it = diagnostics[i].structuralEvidence.find("struct");
+        if (it != diagnostics[i].structuralEvidence.end() && !it->second.empty())
+            structGroups["struct:" + it->second].push_back(i);
     }
 
     // Merge struct groups into site groups (struct-level correlation
@@ -170,14 +161,14 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 compound.hardwareReasoning = hw.str();
 
                 // Structural evidence: merge from both diagnostics.
-                std::ostringstream ev;
-                ev << "interaction=" << tmpl->id
-                   << "; components=" << dA.ruleID << "+" << dB.ruleID
-                   << "; site=" << siteKey
-                   << "; threshold=" << tmpl->interactionThreshold
-                   << "; evidence_A={" << dA.structuralEvidence << "}"
-                   << "; evidence_B={" << dB.structuralEvidence << "}";
-                compound.structuralEvidence = ev.str();
+                compound.structuralEvidence = {
+                    {"interaction", tmpl->id},
+                    {"components", dA.ruleID + "+" + dB.ruleID},
+                    {"site", siteKey},
+                    {"threshold", std::to_string(tmpl->interactionThreshold)},
+                    {"evidence_A", dA.serializeEvidence()},
+                    {"evidence_B", dB.serializeEvidence()},
+                };
 
                 compound.mitigation =
                     "Address both contributing hazards. Interaction effects "
@@ -251,12 +242,11 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                    << dB.ruleID << ", " << dC.ruleID << ".";
                 compound.hardwareReasoning = hw.str();
 
-                std::ostringstream ev;
-                ev << "interaction=" << tmpl.id
-                   << "; components=" << dA.ruleID << "+"
-                   << dB.ruleID << "+" << dC.ruleID
-                   << "; site=" << siteKey;
-                compound.structuralEvidence = ev.str();
+                compound.structuralEvidence = {
+                    {"interaction", tmpl.id},
+                    {"components", dA.ruleID + "+" + dB.ruleID + "+" + dC.ruleID},
+                    {"site", siteKey},
+                };
 
                 compound.mitigation =
                     "Critical compound hazard. Address all three contributing "

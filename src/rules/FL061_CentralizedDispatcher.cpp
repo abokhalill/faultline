@@ -164,13 +164,13 @@ public:
            << "creates BTB contention from multiple indirect targets.";
         diag.hardwareReasoning = hw.str();
 
-        std::ostringstream ev;
-        ev << "function=" << FD->getQualifiedNameAsString()
-           << "; callees=" << info.callees
-           << "; virtual_calls=" << info.virtualCalls
-           << "; switch_cases=" << info.switchCases
-           << "; has_loop=" << (info.hasLoop ? "yes" : "no");
-        diag.structuralEvidence = ev.str();
+        diag.structuralEvidence = {
+            {"function", FD->getQualifiedNameAsString()},
+            {"callees", std::to_string(info.callees)},
+            {"virtual_calls", std::to_string(info.virtualCalls)},
+            {"switch_cases", std::to_string(info.switchCases)},
+            {"has_loop", info.hasLoop ? "yes" : "no"},
+        };
 
         diag.mitigation =
             "Partition dispatch by message type to separate handlers. "
