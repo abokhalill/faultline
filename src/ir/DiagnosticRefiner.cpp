@@ -1,12 +1,12 @@
-#include "faultline/ir/DiagnosticRefiner.h"
-#include "faultline/ir/ConfidenceModel.h"
+#include "lshaz/ir/DiagnosticRefiner.h"
+#include "lshaz/ir/ConfidenceModel.h"
 
 #include <llvm/IR/Instructions.h>
 
 #include <algorithm>
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 DiagnosticRefiner::DiagnosticRefiner(const IRAnalyzer::ProfileMap &profiles)
     : profiles_(profiles) {}
@@ -418,4 +418,4 @@ void DiagnosticRefiner::refineFL090(Diagnostic &diag) const {
     }
 }
 
-} // namespace faultline
+} // namespace lshaz

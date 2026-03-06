@@ -1,6 +1,6 @@
-#include "faultline/hypothesis/HypothesisTemplate.h"
+#include "lshaz/hypothesis/HypothesisTemplate.h"
 
-namespace faultline {
+namespace lshaz {
 
 namespace {
 
@@ -364,4 +364,4 @@ HypothesisTemplateRegistry::HypothesisTemplateRegistry() {
     };
 }
 
-} // namespace faultline
+} // namespace lshaz

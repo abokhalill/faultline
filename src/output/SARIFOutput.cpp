@@ -1,10 +1,10 @@
-#include "faultline/output/OutputFormatter.h"
-#include "faultline/core/Version.h"
+#include "lshaz/output/OutputFormatter.h"
+#include "lshaz/core/Version.h"
 
 #include <cmath>
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 namespace {
 
@@ -64,9 +64,9 @@ std::string SARIFOutputFormatter::format(
     // Tool descriptor.
     os << "    \"tool\": {\n";
     os << "      \"driver\": {\n";
-    os << "        \"name\": \"faultline\",\n";
+    os << "        \"name\": \"lshaz\",\n";
     os << "        \"version\": \"" << kToolVersion << "\",\n";
-    os << "        \"informationUri\": \"https://github.com/abokhalill/faultline\",\n";
+    os << "        \"informationUri\": \"https://github.com/abokhalill/lshaz\",\n";
     os << "        \"properties\": { \"outputSchemaVersion\": \"" << kOutputSchemaVersion << "\" },\n";
     os << "        \"rules\": [";
 
@@ -94,7 +94,7 @@ std::string SARIFOutputFormatter::format(
         os << "\n          {\n";
         os << "            \"id\": \"" << sarifEscape(rid) << "\",\n";
         os << "            \"shortDescription\": { \"text\": \"" << sarifEscape(title) << "\" },\n";
-        os << "            \"helpUri\": \"https://github.com/abokhalill/faultline#" << sarifEscape(rid) << "\",\n";
+        os << "            \"helpUri\": \"https://github.com/abokhalill/lshaz#" << sarifEscape(rid) << "\",\n";
         os << "            \"properties\": { \"tags\": [\"latency\", \"microarchitecture\"] }\n";
         os << "          }";
         if (i + 1 < seenRules.size()) os << ",";
@@ -175,9 +175,9 @@ std::string SARIFOutputFormatter::format(
 
     os << "    \"tool\": {\n";
     os << "      \"driver\": {\n";
-    os << "        \"name\": \"faultline\",\n";
+    os << "        \"name\": \"lshaz\",\n";
     os << "        \"version\": \"" << sarifEscape(meta.toolVersion) << "\",\n";
-    os << "        \"informationUri\": \"https://github.com/abokhalill/faultline\",\n";
+    os << "        \"informationUri\": \"https://github.com/abokhalill/lshaz\",\n";
     os << "        \"properties\": { \"outputSchemaVersion\": \"" << kOutputSchemaVersion << "\" },\n";
     os << "        \"rules\": [";
 
@@ -199,7 +199,7 @@ std::string SARIFOutputFormatter::format(
         os << "\n          {\n";
         os << "            \"id\": \"" << sarifEscape(rid) << "\",\n";
         os << "            \"shortDescription\": { \"text\": \"" << sarifEscape(title) << "\" },\n";
-        os << "            \"helpUri\": \"https://github.com/abokhalill/faultline#" << sarifEscape(rid) << "\",\n";
+        os << "            \"helpUri\": \"https://github.com/abokhalill/lshaz#" << sarifEscape(rid) << "\",\n";
         os << "            \"properties\": { \"tags\": [\"latency\", \"microarchitecture\"] }\n";
         os << "          }";
         if (i + 1 < seenRules.size()) os << ",";
@@ -292,4 +292,4 @@ std::string SARIFOutputFormatter::format(
     return os.str();
 }
 
-} // namespace faultline
+} // namespace lshaz

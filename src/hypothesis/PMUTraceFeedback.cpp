@@ -1,11 +1,11 @@
-#include "faultline/hypothesis/PMUTraceFeedback.h"
+#include "lshaz/hypothesis/PMUTraceFeedback.h"
 
 #include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 PMUTraceFeedbackLoop::PMUTraceFeedbackLoop(CalibrationFeedbackStore &calStore)
     : calStore_(calStore) {
@@ -132,7 +132,7 @@ bool PMUTraceFeedbackLoop::savePriors(const std::string &path) const {
         keys.push_back(name);
     std::sort(keys.begin(), keys.end());
 
-    out << "# faultline PMU trace priors v1\n";
+    out << "# lshaz PMU trace priors v1\n";
     for (const auto &name : keys) {
         const auto &prior = priors_.at(name);
         out << name
@@ -299,4 +299,4 @@ void PMUTraceFeedbackLoop::updatePrior(HazardClass hc, LabelValue verdict) {
     }
 }
 
-} // namespace faultline
+} // namespace lshaz

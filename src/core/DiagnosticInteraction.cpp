@@ -1,11 +1,11 @@
-#include "faultline/core/DiagnosticInteraction.h"
-#include "faultline/hypothesis/InteractionModel.h"
+#include "lshaz/core/DiagnosticInteraction.h"
+#include "lshaz/hypothesis/InteractionModel.h"
 
 #include <algorithm>
 #include <sstream>
 #include <unordered_map>
 
-namespace faultline {
+namespace lshaz {
 
 std::optional<HazardClass> ruleToHazardClass(const std::string &ruleID) {
     if (ruleID == "FL001") return HazardClass::CacheGeometry;
@@ -281,4 +281,4 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
         diagnostics.push_back(std::move(d));
 }
 
-} // namespace faultline
+} // namespace lshaz

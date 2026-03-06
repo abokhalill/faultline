@@ -1,7 +1,7 @@
-#include "faultline/core/Rule.h"
-#include "faultline/core/RuleRegistry.h"
-#include "faultline/core/HotPathOracle.h"
-#include "faultline/analysis/AllocatorTopology.h"
+#include "lshaz/core/Rule.h"
+#include "lshaz/core/RuleRegistry.h"
+#include "lshaz/core/HotPathOracle.h"
+#include "lshaz/analysis/AllocatorTopology.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -16,7 +16,7 @@
 #include <sstream>
 #include <string>
 
-namespace faultline {
+namespace lshaz {
 
 namespace {
 
@@ -260,6 +260,6 @@ public:
     }
 };
 
-FAULTLINE_REGISTER_RULE(FL020_HeapAllocHotPath)
+LSHAZ_REGISTER_RULE(FL020_HeapAllocHotPath)
 
-} // namespace faultline
+} // namespace lshaz

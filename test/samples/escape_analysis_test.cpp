@@ -107,17 +107,17 @@ struct FullEscape {
 };
 
 // Hot path functions using the types above.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void process_atomic(HasAtomic& h) {
     h.counter.store(42);
 }
 
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void process_no_atomic(NoAtomic& h) {
     h.counter = 42;
 }
 
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void process_full_escape(FullEscape& f) {
     f.seq.store(f.seq.load() + 1);
 }

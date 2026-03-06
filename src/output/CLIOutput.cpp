@@ -1,8 +1,8 @@
-#include "faultline/output/OutputFormatter.h"
+#include "lshaz/output/OutputFormatter.h"
 
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 std::string CLIOutputFormatter::format(const std::vector<Diagnostic> &diagnostics) {
     std::ostringstream os;
@@ -30,11 +30,11 @@ std::string CLIOutputFormatter::format(const std::vector<Diagnostic> &diagnostic
     }
 
     if (diagnostics.empty())
-        os << "faultline: no hazards detected.\n";
+        os << "lshaz: no hazards detected.\n";
     else
-        os << "faultline: " << diagnostics.size() << " hazard(s) detected.\n";
+        os << "lshaz: " << diagnostics.size() << " hazard(s) detected.\n";
 
     return os.str();
 }
 
-} // namespace faultline
+} // namespace lshaz

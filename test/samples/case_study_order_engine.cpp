@@ -1,5 +1,5 @@
 // Case Study: Simplified HFT Order Matching Engine
-// Exercises all 15 Faultline rules in a realistic trading system context.
+// Exercises all 15 Lshaz rules in a realistic trading system context.
 //
 // This is a structural test — not a functional implementation.
 // It models common latency landmine patterns found in production HFT systems.
@@ -78,7 +78,7 @@ public:
 // FL012: lock in hot path.
 // FL050: deep conditional tree.
 // FL061: centralized dispatcher.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void processOrder(IOrderHandler* handler,
                   std::function<void(uint64_t)> fillCallback,
                   std::mutex& bookMutex,
@@ -124,7 +124,7 @@ void processOrder(IOrderHandler* handler,
 }
 
 // FL011: atomic contention hotspot — multiple atomic writes in loop.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void updateMarketData(MarketDataLevel& level,
                       std::atomic<uint64_t>& globalSeq,
                       const uint64_t* prices, int count) {
@@ -136,7 +136,7 @@ void updateMarketData(MarketDataLevel& level,
 }
 
 // FL021: large stack frame in hot path.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void buildSnapshot(const MarketDataLevel& level) {
     char snapshotBuffer[16384];  // 16KB on stack
     std::memset(snapshotBuffer, 0, sizeof(snapshotBuffer));
@@ -145,7 +145,7 @@ void buildSnapshot(const MarketDataLevel& level) {
 }
 
 // Batch processing loop — exercises loop escalations.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void processBatch(IOrderHandler* handler,
                   std::function<void(uint64_t)> callback,
                   const uint64_t* orderIds, int count) {

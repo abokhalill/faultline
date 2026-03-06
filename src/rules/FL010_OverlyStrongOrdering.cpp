@@ -1,6 +1,6 @@
-#include "faultline/core/Rule.h"
-#include "faultline/core/RuleRegistry.h"
-#include "faultline/core/HotPathOracle.h"
+#include "lshaz/core/Rule.h"
+#include "lshaz/core/RuleRegistry.h"
+#include "lshaz/core/HotPathOracle.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -13,7 +13,7 @@
 
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 namespace {
 
@@ -351,6 +351,6 @@ public:
     }
 };
 
-FAULTLINE_REGISTER_RULE(FL010_OverlyStrongOrdering)
+LSHAZ_REGISTER_RULE(FL010_OverlyStrongOrdering)
 
-} // namespace faultline
+} // namespace lshaz

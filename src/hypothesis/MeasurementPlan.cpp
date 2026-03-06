@@ -1,8 +1,8 @@
-#include "faultline/hypothesis/MeasurementPlan.h"
+#include "lshaz/hypothesis/MeasurementPlan.h"
 
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 bool MeasurementPlanGenerator::needsC2C(HazardClass hc) {
     return hc == HazardClass::FalseSharing ||
@@ -130,7 +130,7 @@ CollectionScript MeasurementPlanGenerator::generateSetupEnv() {
     std::ostringstream os;
     os << "#!/bin/bash\n"
        << "set -euo pipefail\n\n"
-       << "echo \"[faultline] Configuring measurement environment\"\n\n"
+       << "echo \"[lshaz] Configuring measurement environment\"\n\n"
        << "# Disable turbo boost\n"
        << "echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo "
        << "2>/dev/null || \\\n"
@@ -152,7 +152,7 @@ CollectionScript MeasurementPlanGenerator::generateSetupEnv() {
        << "cat /proc/cpuinfo | grep \"model name\" | head -1 "
        << ">> results/env_state.txt\n"
        << "numactl --hardware >> results/env_state.txt 2>/dev/null || true\n"
-       << "echo \"[faultline] Environment configured\"\n";
+       << "echo \"[lshaz] Environment configured\"\n";
 
     return {"setup_env.sh", os.str()};
 }
@@ -161,7 +161,7 @@ CollectionScript MeasurementPlanGenerator::generateTeardownEnv() {
     std::ostringstream os;
     os << "#!/bin/bash\n"
        << "set -euo pipefail\n\n"
-       << "echo \"[faultline] Restoring environment\"\n\n"
+       << "echo \"[lshaz] Restoring environment\"\n\n"
        << "# Re-enable turbo boost\n"
        << "echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo "
        << "2>/dev/null || true\n\n"
@@ -176,7 +176,7 @@ CollectionScript MeasurementPlanGenerator::generateTeardownEnv() {
        << "2>/dev/null || true\n\n"
        << "# Re-enable ASLR\n"
        << "echo 2 > /proc/sys/kernel/randomize_va_space\n\n"
-       << "echo \"[faultline] Environment restored\"\n";
+       << "echo \"[lshaz] Environment restored\"\n";
 
     return {"teardown_env.sh", os.str()};
 }
@@ -213,4 +213,4 @@ MeasurementPlan MeasurementPlanGenerator::generate(
     return plan;
 }
 
-} // namespace faultline
+} // namespace lshaz

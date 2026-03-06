@@ -1,11 +1,11 @@
-#include "faultline/hypothesis/CalibrationFeedback.h"
+#include "lshaz/hypothesis/CalibrationFeedback.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
 
-namespace faultline {
+namespace lshaz {
 
 double CalibrationFeedbackStore::featureDistance(
     const std::vector<double> &a, const std::vector<double> &b) {
@@ -193,4 +193,4 @@ void CalibrationFeedbackStore::registerFalsePositive(
     falsePositiveRegistry_.push_back({features, hc, reason, 1});
 }
 
-} // namespace faultline
+} // namespace lshaz

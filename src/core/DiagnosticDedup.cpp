@@ -1,10 +1,10 @@
-#include "faultline/core/DiagnosticDedup.h"
+#include "lshaz/core/DiagnosticDedup.h"
 
 #include <algorithm>
 #include <string>
 #include <unordered_map>
 
-namespace faultline {
+namespace lshaz {
 
 namespace {
 
@@ -100,4 +100,4 @@ void deduplicateDiagnostics(std::vector<Diagnostic> &diagnostics) {
     diagnostics = std::move(deduped);
 }
 
-} // namespace faultline
+} // namespace lshaz

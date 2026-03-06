@@ -4,10 +4,10 @@
 // output with all required fields present. Run as a standalone binary.
 // Returns 0 on success, 1 on contract violation.
 
-#include "faultline/core/Diagnostic.h"
-#include "faultline/core/ExecutionMetadata.h"
-#include "faultline/core/Version.h"
-#include "faultline/output/OutputFormatter.h"
+#include "lshaz/core/Diagnostic.h"
+#include "lshaz/core/ExecutionMetadata.h"
+#include "lshaz/core/Version.h"
+#include "lshaz/output/OutputFormatter.h"
 
 #include <cassert>
 #include <cmath>
@@ -32,14 +32,14 @@ bool contains(const std::string &haystack, const std::string &needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
-faultline::Diagnostic makeDiag(const char *rule, const char *func,
+lshaz::Diagnostic makeDiag(const char *rule, const char *func,
                                 const char *file, unsigned line) {
-    faultline::Diagnostic d;
+    lshaz::Diagnostic d;
     d.ruleID = rule;
     d.title = std::string(rule) + " test diagnostic";
-    d.severity = faultline::Severity::High;
+    d.severity = lshaz::Severity::High;
     d.confidence = 0.85;
-    d.evidenceTier = faultline::EvidenceTier::Likely;
+    d.evidenceTier = lshaz::EvidenceTier::Likely;
     d.location.file = file;
     d.location.line = line;
     d.location.column = 5;
@@ -51,9 +51,9 @@ faultline::Diagnostic makeDiag(const char *rule, const char *func,
     return d;
 }
 
-faultline::ExecutionMetadata makeMeta() {
-    faultline::ExecutionMetadata meta;
-    meta.toolVersion = faultline::kToolVersion;
+lshaz::ExecutionMetadata makeMeta() {
+    lshaz::ExecutionMetadata meta;
+    meta.toolVersion = lshaz::kToolVersion;
     meta.configPath = "/tmp/test.yaml";
     meta.irOptLevel = "O0";
     meta.irEnabled = true;
@@ -65,17 +65,17 @@ faultline::ExecutionMetadata makeMeta() {
 // --- JSON contract tests ---
 
 void testJSONBasicSchema() {
-    std::vector<faultline::Diagnostic> diags = {
+    std::vector<lshaz::Diagnostic> diags = {
         makeDiag("FL001", "foo", "test.cpp", 10),
         makeDiag("FL012", "bar::baz", "test.cpp", 42),
     };
 
-    faultline::JSONOutputFormatter fmt;
+    lshaz::JSONOutputFormatter fmt;
     std::string out = fmt.format(diags);
 
     check(contains(out, "\"version\""), "JSON: missing 'version' field");
     check(contains(out, "\"schemaVersion\""), "JSON: missing 'schemaVersion' field");
-    check(contains(out, std::string("\"") + faultline::kOutputSchemaVersion + "\""),
+    check(contains(out, std::string("\"") + lshaz::kOutputSchemaVersion + "\""),
           "JSON: schemaVersion value mismatch");
     check(contains(out, "\"diagnostics\""), "JSON: missing 'diagnostics' array");
     check(contains(out, "\"ruleID\""), "JSON: missing 'ruleID' in diagnostic");
@@ -95,12 +95,12 @@ void testJSONBasicSchema() {
 }
 
 void testJSONWithMetadata() {
-    std::vector<faultline::Diagnostic> diags = {
+    std::vector<lshaz::Diagnostic> diags = {
         makeDiag("FL002", "process", "engine.h", 100),
     };
     auto meta = makeMeta();
 
-    faultline::JSONOutputFormatter fmt;
+    lshaz::JSONOutputFormatter fmt;
     std::string out = fmt.format(diags, meta);
 
     check(contains(out, "\"schemaVersion\""), "JSON+meta: missing 'schemaVersion'");
@@ -114,20 +114,20 @@ void testJSONWithMetadata() {
 }
 
 void testJSONDeterminism() {
-    std::vector<faultline::Diagnostic> diags = {
+    std::vector<lshaz::Diagnostic> diags = {
         makeDiag("FL010", "tick", "x.cpp", 5),
         makeDiag("FL020", "alloc", "x.cpp", 50),
     };
 
-    faultline::JSONOutputFormatter fmt;
+    lshaz::JSONOutputFormatter fmt;
     std::string a = fmt.format(diags);
     std::string b = fmt.format(diags);
     check(a == b, "JSON: non-deterministic output across calls");
 }
 
 void testJSONEmptyDiagnostics() {
-    std::vector<faultline::Diagnostic> empty;
-    faultline::JSONOutputFormatter fmt;
+    std::vector<lshaz::Diagnostic> empty;
+    lshaz::JSONOutputFormatter fmt;
     std::string out = fmt.format(empty);
 
     check(contains(out, "\"schemaVersion\""), "JSON empty: missing 'schemaVersion'");
@@ -137,11 +137,11 @@ void testJSONEmptyDiagnostics() {
 // --- SARIF contract tests ---
 
 void testSARIFBasicSchema() {
-    std::vector<faultline::Diagnostic> diags = {
+    std::vector<lshaz::Diagnostic> diags = {
         makeDiag("FL001", "foo", "test.cpp", 10),
     };
 
-    faultline::SARIFOutputFormatter fmt;
+    lshaz::SARIFOutputFormatter fmt;
     std::string out = fmt.format(diags);
 
     check(contains(out, "\"$schema\""), "SARIF: missing '$schema'");
@@ -150,9 +150,9 @@ void testSARIFBasicSchema() {
     check(contains(out, "\"runs\""), "SARIF: missing 'runs'");
     check(contains(out, "\"tool\""), "SARIF: missing 'tool'");
     check(contains(out, "\"driver\""), "SARIF: missing 'driver'");
-    check(contains(out, "\"name\": \"faultline\""), "SARIF: wrong tool name");
+    check(contains(out, "\"name\": \"lshaz\""), "SARIF: wrong tool name");
     check(contains(out, "\"outputSchemaVersion\""), "SARIF: missing outputSchemaVersion");
-    check(contains(out, faultline::kOutputSchemaVersion),
+    check(contains(out, lshaz::kOutputSchemaVersion),
           "SARIF: outputSchemaVersion value mismatch");
     check(contains(out, "\"rules\""), "SARIF: missing 'rules'");
     check(contains(out, "\"results\""), "SARIF: missing 'results'");
@@ -173,12 +173,12 @@ void testSARIFBasicSchema() {
 }
 
 void testSARIFWithMetadata() {
-    std::vector<faultline::Diagnostic> diags = {
+    std::vector<lshaz::Diagnostic> diags = {
         makeDiag("FL002", "process", "engine.h", 100),
     };
     auto meta = makeMeta();
 
-    faultline::SARIFOutputFormatter fmt;
+    lshaz::SARIFOutputFormatter fmt;
     std::string out = fmt.format(diags, meta);
 
     check(contains(out, "\"outputSchemaVersion\""), "SARIF+meta: missing outputSchemaVersion");
@@ -189,11 +189,11 @@ void testSARIFWithMetadata() {
 }
 
 void testSARIFDeterminism() {
-    std::vector<faultline::Diagnostic> diags = {
+    std::vector<lshaz::Diagnostic> diags = {
         makeDiag("FL010", "tick", "x.cpp", 5),
     };
 
-    faultline::SARIFOutputFormatter fmt;
+    lshaz::SARIFOutputFormatter fmt;
     std::string a = fmt.format(diags);
     std::string b = fmt.format(diags);
     check(a == b, "SARIF: non-deterministic output across calls");
@@ -202,12 +202,12 @@ void testSARIFDeterminism() {
 // --- Adversarial regression tests ---
 
 void testJSONControlCharEscape() {
-    faultline::Diagnostic d;
+    lshaz::Diagnostic d;
     d.ruleID = "FL001";
     d.title = "test\r\n\b\f\x01\x1f";
-    d.severity = faultline::Severity::High;
+    d.severity = lshaz::Severity::High;
     d.confidence = 0.5;
-    d.evidenceTier = faultline::EvidenceTier::Likely;
+    d.evidenceTier = lshaz::EvidenceTier::Likely;
     d.location.file = "test.cpp";
     d.location.line = 1;
     d.location.column = 1;
@@ -215,7 +215,7 @@ void testJSONControlCharEscape() {
     d.structuralEvidence = "ev";
     d.mitigation = "mit";
 
-    faultline::JSONOutputFormatter fmt;
+    lshaz::JSONOutputFormatter fmt;
     std::string out = fmt.format({d});
 
     // RFC 8259: no raw control chars U+0000-U+001F in strings.
@@ -252,7 +252,7 @@ void testJSONNaNInfConfidence() {
     auto d3 = makeDiag("FL010", "baz", "t.cpp", 3);
     d3.confidence = -std::numeric_limits<double>::infinity();
 
-    faultline::JSONOutputFormatter jfmt;
+    lshaz::JSONOutputFormatter jfmt;
     std::string jout = jfmt.format({d1, d2, d3});
 
     // JSON must not contain bare nan/inf numeric tokens.
@@ -264,7 +264,7 @@ void testJSONNaNInfConfidence() {
     check(!contains(jout, ": NaN"), "JSON: contains ': NaN' numeric token");
     check(!contains(jout, ": Infinity"), "JSON: contains ': Infinity' numeric token");
 
-    faultline::SARIFOutputFormatter sfmt;
+    lshaz::SARIFOutputFormatter sfmt;
     std::string sout = sfmt.format({d1, d2, d3});
 
     check(!contains(sout, ": nan"), "SARIF: contains ': nan' numeric token");
@@ -278,7 +278,7 @@ void testJSONEmptyFunctionName() {
     auto d = makeDiag("FL001", "", "test.cpp", 10);
     d.functionName = ""; // explicitly empty
 
-    faultline::JSONOutputFormatter fmt;
+    lshaz::JSONOutputFormatter fmt;
     std::string out = fmt.format({d});
 
     // functionName must always be present (even if empty string)
@@ -288,14 +288,14 @@ void testJSONEmptyFunctionName() {
 }
 
 void testJSONStress() {
-    std::vector<faultline::Diagnostic> diags;
+    std::vector<lshaz::Diagnostic> diags;
     for (int i = 0; i < 10000; ++i) {
         auto d = makeDiag("FL001", "func", "file.cpp", i);
         d.confidence = static_cast<double>(i) / 10000.0;
         diags.push_back(std::move(d));
     }
 
-    faultline::JSONOutputFormatter fmt;
+    lshaz::JSONOutputFormatter fmt;
     std::string a = fmt.format(diags);
     std::string b = fmt.format(diags);
     check(a == b, "JSON stress: non-deterministic output with 10K diagnostics");

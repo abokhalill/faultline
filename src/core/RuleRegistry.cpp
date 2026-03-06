@@ -1,8 +1,8 @@
-#include "faultline/core/RuleRegistry.h"
+#include "lshaz/core/RuleRegistry.h"
 
 #include <algorithm>
 
-namespace faultline {
+namespace lshaz {
 
 RuleRegistry &RuleRegistry::instance() {
     static RuleRegistry registry;
@@ -19,4 +19,4 @@ const Rule *RuleRegistry::findByID(std::string_view id) const {
     return (it != rules_.end()) ? it->get() : nullptr;
 }
 
-} // namespace faultline
+} // namespace lshaz

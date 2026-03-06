@@ -1,8 +1,8 @@
-#include "faultline/core/Rule.h"
-#include "faultline/core/RuleRegistry.h"
-#include "faultline/core/HotPathOracle.h"
-#include "faultline/core/Config.h"
-#include "faultline/analysis/CacheLineMap.h"
+#include "lshaz/core/Rule.h"
+#include "lshaz/core/RuleRegistry.h"
+#include "lshaz/core/HotPathOracle.h"
+#include "lshaz/core/Config.h"
+#include "lshaz/analysis/CacheLineMap.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -11,7 +11,7 @@
 
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 class FL001_CacheLineSpanning : public Rule {
 public:
@@ -122,6 +122,6 @@ public:
     }
 };
 
-FAULTLINE_REGISTER_RULE(FL001_CacheLineSpanning)
+LSHAZ_REGISTER_RULE(FL001_CacheLineSpanning)
 
-} // namespace faultline
+} // namespace lshaz

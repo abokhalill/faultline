@@ -1,4 +1,4 @@
-#include "faultline/ir/IRAnalyzer.h"
+#include "lshaz/ir/IRAnalyzer.h"
 
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/Analysis/PostDominators.h>
@@ -11,7 +11,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Demangle/Demangle.h>
 
-namespace faultline {
+namespace lshaz {
 
 void IRAnalyzer::analyzeModule(llvm::Module &M) {
     for (auto &F : M) {
@@ -249,4 +249,4 @@ void IRAnalyzer::analyzeFunction(llvm::Function &F) {
     profiles_[profile.mangledName] = std::move(profile);
 }
 
-} // namespace faultline
+} // namespace lshaz

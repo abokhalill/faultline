@@ -41,7 +41,7 @@ public:
 };
 
 // Hot path function: exercises FL020, FL030, FL031
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void processMarketData(IHandler* handler, std::function<void(int)> callback) {
     // FL030: virtual dispatch in hot path
     handler->onEvent(42);
@@ -59,7 +59,7 @@ void processMarketData(IHandler* handler, std::function<void(int)> callback) {
 }
 
 // Hot path with loop escalations
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void processLoop(IHandler* handler, std::function<void(int)> callback) {
     for (int i = 0; i < 1000; ++i) {
         // FL030 escalated: virtual dispatch inside loop
@@ -75,7 +75,7 @@ void processLoop(IHandler* handler, std::function<void(int)> callback) {
 }
 
 // --- FL021: Large Stack Frame ---
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void largeStackFunction() {
     char buffer[8192]; // 8KB on stack — exceeds 2KB threshold and page size
     buffer[0] = 'x';

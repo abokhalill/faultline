@@ -1,5 +1,5 @@
-#include "faultline/core/HotPathOracle.h"
-#include "faultline/core/Config.h"
+#include "lshaz/core/HotPathOracle.h"
+#include "lshaz/core/Config.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Attr.h>
@@ -9,7 +9,7 @@
 
 #include <fnmatch.h>
 
-namespace faultline {
+namespace lshaz {
 
 HotPathOracle::HotPathOracle(const Config &cfg) : config_(cfg) {}
 
@@ -63,7 +63,7 @@ void HotPathOracle::markHot(const clang::FunctionDecl *FD) {
 bool HotPathOracle::hasHotAnnotation(const clang::FunctionDecl *FD) const {
     for (const auto *A : FD->attrs()) {
         if (const auto *Ann = llvm::dyn_cast<clang::AnnotateAttr>(A)) {
-            if (Ann->getAnnotation() == "faultline_hot")
+            if (Ann->getAnnotation() == "lshaz_hot")
                 return true;
         }
     }
@@ -91,4 +91,4 @@ bool HotPathOracle::matchesConfigPattern(const clang::FunctionDecl *FD) const {
     return false;
 }
 
-} // namespace faultline
+} // namespace lshaz

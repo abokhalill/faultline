@@ -1,10 +1,10 @@
-#include "faultline/hypothesis/HypothesisConstructor.h"
-#include "faultline/hypothesis/HypothesisTemplate.h"
+#include "lshaz/hypothesis/HypothesisConstructor.h"
+#include "lshaz/hypothesis/HypothesisTemplate.h"
 
 #include <functional>
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 HazardClass HypothesisConstructor::mapRuleToHazardClass(std::string_view ruleID) {
     if (ruleID == "FL001") return HazardClass::CacheGeometry;
@@ -126,4 +126,4 @@ std::optional<LatencyHypothesis> HypothesisConstructor::construct(
     return hyp;
 }
 
-} // namespace faultline
+} // namespace lshaz

@@ -41,14 +41,14 @@ struct HazardousState {
 
 // --- FL010: Overly Strong Atomic Ordering ---
 // seq_cst in hot path. Should flag High, escalate in loop.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void updateSequence(std::atomic<uint64_t>& seq) {
     // Default ordering = seq_cst. Should flag.
     seq.store(seq.load() + 1);
 }
 
 // Negative: explicit relaxed ordering. Should NOT flag FL010.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void updateSequenceRelaxed(std::atomic<uint64_t>& seq) {
     seq.store(
         seq.load(std::memory_order_relaxed) + 1,
@@ -58,7 +58,7 @@ void updateSequenceRelaxed(std::atomic<uint64_t>& seq) {
 
 // --- FL011: Atomic Contention Hotspot ---
 // Multiple atomic writes in hot loop. Should flag Critical.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void heavyAtomicLoop(std::atomic<uint64_t>& a, std::atomic<uint64_t>& b) {
     for (int i = 0; i < 1000; ++i) {
         a.fetch_add(1);
@@ -68,14 +68,14 @@ void heavyAtomicLoop(std::atomic<uint64_t>& a, std::atomic<uint64_t>& b) {
 
 // --- FL012: Lock in Hot Path ---
 // Mutex lock in hot function. Should flag Critical.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void lockedUpdate(std::mutex& mtx, uint64_t& value) {
     std::lock_guard<std::mutex> guard(mtx);
     value += 1;
 }
 
 // Lock inside loop — escalation.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void lockedLoop(std::mutex& mtx, uint64_t& value) {
     for (int i = 0; i < 100; ++i) {
         std::lock_guard<std::mutex> guard(mtx);
@@ -84,7 +84,7 @@ void lockedLoop(std::mutex& mtx, uint64_t& value) {
 }
 
 // --- FL050: Deep Conditional Tree ---
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void deepBranching(int a, int b, int c, int d, int e) {
     if (a > 0) {
         if (b > 0) {
@@ -102,7 +102,7 @@ void deepBranching(int a, int b, int c, int d, int e) {
 }
 
 // Large switch — should flag.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 int dispatchMessage(int msgType) {
     switch (msgType) {
         case 0: return 10;

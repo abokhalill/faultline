@@ -1,9 +1,9 @@
-#include "faultline/core/PrecisionBudget.h"
+#include "lshaz/core/PrecisionBudget.h"
 
 #include <algorithm>
 #include <unordered_map>
 
-namespace faultline {
+namespace lshaz {
 
 PrecisionBudget::PrecisionBudget() {
     // Default policies: struct-level rules are high-confidence, allow unlimited.
@@ -97,4 +97,4 @@ void PrecisionBudget::apply(std::vector<Diagnostic> &diagnostics) const {
     }
 }
 
-} // namespace faultline
+} // namespace lshaz

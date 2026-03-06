@@ -48,7 +48,7 @@ public:
 };
 
 // High fan-out dispatcher: switch + multiple virtual calls. Should flag.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void dispatchMessage(int msgType, IMessageHandler* handler,
                      uint64_t orderId, std::function<void()> callback) {
     switch (msgType) {
@@ -64,7 +64,7 @@ void dispatchMessage(int msgType, IMessageHandler* handler,
 }
 
 // Dispatch loop — should escalate.
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void processMessageBatch(int* types, uint64_t* ids, int count,
                          IMessageHandler* handler) {
     for (int i = 0; i < count; ++i) {

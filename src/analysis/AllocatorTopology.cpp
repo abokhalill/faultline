@@ -1,6 +1,6 @@
-#include "faultline/analysis/AllocatorTopology.h"
+#include "lshaz/analysis/AllocatorTopology.h"
 
-namespace faultline {
+namespace lshaz {
 
 AllocatorTopology::AllocatorTopology() {
     // Common pool/slab allocator patterns.
@@ -97,4 +97,4 @@ void AllocatorTopology::setLinkedAllocator(const std::string &allocatorLib) {
     linkedAllocator_ = allocatorLib;
 }
 
-} // namespace faultline
+} // namespace lshaz

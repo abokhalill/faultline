@@ -1,8 +1,8 @@
-#include "faultline/analysis/StructLayoutVisitor.h"
+#include "lshaz/analysis/StructLayoutVisitor.h"
 
 #include <clang/AST/DeclCXX.h>
 
-namespace faultline {
+namespace lshaz {
 
 StructLayoutVisitor::StructLayoutVisitor(clang::ASTContext &Ctx) : ctx_(Ctx) {}
 
@@ -17,4 +17,4 @@ bool StructLayoutVisitor::VisitCXXRecordDecl(clang::CXXRecordDecl *RD) {
     return true;
 }
 
-} // namespace faultline
+} // namespace lshaz

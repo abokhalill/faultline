@@ -1,4 +1,4 @@
-#include "faultline/analysis/NUMATopology.h"
+#include "lshaz/analysis/NUMATopology.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -8,7 +8,7 @@
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Stmt.h>
 
-namespace faultline {
+namespace lshaz {
 
 namespace {
 
@@ -190,4 +190,4 @@ bool NUMATopology::hasNUMAPlacementHint(const clang::VarDecl *VD,
     return false;
 }
 
-} // namespace faultline
+} // namespace lshaz

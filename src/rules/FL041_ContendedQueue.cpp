@@ -1,7 +1,7 @@
-#include "faultline/core/Rule.h"
-#include "faultline/core/RuleRegistry.h"
-#include "faultline/core/HotPathOracle.h"
-#include "faultline/analysis/CacheLineMap.h"
+#include "lshaz/core/Rule.h"
+#include "lshaz/core/RuleRegistry.h"
+#include "lshaz/core/HotPathOracle.h"
+#include "lshaz/analysis/CacheLineMap.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -10,7 +10,7 @@
 
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 class FL041_ContendedQueue : public Rule {
 public:
@@ -138,6 +138,6 @@ public:
     }
 };
 
-FAULTLINE_REGISTER_RULE(FL041_ContendedQueue)
+LSHAZ_REGISTER_RULE(FL041_ContendedQueue)
 
-} // namespace faultline
+} // namespace lshaz

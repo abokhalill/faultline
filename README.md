@@ -1,4 +1,4 @@
-# Faultline
+# lshaz
 
 Static structural analyzer for C++ that maps source-level patterns to microarchitectural latency hazards on Linux x86-64.
 
@@ -8,7 +8,7 @@ Built on Clang/LLVM. Assumes 64-byte cache lines, x86-64 TSO memory model, and L
 
 ## What This Tool Does
 
-Faultline inspects C++ source (via Clang AST) and optionally LLVM IR to detect struct layouts, atomic patterns, allocation sites, and dispatch structures that are likely to cause cache-line contention, false sharing, branch misprediction, or allocator serialization on x86-64 hardware.
+Lshaz inspects C++ source (via Clang AST) and optionally LLVM IR to detect struct layouts, atomic patterns, allocation sites, and dispatch structures that are likely to cause cache-line contention, false sharing, branch misprediction, or allocator serialization on x86-64 hardware.
 
 It does not profile. It does not instrument. It performs compile-time structural analysis and reports findings with file, line, column, severity, confidence, and hardware-specific reasoning.
 
@@ -25,13 +25,13 @@ It is not a linter. It does not enforce style. It identifies structural patterns
 
 ### Where It Fits
 
-| Existing Tool | What It Provides | Gap | Faultline's Role |
+| Existing Tool | What It Provides | Gap | Lshaz's Role |
 |---|---|---|---|
 | `pahole` | Post-build struct layout via DWARF/BTF | No hot-path context, no atomic/ordering analysis, no function attribution | AST/IR-level reasoning with source location diagnostics |
 | `perf` / PMU tracing | Runtime ground-truth counters, bottleneck attribution | Requires a running workload; discovers problems late | Pre-runtime structural triage; generates `perf stat` experiment scripts |
 | `llvm-mca` | Instruction-level throughput/latency modeling | No cross-declaration layout, no thread-coherence modeling | Source/IR structure analysis across types and functions |
 
-Faultline operates in the compile-analysis phase. Runtime tools validate whether flagged hazards have measurable impact.
+Lshaz operates in the compile-analysis phase. Runtime tools validate whether flagged hazards have measurable impact.
 
 ---
 
@@ -70,7 +70,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 
 The build produces two binaries:
 
-- `build/faultline` — the analyzer
+- `build/lshaz` — the analyzer
 - `build/output_schema_contract_test` — schema contract test suite
 
 ---
@@ -79,31 +79,31 @@ The build produces two binaries:
 
 ```bash
 # Single file, default CLI output
-./build/faultline src/engine.cpp -- -std=c++20
+./build/lshaz src/engine.cpp -- -std=c++20
 
 # JSON output to stdout
-./build/faultline --format=json src/engine.cpp -- -std=c++20
+./build/lshaz --format=json src/engine.cpp -- -std=c++20
 
 # SARIF output to file
-./build/faultline --format=sarif --output=report.sarif src/engine.cpp -- -std=c++20
+./build/lshaz --format=sarif --output=report.sarif src/engine.cpp -- -std=c++20
 
 # Multiple translation units
-./build/faultline src/a.cpp src/b.cpp src/c.cpp -- -std=c++20 -I include/
+./build/lshaz src/a.cpp src/b.cpp src/c.cpp -- -std=c++20 -I include/
 
 # Filter by severity and evidence tier
-./build/faultline --min-severity=High --min-evidence=proven src/engine.cpp -- -std=c++20
+./build/lshaz --min-severity=High --min-evidence=proven src/engine.cpp -- -std=c++20
 
 # AST-only mode (skip IR emission, faster, lower confidence)
-./build/faultline --no-ir src/engine.cpp -- -std=c++20
+./build/lshaz --no-ir src/engine.cpp -- -std=c++20
 
 # Custom config
-./build/faultline --config=./faultline.config.yaml src/engine.cpp -- -std=c++20
+./build/lshaz --config=./lshaz.config.yaml src/engine.cpp -- -std=c++20
 
 # Specify linked allocator (affects FL020 severity classification)
-./build/faultline --allocator=jemalloc src/engine.cpp -- -std=c++20
+./build/lshaz --allocator=jemalloc src/engine.cpp -- -std=c++20
 
 # Profile-guided hot-path selection
-./build/faultline --perf-profile=perf.data --hotness-threshold=2.0 src/engine.cpp -- -std=c++20
+./build/lshaz --perf-profile=perf.data --hotness-threshold=2.0 src/engine.cpp -- -std=c++20
 ```
 
 Arguments after `--` are passed to the Clang compilation. Source files before `--` are the analysis targets.
@@ -116,7 +116,7 @@ The tool executes a fixed sequence of stages. Each stage is described below with
 
 ### Stage 1: AST Analysis
 
-Entry point: `FaultlineASTConsumer::HandleTranslationUnit`.
+Entry point: `LshazASTConsumer::HandleTranslationUnit`.
 
 For each translation unit, walks all top-level declarations and runs 15 registered rules. Each rule implements:
 
@@ -135,7 +135,7 @@ Supporting analyses available to rules:
 - **AllocatorTopology** — Classifies allocator contention characteristics based on the `--allocator` flag: glibc (arena-lock), tcmalloc/jemalloc (thread-local cache), mimalloc (pool/slab). Affects FL020 severity.
 - **NUMATopology** — Infers NUMA page placement based on first-touch policy analysis: local-init, main-thread, any-thread, interleaved, explicit-bind, or unknown.
 - **HotPathOracle** — Classifies functions as hot via four mechanisms:
-  1. `[[clang::annotate("faultline_hot")]]` attribute
+  1. `[[clang::annotate("lshaz_hot")]]` attribute
   2. fnmatch glob patterns in config (`hot_function_patterns`, `hot_file_patterns`)
   3. `perf` profile sample threshold (`--perf-profile`, `--hotness-threshold`)
   4. Transitive marking during AST walk
@@ -333,7 +333,7 @@ disabled_rules: []
 Functions can be marked hot in source:
 
 ```cpp
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void onMarketData(const Update& u);
 ```
 
@@ -424,7 +424,7 @@ Separating independent writers onto different cache lines eliminates cross-core 
 **Before:**
 
 ```cpp
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void publish(std::atomic<uint64_t>& seq, uint64_t v) {
     seq.store(v); // implicit seq_cst
 }
@@ -440,7 +440,7 @@ void publish(std::atomic<uint64_t>& seq, uint64_t v) {
 **After:**
 
 ```cpp
-[[clang::annotate("faultline_hot")]]
+[[clang::annotate("lshaz_hot")]]
 void publish(std::atomic<uint64_t>& seq, uint64_t v) {
     seq.store(v, std::memory_order_release);
 }
@@ -479,7 +479,7 @@ Validates: JSON field completeness, severity ordering, confidence bounds `[0.0, 
 ./validation/run.sh --tier1
 ```
 
-Runs faultline against internal test samples and external corpora. Asserts: no crashes, deterministic output across runs, valid source locations, diagnostic distribution sanity, evidence parseability.
+Runs lshaz against internal test samples and external corpora. Asserts: no crashes, deterministic output across runs, valid source locations, diagnostic distribution sanity, evidence parseability.
 
 ### Ground-Truth Benchmarks
 
@@ -495,7 +495,7 @@ Runs paired hazardous/fixed microbenchmarks per rule with hardware timing and op
 
 These are known limitations of the current implementation. They are documented here so that users can make informed decisions about the tool's applicability to their codebase.
 
-- **Static analysis only.** Faultline does not execute code, attach to processes, or read PMU counters. It identifies structural patterns that correlate with known hardware penalties. Runtime validation is required to confirm impact magnitude.
+- **Static analysis only.** Lshaz does not execute code, attach to processes, or read PMU counters. It identifies structural patterns that correlate with known hardware penalties. Runtime validation is required to confirm impact magnitude.
 - **Single-TU escape analysis.** `EscapeAnalysis` inspects structural members and scans publication paths within the current translation unit. It does not perform cross-TU or whole-program interprocedural dataflow analysis. Types that escape through interfaces not visible in the current TU may not be detected.
 - **IR refinement is not a lowering proof.** The IR pass confirms or refutes AST-level findings using post-optimization IR. It does not establish a bijective mapping between source sites and lowered instructions. Confidence adjustments are bounded heuristics, not proofs.
 - **IR cache invalidation.** Cache keys include source content, mtime, compile args, tool version, and `.d` dependency file contents if present. Header-only changes without a corresponding `.d` file update may not invalidate the cache. Use `--no-ir-cache` in CI pipelines.

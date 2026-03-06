@@ -1,8 +1,8 @@
-#include "faultline/core/Rule.h"
-#include "faultline/core/RuleRegistry.h"
-#include "faultline/core/HotPathOracle.h"
-#include "faultline/analysis/CacheLineMap.h"
-#include "faultline/analysis/EscapeAnalysis.h"
+#include "lshaz/core/Rule.h"
+#include "lshaz/core/RuleRegistry.h"
+#include "lshaz/core/HotPathOracle.h"
+#include "lshaz/analysis/CacheLineMap.h"
+#include "lshaz/analysis/EscapeAnalysis.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -11,7 +11,7 @@
 
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 class FL090_HazardAmplification : public Rule {
 public:
@@ -145,6 +145,6 @@ public:
     }
 };
 
-FAULTLINE_REGISTER_RULE(FL090_HazardAmplification)
+LSHAZ_REGISTER_RULE(FL090_HazardAmplification)
 
-} // namespace faultline
+} // namespace lshaz

@@ -1,1 +1,1 @@
-#include "faultline/core/Diagnostic.h"
+#include "lshaz/core/Diagnostic.h"

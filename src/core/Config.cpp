@@ -1,4 +1,4 @@
-#include "faultline/core/Config.h"
+#include "lshaz/core/Config.h"
 
 #include <llvm/Support/YAMLParser.h>
 #include <llvm/Support/YAMLTraits.h>
@@ -15,8 +15,8 @@ namespace llvm {
 namespace yaml {
 
 template <>
-struct MappingTraits<faultline::Config> {
-    static void mapping(IO &io, faultline::Config &cfg) {
+struct MappingTraits<lshaz::Config> {
+    static void mapping(IO &io, lshaz::Config &cfg) {
         io.mapOptional("cache_line_bytes",       cfg.cacheLineBytes);
         io.mapOptional("cache_line_span_warn",   cfg.cacheLineSpanWarn);
         io.mapOptional("cache_line_span_crit",   cfg.cacheLineSpanCrit);
@@ -35,7 +35,7 @@ struct MappingTraits<faultline::Config> {
 } // namespace yaml
 } // namespace llvm
 
-namespace faultline {
+namespace lshaz {
 
 Config Config::defaults() {
     return Config{};
@@ -44,7 +44,7 @@ Config Config::defaults() {
 Config Config::loadFromFile(const std::string &path) {
     auto bufOrErr = llvm::MemoryBuffer::getFile(path);
     if (!bufOrErr) {
-        llvm::errs() << "faultline: warning: cannot open config '"
+        llvm::errs() << "lshaz: warning: cannot open config '"
                      << path << "', using defaults\n";
         return defaults();
     }
@@ -54,7 +54,7 @@ Config Config::loadFromFile(const std::string &path) {
     yin >> cfg;
 
     if (yin.error()) {
-        llvm::errs() << "faultline: warning: config parse error in '"
+        llvm::errs() << "lshaz: warning: config parse error in '"
                      << path << "', using defaults\n";
         return defaults();
     }
@@ -62,4 +62,4 @@ Config Config::loadFromFile(const std::string &path) {
     return cfg;
 }
 
-} // namespace faultline
+} // namespace lshaz

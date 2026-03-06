@@ -1,10 +1,10 @@
-#include "faultline/output/OutputFormatter.h"
-#include "faultline/core/Version.h"
+#include "lshaz/output/OutputFormatter.h"
+#include "lshaz/core/Version.h"
 
 #include <cmath>
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 namespace {
 
@@ -143,4 +143,4 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
     return os.str();
 }
 
-} // namespace faultline
+} // namespace lshaz

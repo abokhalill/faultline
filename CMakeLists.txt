@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(faultline VERSION 0.1.0 LANGUAGES CXX)
+project(lshaz VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,7 +21,7 @@ add_definitions(${LLVM_DEFINITIONS})
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # --- Source files ---
-set(FAULTLINE_SOURCES
+set(LSHAZ_SOURCES
     src/main.cpp
     src/core/Diagnostic.cpp
     src/core/Rule.cpp
@@ -36,8 +36,8 @@ set(FAULTLINE_SOURCES
     src/output/CLIOutput.cpp
     src/output/JSONOutput.cpp
     src/output/SARIFOutput.cpp
-    src/analysis/FaultlineAction.cpp
-    src/analysis/FaultlineASTConsumer.cpp
+    src/analysis/LshazAction.cpp
+    src/analysis/LshazASTConsumer.cpp
     src/analysis/StructLayoutVisitor.cpp
     src/analysis/EscapeAnalysis.cpp
     src/analysis/CacheLineMap.cpp
@@ -69,10 +69,10 @@ set(FAULTLINE_SOURCES
     src/hypothesis/InteractionModel.cpp
 )
 
-add_executable(faultline ${FAULTLINE_SOURCES})
+add_executable(lshaz ${LSHAZ_SOURCES})
 
 # --- Link Clang/LLVM libraries ---
-target_link_libraries(faultline
+target_link_libraries(lshaz
     PRIVATE
     clangTooling
     clangFrontend

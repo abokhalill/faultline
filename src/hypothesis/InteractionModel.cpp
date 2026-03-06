@@ -1,11 +1,11 @@
-#include "faultline/hypothesis/InteractionModel.h"
-#include "faultline/hypothesis/HypothesisTemplate.h"
+#include "lshaz/hypothesis/InteractionModel.h"
+#include "lshaz/hypothesis/HypothesisTemplate.h"
 
 #include <algorithm>
 #include <sstream>
 #include <unordered_map>
 
-namespace faultline {
+namespace lshaz {
 
 // --- InteractionEligibilityMatrix ---
 
@@ -267,4 +267,4 @@ std::optional<InteractionCatalogEntry> InteractionCatalog::lookup(
     return std::nullopt;
 }
 
-} // namespace faultline
+} // namespace lshaz

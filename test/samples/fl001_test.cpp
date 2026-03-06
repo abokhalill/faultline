@@ -1,11 +1,11 @@
 // FL001 end-to-end validation input.
-// Expected: faultline flags LargeOrder as cache-line spanning (192B, 3 lines).
-// Expected: faultline flags AtomicHeavy as Critical (>128B + atomics).
+// Expected: lshaz flags LargeOrder as cache-line spanning (192B, 3 lines).
+// Expected: lshaz flags AtomicHeavy as Critical (>128B + atomics).
 
 #include <atomic>
 #include <cstdint>
 
-struct [[clang::annotate("faultline_hot")]] SmallOrder {
+struct [[clang::annotate("lshaz_hot")]] SmallOrder {
     uint64_t id;
     uint64_t price;
     uint32_t qty;

@@ -1,11 +1,11 @@
-#include "faultline/core/PerfProfileParser.h"
+#include "lshaz/core/PerfProfileParser.h"
 
 #include <fstream>
 #include <sstream>
 #include <algorithm>
 #include <cctype>
 
-namespace faultline {
+namespace lshaz {
 
 bool PerfProfileParser::parse(const std::string &path) {
     std::ifstream file(path);
@@ -163,4 +163,4 @@ PerfProfileParser::hotFunctions(double thresholdPct) const {
     return result;
 }
 
-} // namespace faultline
+} // namespace lshaz

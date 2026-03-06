@@ -1,8 +1,8 @@
-#include "faultline/core/Rule.h"
-#include "faultline/core/RuleRegistry.h"
-#include "faultline/core/HotPathOracle.h"
-#include "faultline/analysis/EscapeAnalysis.h"
-#include "faultline/analysis/NUMATopology.h"
+#include "lshaz/core/Rule.h"
+#include "lshaz/core/RuleRegistry.h"
+#include "lshaz/core/HotPathOracle.h"
+#include "lshaz/analysis/EscapeAnalysis.h"
+#include "lshaz/analysis/NUMATopology.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -12,7 +12,7 @@
 
 #include <sstream>
 
-namespace faultline {
+namespace lshaz {
 
 class FL060_NUMAUnfriendly : public Rule {
 public:
@@ -167,6 +167,6 @@ public:
     }
 };
 
-FAULTLINE_REGISTER_RULE(FL060_NUMAUnfriendly)
+LSHAZ_REGISTER_RULE(FL060_NUMAUnfriendly)
 
-} // namespace faultline
+} // namespace lshaz

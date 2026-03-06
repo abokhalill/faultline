@@ -1,18 +1,18 @@
-#include "faultline/analysis/FaultlineAction.h"
-#include "faultline/core/Config.h"
-#include "faultline/core/Diagnostic.h"
-#include "faultline/core/Severity.h"
-#include "faultline/core/Version.h"
-#include "faultline/hypothesis/CalibrationFeedback.h"
-#include "faultline/hypothesis/HypothesisConstructor.h"
-#include "faultline/ir/IRAnalyzer.h"
-#include "faultline/ir/DiagnosticRefiner.h"
-#include "faultline/core/DiagnosticDedup.h"
-#include "faultline/core/DiagnosticInteraction.h"
-#include "faultline/core/PerfProfileParser.h"
-#include "faultline/hypothesis/PMUTraceFeedback.h"
-#include "faultline/core/PrecisionBudget.h"
-#include "faultline/output/OutputFormatter.h"
+#include "lshaz/analysis/LshazAction.h"
+#include "lshaz/core/Config.h"
+#include "lshaz/core/Diagnostic.h"
+#include "lshaz/core/Severity.h"
+#include "lshaz/core/Version.h"
+#include "lshaz/hypothesis/CalibrationFeedback.h"
+#include "lshaz/hypothesis/HypothesisConstructor.h"
+#include "lshaz/ir/IRAnalyzer.h"
+#include "lshaz/ir/DiagnosticRefiner.h"
+#include "lshaz/core/DiagnosticDedup.h"
+#include "lshaz/core/DiagnosticInteraction.h"
+#include "lshaz/core/PerfProfileParser.h"
+#include "lshaz/hypothesis/PMUTraceFeedback.h"
+#include "lshaz/core/PrecisionBudget.h"
+#include "lshaz/output/OutputFormatter.h"
 
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
@@ -42,98 +42,98 @@
 
 using namespace clang::tooling;
 
-static llvm::cl::OptionCategory FaultlineCat("faultline options");
+static llvm::cl::OptionCategory LshazCat("lshaz options");
 
 static llvm::cl::opt<std::string> ConfigPath(
     "config",
-    llvm::cl::desc("Path to faultline.config.yaml"),
+    llvm::cl::desc("Path to lshaz.config.yaml"),
     llvm::cl::value_desc("file"),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> OutputFormat(
     "format",
     llvm::cl::desc("Output format (cli|json|sarif)"),
     llvm::cl::init("cli"),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<bool> JSONFlag(
     "json",
     llvm::cl::desc("Emit JSON output (deprecated: use --format=json)"),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> OutputFile(
     "output",
     llvm::cl::desc("Write output to file instead of stdout"),
     llvm::cl::value_desc("file"),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> MinSev(
     "min-severity",
     llvm::cl::desc("Minimum severity to report (Informational|Medium|High|Critical)"),
     llvm::cl::init("Informational"),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> MinEvidence(
     "min-evidence",
     llvm::cl::desc("Minimum evidence tier to report (proven|likely|speculative)"),
     llvm::cl::init("speculative"),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> CalibrationStore(
     "calibration-store",
     llvm::cl::desc("Path to calibration feedback store for false-positive suppression"),
     llvm::cl::value_desc("path"),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<bool> NoIR(
     "no-ir",
     llvm::cl::desc("Disable LLVM IR analysis pass (AST-only mode)"),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> IROpt(
     "ir-opt",
     llvm::cl::desc("Optimization level for IR emission (O0|O1|O2). "
                     "O0 confirms structural patterns; O1+ shows optimizer effects"),
     llvm::cl::init("O0"),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<bool> NoIRCache(
     "no-ir-cache",
     llvm::cl::desc("Disable IR cache (force re-emission every run). "
                     "Recommended for CI where header changes must invalidate."),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<unsigned> IRJobs(
     "ir-jobs",
     llvm::cl::desc("Max parallel IR emission jobs (default: hardware_concurrency)"),
     llvm::cl::init(0),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<unsigned> IRBatchSize(
     "ir-batch-size",
     llvm::cl::desc("TUs per IR emission batch/shard (default: 1, i.e. per-TU). "
                     "Higher values reduce subprocess overhead for large projects."),
     llvm::cl::init(1),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> PerfProfile(
     "perf-profile",
     llvm::cl::desc("Path to perf profile data (flat or perf-script format). "
                     "Functions exceeding --hotness-threshold are treated as hot."),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<double> HotnessThreshold(
     "hotness-threshold",
     llvm::cl::desc("Minimum sample percentage to consider a function hot (default: 1.0)"),
     llvm::cl::init(1.0),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> LinkedAllocator(
     "allocator",
     llvm::cl::desc("Linked allocator library (tcmalloc|jemalloc|mimalloc). "
                     "Affects FL020 severity: thread-local cache allocators "
                     "reduce contention risk classification."),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> PMUTracePath(
     "pmu-trace",
@@ -141,43 +141,43 @@ static llvm::cl::opt<std::string> PMUTracePath(
                     "Each line: {\"function\", \"file\", \"line\", \"counters\": "
                     "[{\"name\", \"value\", \"duration_ns\"}], ...}. "
                     "Used for closed-loop learning to update hazard priors."),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
 static llvm::cl::opt<std::string> PMUPriorsPath(
     "pmu-priors",
     llvm::cl::desc("Path to load/save PMU-learned hazard priors. "
                     "Priors persist across runs for incremental learning."),
-    llvm::cl::cat(FaultlineCat));
+    llvm::cl::cat(LshazCat));
 
-static faultline::Severity parseSeverity(const std::string &s) {
-    if (s == "Critical")      return faultline::Severity::Critical;
-    if (s == "High")          return faultline::Severity::High;
-    if (s == "Medium")        return faultline::Severity::Medium;
-    return faultline::Severity::Informational;
+static lshaz::Severity parseSeverity(const std::string &s) {
+    if (s == "Critical")      return lshaz::Severity::Critical;
+    if (s == "High")          return lshaz::Severity::High;
+    if (s == "Medium")        return lshaz::Severity::Medium;
+    return lshaz::Severity::Informational;
 }
 
-static faultline::EvidenceTier parseEvidenceTier(const std::string &s) {
-    if (s == "proven") return faultline::EvidenceTier::Proven;
-    if (s == "likely") return faultline::EvidenceTier::Likely;
-    return faultline::EvidenceTier::Speculative;
+static lshaz::EvidenceTier parseEvidenceTier(const std::string &s) {
+    if (s == "proven") return lshaz::EvidenceTier::Proven;
+    if (s == "likely") return lshaz::EvidenceTier::Likely;
+    return lshaz::EvidenceTier::Speculative;
 }
 
 int main(int argc, const char **argv) {
     llvm::cl::SetVersionPrinter([](llvm::raw_ostream &OS) {
-        OS << faultline::kToolName << " version " << faultline::kToolVersion
-           << " (output schema " << faultline::kOutputSchemaVersion << ")\n";
+        OS << lshaz::kToolName << " version " << lshaz::kToolVersion
+           << " (output schema " << lshaz::kOutputSchemaVersion << ")\n";
     });
 
-    auto parser = CommonOptionsParser::create(argc, argv, FaultlineCat);
+    auto parser = CommonOptionsParser::create(argc, argv, LshazCat);
     if (!parser) {
         llvm::errs() << parser.takeError();
         return 1;
     }
 
     // Load config.
-    faultline::Config cfg = ConfigPath.empty()
-        ? faultline::Config::defaults()
-        : faultline::Config::loadFromFile(ConfigPath);
+    lshaz::Config cfg = ConfigPath.empty()
+        ? lshaz::Config::defaults()
+        : lshaz::Config::loadFromFile(ConfigPath);
 
     // CLI overrides.
     if (JSONFlag)
@@ -189,8 +189,8 @@ int main(int argc, const char **argv) {
         cfg.linkedAllocator = LinkedAllocator;
 
     // Build execution metadata for output provenance.
-    faultline::ExecutionMetadata execMeta;
-    execMeta.toolVersion = faultline::kToolVersion;
+    lshaz::ExecutionMetadata execMeta;
+    execMeta.toolVersion = lshaz::kToolVersion;
     execMeta.configPath = ConfigPath.getValue();
     execMeta.irOptLevel = IROpt.getValue();
     execMeta.irEnabled = !NoIR;
@@ -206,17 +206,17 @@ int main(int argc, const char **argv) {
     if (profilePath.empty())
         profilePath = cfg.perfProfilePath;
     if (!profilePath.empty()) {
-        faultline::PerfProfileParser profParser;
+        lshaz::PerfProfileParser profParser;
         if (profParser.parse(profilePath)) {
             double threshold = HotnessThreshold.getValue();
             if (cfg.hotnessThresholdPct > 0 && threshold == 1.0)
                 threshold = cfg.hotnessThresholdPct;
             profileHotFuncs = profParser.hotFunctions(threshold);
-            llvm::errs() << "faultline: loaded " << profParser.totalSamples()
+            llvm::errs() << "lshaz: loaded " << profParser.totalSamples()
                          << " samples, " << profileHotFuncs.size()
                          << " hot function(s) at >=" << threshold << "%\n";
         } else {
-            llvm::errs() << "faultline: warning: failed to parse profile '"
+            llvm::errs() << "lshaz: warning: failed to parse profile '"
                          << profilePath << "'\n";
         }
     }
@@ -224,8 +224,8 @@ int main(int argc, const char **argv) {
     // Run analysis.
     ClangTool tool(parser->getCompilations(), parser->getSourcePathList());
 
-    std::vector<faultline::Diagnostic> diagnostics;
-    faultline::FaultlineActionFactory factory(
+    std::vector<lshaz::Diagnostic> diagnostics;
+    lshaz::LshazActionFactory factory(
         cfg, diagnostics, std::move(profileHotFuncs));
 
     int ret = tool.run(&factory);
@@ -233,7 +233,7 @@ int main(int argc, const char **argv) {
     // --- IR analysis pass ---
     // Emit LLVM IR via structured subprocess, then parse with IRReader.
     if (!NoIR && ret == 0) {
-        faultline::IRAnalyzer irAnalyzer;
+        lshaz::IRAnalyzer irAnalyzer;
         std::string optLevel = "-" + IROpt.getValue();
 
         struct IRJob {
@@ -275,7 +275,7 @@ int main(int argc, const char **argv) {
                 }
             }
             if (compilerPath.empty()) {
-                llvm::errs() << "faultline: warning: cannot resolve compiler '"
+                llvm::errs() << "lshaz: warning: cannot resolve compiler '"
                              << dbCompiler << "', skipping IR for "
                              << srcPath << "\n";
                 continue;
@@ -337,7 +337,7 @@ int main(int argc, const char **argv) {
 
             for (const auto &a : argv)
                 hasher.update(a);
-            hasher.update(faultline::kToolVersion);
+            hasher.update(lshaz::kToolVersion);
             llvm::MD5::MD5Result hashResult;
             hasher.final(hashResult);
             llvm::SmallString<32> hashStr;
@@ -347,9 +347,9 @@ int main(int argc, const char **argv) {
             llvm::sys::path::system_temp_directory(/*erasedOnReboot=*/true, tmpDir);
             llvm::SmallString<128> irPath(tmpDir), errPath(tmpDir);
             llvm::sys::path::append(irPath,
-                "faultline-" + std::string(hashStr) + ".ll");
+                "lshaz-" + std::string(hashStr) + ".ll");
             llvm::sys::path::append(errPath,
-                "faultline-" + std::string(hashStr) + ".err");
+                "lshaz-" + std::string(hashStr) + ".err");
 
             // Incremental cache: reuse existing IR if hash matches.
             bool cached = !NoIRCache && llvm::sys::fs::exists(irPath);
@@ -370,7 +370,7 @@ int main(int argc, const char **argv) {
         }
 
         if (jobs.empty() && !parser->getSourcePathList().empty()) {
-            llvm::errs() << "faultline: warning: no compilable IR jobs, "
+            llvm::errs() << "lshaz: warning: no compilable IR jobs, "
                          << "skipping IR analysis pass\n";
         }
 
@@ -434,7 +434,7 @@ int main(int argc, const char **argv) {
         };
 
         struct ShardResult {
-            faultline::IRAnalyzer analyzer;
+            lshaz::IRAnalyzer analyzer;
             std::vector<std::pair<size_t, IRResult>> jobResults;
         };
 
@@ -479,11 +479,11 @@ int main(int argc, const char **argv) {
                 if (result.exitCode != 0) {
                     auto errBuf = llvm::MemoryBuffer::getFile(jobs[idx].errFile);
                     if (errBuf && !(*errBuf)->getBuffer().empty()) {
-                        llvm::errs() << "faultline: IR emission failed for "
+                        llvm::errs() << "lshaz: IR emission failed for "
                                      << jobs[idx].srcPath << ":\n"
                                      << (*errBuf)->getBuffer() << "\n";
                     } else if (!result.errMsg.empty()) {
-                        llvm::errs() << "faultline: IR emission failed for "
+                        llvm::errs() << "lshaz: IR emission failed for "
                                      << jobs[idx].srcPath << ": "
                                      << result.errMsg << "\n";
                     }
@@ -500,7 +500,7 @@ int main(int argc, const char **argv) {
         }
 
         if (!irAnalyzer.profiles().empty()) {
-            faultline::DiagnosticRefiner refiner(irAnalyzer.profiles());
+            lshaz::DiagnosticRefiner refiner(irAnalyzer.profiles());
             refiner.refine(diagnostics);
         }
     }
@@ -508,23 +508,23 @@ int main(int argc, const char **argv) {
     // --- Cross-TU deduplication ---
     // Struct-level rules emit identical diagnostics when the same header
     // is included by multiple TUs. Merge duplicates, keep highest confidence.
-    faultline::deduplicateDiagnostics(diagnostics);
+    lshaz::deduplicateDiagnostics(diagnostics);
 
     // --- Hazard interaction synthesis ---
     // Correlate diagnostics from different rules at the same site.
     // Synthesize compound hazard diagnostics (FL090) with site-specific
     // evidence drawn from the InteractionEligibilityMatrix.
-    faultline::synthesizeInteractions(diagnostics);
+    lshaz::synthesizeInteractions(diagnostics);
 
     // --- Precision budget governance ---
     // Per-rule confidence floors, severity caps, and emission limits.
-    faultline::PrecisionBudget precisionBudget;
+    lshaz::PrecisionBudget precisionBudget;
     precisionBudget.apply(diagnostics);
 
     // --- Calibration-based false-positive suppression ---
-    std::unique_ptr<faultline::CalibrationFeedbackStore> calStore;
+    std::unique_ptr<lshaz::CalibrationFeedbackStore> calStore;
     if (!CalibrationStore.empty()) {
-        calStore = std::make_unique<faultline::CalibrationFeedbackStore>(
+        calStore = std::make_unique<lshaz::CalibrationFeedbackStore>(
             CalibrationStore);
     }
 
@@ -532,18 +532,18 @@ int main(int argc, const char **argv) {
     if (calStore) {
         diagnostics.erase(
             std::remove_if(diagnostics.begin(), diagnostics.end(),
-                           [&](const faultline::Diagnostic &d) {
-                               auto hc = faultline::HypothesisConstructor
+                           [&](const lshaz::Diagnostic &d) {
+                               auto hc = lshaz::HypothesisConstructor
                                    ::mapRuleToHazardClass(d.ruleID);
-                               auto features = faultline::HypothesisConstructor
+                               auto features = lshaz::HypothesisConstructor
                                    ::extractFeatures(d);
                                // Safety rail: never suppress high-severity
                                // proven findings via calibration.
                                bool highSev =
-                                   d.severity == faultline::Severity::Critical ||
-                                   d.severity == faultline::Severity::High;
+                                   d.severity == lshaz::Severity::Critical ||
+                                   d.severity == lshaz::Severity::High;
                                bool proven =
-                                   d.evidenceTier == faultline::EvidenceTier::Proven;
+                                   d.evidenceTier == lshaz::EvidenceTier::Proven;
                                if (highSev && proven)
                                    return false;
 
@@ -556,7 +556,7 @@ int main(int argc, const char **argv) {
             diagnostics.end());
 
         if (suppressed > 0) {
-            llvm::errs() << "faultline: suppressed " << suppressed
+            llvm::errs() << "lshaz: suppressed " << suppressed
                          << " diagnostic(s) via calibration feedback\n";
         }
     }
@@ -565,7 +565,7 @@ int main(int argc, const char **argv) {
     // Ingest production PMU traces to update hazard priors and adjust
     // diagnostic confidence based on observed true/false positive rates.
     if (calStore && (!PMUTracePath.empty() || !PMUPriorsPath.empty())) {
-        faultline::PMUTraceFeedbackLoop feedbackLoop(*calStore);
+        lshaz::PMUTraceFeedbackLoop feedbackLoop(*calStore);
 
         // Load persisted priors from previous runs.
         if (!PMUPriorsPath.empty())
@@ -581,7 +581,7 @@ int main(int argc, const char **argv) {
                 llvm::SmallVector<llvm::StringRef, 0> lines;
                 data.split(lines, '\n', /*MaxSplit=*/-1, /*KeepEmpty=*/false);
 
-                faultline::PMUTraceRecord currentRecord;
+                lshaz::PMUTraceRecord currentRecord;
                 for (const auto &line : lines) {
                     if (line.starts_with("#"))
                         continue;
@@ -605,9 +605,9 @@ int main(int argc, const char **argv) {
                             if (d.functionName == currentRecord.functionName ||
                                 (d.location.file == currentRecord.sourceFile &&
                                  d.location.line == currentRecord.sourceLine)) {
-                                auto hc = faultline::HypothesisConstructor
+                                auto hc = lshaz::HypothesisConstructor
                                     ::mapRuleToHazardClass(d.ruleID);
-                                auto features = faultline::HypothesisConstructor
+                                auto features = lshaz::HypothesisConstructor
                                     ::extractFeatures(d);
                                 feedbackLoop.ingestTrace(
                                     currentRecord, hc, features);
@@ -621,7 +621,7 @@ int main(int argc, const char **argv) {
                     currentRecord.sourceFile = file;
                     currentRecord.sourceLine = srcLine;
 
-                    faultline::PMUSample sample;
+                    lshaz::PMUSample sample;
                     sample.counterName = fields[3].str();
                     fields[4].getAsInteger(10, sample.value);
                     if (fields.size() > 5)
@@ -635,9 +635,9 @@ int main(int argc, const char **argv) {
                         if (d.functionName == currentRecord.functionName ||
                             (d.location.file == currentRecord.sourceFile &&
                              d.location.line == currentRecord.sourceLine)) {
-                            auto hc = faultline::HypothesisConstructor
+                            auto hc = lshaz::HypothesisConstructor
                                 ::mapRuleToHazardClass(d.ruleID);
-                            auto features = faultline::HypothesisConstructor
+                            auto features = lshaz::HypothesisConstructor
                                 ::extractFeatures(d);
                             feedbackLoop.ingestTrace(
                                 currentRecord, hc, features);
@@ -646,14 +646,14 @@ int main(int argc, const char **argv) {
                     }
                 }
             } else {
-                llvm::errs() << "faultline: warning: cannot read PMU trace '"
+                llvm::errs() << "lshaz: warning: cannot read PMU trace '"
                              << PMUTracePath.getValue() << "'\n";
             }
         }
 
         // Apply learned priors to adjust diagnostic confidence.
         for (auto &d : diagnostics) {
-            auto hc = faultline::HypothesisConstructor
+            auto hc = lshaz::HypothesisConstructor
                 ::mapRuleToHazardClass(d.ruleID);
             d.confidence = feedbackLoop.adjustConfidence(d.confidence, hc);
         }
@@ -667,7 +667,7 @@ int main(int argc, const char **argv) {
     auto minTier = parseEvidenceTier(MinEvidence);
     diagnostics.erase(
         std::remove_if(diagnostics.begin(), diagnostics.end(),
-                       [&](const faultline::Diagnostic &d) {
+                       [&](const lshaz::Diagnostic &d) {
                            if (d.suppressed)
                                return true;
                            if (static_cast<uint8_t>(d.severity) <
@@ -682,7 +682,7 @@ int main(int argc, const char **argv) {
 
     // Sort: Critical first, then by file/line.
     std::sort(diagnostics.begin(), diagnostics.end(),
-              [](const faultline::Diagnostic &a, const faultline::Diagnostic &b) {
+              [](const lshaz::Diagnostic &a, const lshaz::Diagnostic &b) {
                   if (a.severity != b.severity)
                       return static_cast<uint8_t>(a.severity) >
                              static_cast<uint8_t>(b.severity);
@@ -696,16 +696,16 @@ int main(int argc, const char **argv) {
     if (JSONFlag && fmt == "cli")
         fmt = "json"; // backward compat
 
-    std::unique_ptr<faultline::OutputFormatter> formatter;
+    std::unique_ptr<lshaz::OutputFormatter> formatter;
     if (fmt == "sarif")
-        formatter = std::make_unique<faultline::SARIFOutputFormatter>();
+        formatter = std::make_unique<lshaz::SARIFOutputFormatter>();
     else if (fmt == "json" || cfg.jsonOutput)
-        formatter = std::make_unique<faultline::JSONOutputFormatter>();
+        formatter = std::make_unique<lshaz::JSONOutputFormatter>();
     else {
         if (fmt != "cli")
-            llvm::errs() << "faultline: warning: unknown format '" << fmt
+            llvm::errs() << "lshaz: warning: unknown format '" << fmt
                          << "', defaulting to cli\n";
-        formatter = std::make_unique<faultline::CLIOutputFormatter>();
+        formatter = std::make_unique<lshaz::CLIOutputFormatter>();
     }
 
     std::string output = formatter->format(diagnostics, execMeta);
@@ -717,7 +717,7 @@ int main(int argc, const char **argv) {
         std::error_code EC;
         llvm::raw_fd_ostream file(cfg.outputFile, EC, llvm::sys::fs::OF_Text);
         if (EC) {
-            llvm::errs() << "faultline: error: cannot open output file '"
+            llvm::errs() << "lshaz: error: cannot open output file '"
                          << cfg.outputFile << "': " << EC.message() << "\n";
             return 3;
         }
@@ -733,13 +733,13 @@ int main(int argc, const char **argv) {
     bool hasFindings = !diagnostics.empty();
 
     if (parseError && hasFindings) {
-        llvm::errs() << "faultline: warning: ClangTool returned non-zero ("
+        llvm::errs() << "lshaz: warning: ClangTool returned non-zero ("
                      << ret << "), some sources may have parse errors; "
                      << diagnostics.size() << " finding(s) from successful parses\n";
         return 1;
     }
     if (parseError) {
-        llvm::errs() << "faultline: error: ClangTool returned non-zero ("
+        llvm::errs() << "lshaz: error: ClangTool returned non-zero ("
                      << ret << "), input has parse/compilation errors\n";
         return 2;
     }

@@ -1,4 +1,4 @@
-#include "faultline/analysis/EscapeAnalysis.h"
+#include "lshaz/analysis/EscapeAnalysis.h"
 
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
@@ -7,7 +7,7 @@
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Type.h>
 
-namespace faultline {
+namespace lshaz {
 
 EscapeAnalysis::EscapeAnalysis(clang::ASTContext &Ctx) : ctx_(Ctx) {}
 
@@ -353,4 +353,4 @@ bool EscapeAnalysis::hasVolatileMembers(const clang::CXXRecordDecl *RD) const {
     return false;
 }
 
-} // namespace faultline
+} // namespace lshaz

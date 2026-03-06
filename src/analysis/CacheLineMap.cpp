@@ -1,11 +1,11 @@
-#include "faultline/analysis/CacheLineMap.h"
+#include "lshaz/analysis/CacheLineMap.h"
 
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/DeclTemplate.h>
 #include <clang/AST/Type.h>
 
-namespace faultline {
+namespace lshaz {
 
 CacheLineMap::CacheLineMap(const clang::CXXRecordDecl *RD,
                            clang::ASTContext &Ctx,
@@ -212,4 +212,4 @@ std::vector<uint64_t> CacheLineMap::falseSharingCandidateLines() const {
     return result;
 }
 
-} // namespace faultline
+} // namespace lshaz
