@@ -67,6 +67,7 @@ set(LSHAZ_SOURCES
     src/hypothesis/CalibrationFeedback.cpp
     src/hypothesis/PMUTraceFeedback.cpp
     src/hypothesis/InteractionModel.cpp
+    src/pipeline/ScanPipeline.cpp
 )
 
 add_executable(lshaz ${LSHAZ_SOURCES})
