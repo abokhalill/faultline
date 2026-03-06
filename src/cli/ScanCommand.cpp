@@ -35,6 +35,8 @@ struct ScanArgs {
     unsigned irJobs = 0;
     unsigned irBatchSize = 1;
     unsigned maxFiles = 0;
+    std::vector<std::string> includeFiles;
+    std::vector<std::string> excludeFiles;
     bool noIR = false;
     bool noIRCache = false;
     bool help = false;
@@ -60,6 +62,8 @@ void printScanUsage() {
         << "  --ir-opt <O0|O1|O2>     IR optimization level (default: O0)\n"
         << "  --ir-jobs <N>            Max parallel IR jobs (default: hardware_concurrency)\n"
         << "  --max-files <N>          Maximum translation units to analyze\n"
+        << "  --include <pattern>      Only analyze files matching pattern (repeatable)\n"
+        << "  --exclude <pattern>      Skip files matching pattern (repeatable)\n"
         << "  --perf-profile <path>    Path to perf profile for hotness guidance\n"
         << "  --allocator <name>       Linked allocator (tcmalloc|jemalloc|mimalloc)\n"
         << "  --help                   Show this help\n";
@@ -101,6 +105,8 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (consumeArgUnsigned(i, argc, argv, "--ir-jobs", args.irJobs)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--ir-batch-size", args.irBatchSize)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--max-files", args.maxFiles)) continue;
+        { std::string v; if (consumeArg(i, argc, argv, "--include", v)) { args.includeFiles.push_back(v); continue; } }
+        { std::string v; if (consumeArg(i, argc, argv, "--exclude", v)) { args.excludeFiles.push_back(v); continue; } }
         if (consumeArg(i, argc, argv, "--perf-profile", args.perfProfile)) continue;
         if (consumeArg(i, argc, argv, "--allocator", args.allocator)) continue;
         if (consumeArg(i, argc, argv, "--calibration-store", args.calibrationStore)) continue;
@@ -238,6 +244,8 @@ int runScanCommand(int argc, const char **argv) {
     request.filter.minSeverity = cfg.minSeverity;
     request.filter.minEvidenceTier = parseEvidenceTier(args.minEvidence);
     request.filter.maxFiles = args.maxFiles;
+    request.filter.includeFiles = args.includeFiles;
+    request.filter.excludeFiles = args.excludeFiles;
 
     request.perfProfilePath = args.perfProfile;
     request.hotnessThreshold = args.hotnessThreshold;
