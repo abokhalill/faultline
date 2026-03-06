@@ -8,7 +8,7 @@ Built on Clang/LLVM. Assumes 64-byte cache lines, x86-64 TSO memory model, and L
 
 ## What This Tool Does
 
-Lshaz inspects C++ source (via Clang AST) and optionally LLVM IR to detect struct layouts, atomic patterns, allocation sites, and dispatch structures that are likely to cause cache-line contention, false sharing, branch misprediction, or allocator serialization on x86-64 hardware.
+lshaz inspects C++ source (via Clang AST) and optionally LLVM IR to detect struct layouts, atomic patterns, allocation sites, and dispatch structures that are likely to cause cache-line contention, false sharing, branch misprediction, or allocator serialization on x86-64 hardware.
 
 It does not profile. It does not instrument. It performs compile-time structural analysis and reports findings with file, line, column, severity, confidence, and hardware-specific reasoning.
 
@@ -25,13 +25,13 @@ It is not a linter. It does not enforce style. It identifies structural patterns
 
 ### Where It Fits
 
-| Existing Tool | What It Provides | Gap | Lshaz's Role |
+| Existing Tool | What It Provides | Gap | lshaz's Role |
 |---|---|---|---|
 | `pahole` | Post-build struct layout via DWARF/BTF | No hot-path context, no atomic/ordering analysis, no function attribution | AST/IR-level reasoning with source location diagnostics |
 | `perf` / PMU tracing | Runtime ground-truth counters, bottleneck attribution | Requires a running workload; discovers problems late | Pre-runtime structural triage; generates `perf stat` experiment scripts |
 | `llvm-mca` | Instruction-level throughput/latency modeling | No cross-declaration layout, no thread-coherence modeling | Source/IR structure analysis across types and functions |
 
-Lshaz operates in the compile-analysis phase. Runtime tools validate whether flagged hazards have measurable impact.
+lshaz operates in the compile-analysis phase. Runtime tools validate whether flagged hazards have measurable impact.
 
 ---
 
@@ -495,7 +495,7 @@ Runs paired hazardous/fixed microbenchmarks per rule with hardware timing and op
 
 These are known limitations of the current implementation. They are documented here so that users can make informed decisions about the tool's applicability to their codebase.
 
-- **Static analysis only.** Lshaz does not execute code, attach to processes, or read PMU counters. It identifies structural patterns that correlate with known hardware penalties. Runtime validation is required to confirm impact magnitude.
+- **Static analysis only.** lshaz does not execute code, attach to processes, or read PMU counters. It identifies structural patterns that correlate with known hardware penalties. Runtime validation is required to confirm impact magnitude.
 - **Single-TU escape analysis.** `EscapeAnalysis` inspects structural members and scans publication paths within the current translation unit. It does not perform cross-TU or whole-program interprocedural dataflow analysis. Types that escape through interfaces not visible in the current TU may not be detected.
 - **IR refinement is not a lowering proof.** The IR pass confirms or refutes AST-level findings using post-optimization IR. It does not establish a bijective mapping between source sites and lowered instructions. Confidence adjustments are bounded heuristics, not proofs.
 - **IR cache invalidation.** Cache keys include source content, mtime, compile args, tool version, and `.d` dependency file contents if present. Header-only changes without a corresponding `.d` file update may not invalidate the cache. Use `--no-ir-cache` in CI pipelines.

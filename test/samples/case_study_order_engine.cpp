@@ -1,5 +1,5 @@
 // Case Study: Simplified HFT Order Matching Engine
-// Exercises all 15 Lshaz rules in a realistic trading system context.
+// Exercises all 15 lshaz rules in a realistic trading system context.
 //
 // This is a structural test — not a functional implementation.
 // It models common latency landmine patterns found in production HFT systems.

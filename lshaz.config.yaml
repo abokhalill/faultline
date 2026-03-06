@@ -1,4 +1,4 @@
-# Faultline configuration — x86-64 / 64B cache line baseline
+# lshaz configuration — x86-64 / 64B cache line baseline
 cache_line_bytes: 64
 cache_line_span_warn: 64
 cache_line_span_crit: 128
