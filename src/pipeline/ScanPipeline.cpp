@@ -443,10 +443,11 @@ ScanResult ScanPipeline::execute(const ScanRequest &request) {
     // Autodiscover compile_commands.json if not explicitly provided.
     if (dbPath.empty() && !request.workingDirectory.empty()) {
         report("compile_db", "Searching for compile_commands.json");
-        dbPath = CompileDBResolver::discover(request.workingDirectory);
+        dbPath = CompileDBResolver::discoverOrGenerate(request.workingDirectory);
         if (dbPath.empty()) {
             llvm::errs() << "lshaz: error: no compile_commands.json found in "
-                         << request.workingDirectory << "\n"
+                         << request.workingDirectory
+                         << " (also tried cmake generation)\n"
                          << "  searched: ";
             for (const auto &p : CompileDBResolver::candidatePaths(
                      request.workingDirectory))
