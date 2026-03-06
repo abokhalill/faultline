@@ -87,13 +87,13 @@ void PrecisionBudget::apply(std::vector<Diagnostic> &diagnostics) const {
         }
 
         // Emission budget enforcement.
-        if (policy->maxEmissionsPerTU > 0) {
+        if (policy->maxEmissions > 0) {
             unsigned &count = emissionCounts[diag.ruleID];
-            if (count >= policy->maxEmissionsPerTU) {
+            if (count >= policy->maxEmissions) {
                 diag.severity = Severity::Informational;
                 diag.escalations.push_back(
                     "precision-budget: demoted (emission limit " +
-                    std::to_string(policy->maxEmissionsPerTU) + " exceeded)");
+                    std::to_string(policy->maxEmissions) + " exceeded)");
             }
             ++count;
         }
