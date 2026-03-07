@@ -6,6 +6,7 @@
 #include <clang/AST/DeclGroup.h>
 #include <clang/Basic/SourceManager.h>
 
+#include <algorithm>
 #include <unordered_set>
 
 namespace lshaz {
@@ -88,6 +89,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     }
 
     // Second pass: run enabled rules.
+    size_t diagsBefore = diagnostics_.size();
     const auto &rules = RuleRegistry::instance().rules();
     for (auto *D : decls) {
         for (const auto &rule : rules) {
@@ -96,6 +98,51 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
             rule->analyze(D, Ctx, oracle_, config_, diagnostics_);
         }
     }
+
+    // Inline suppression: remove diagnostics with lshaz-suppress on their line
+    // or the preceding line.  Format: // lshaz-suppress FL001,FL002
+    auto isSuppressed = [&SM](const Diagnostic &diag) -> bool {
+        if (diag.location.file.empty() || diag.location.line == 0)
+            return false;
+        auto fileRef = SM.getFileManager().getFileRef(diag.location.file);
+        if (!fileRef)
+            return false;
+        auto fid = SM.translateFile(*fileRef);
+        bool invalid = false;
+        llvm::StringRef buf = SM.getBufferData(fid, &invalid);
+        if (invalid || buf.empty())
+            return false;
+
+        // Check the diagnostic line and the line above it.
+        for (unsigned checkLine = diag.location.line;
+             checkLine >= 1 && checkLine >= diag.location.line - 1;
+             --checkLine) {
+            auto loc = SM.translateLineCol(fid, checkLine, 1);
+            if (loc.isInvalid()) continue;
+            unsigned offset = SM.getFileOffset(loc);
+            auto eol = buf.find('\n', offset);
+            llvm::StringRef line = buf.slice(offset,
+                eol == llvm::StringRef::npos ? buf.size() : eol);
+            auto pos = line.find("lshaz-suppress");
+            if (pos == llvm::StringRef::npos) continue;
+            llvm::StringRef tail = line.substr(pos + 14).ltrim();
+            if (tail.empty())
+                return true;  // bare suppress = suppress all
+            // Parse comma-separated rule IDs.
+            while (!tail.empty()) {
+                auto [tok, rest] = tail.split(',');
+                if (tok.trim() == diag.ruleID)
+                    return true;
+                tail = rest;
+            }
+        }
+        return false;
+    };
+
+    auto it = std::remove_if(
+        diagnostics_.begin() + static_cast<long>(diagsBefore),
+        diagnostics_.end(), isSuppressed);
+    diagnostics_.erase(it, diagnostics_.end());
 }
 
 } // namespace lshaz
