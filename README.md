@@ -1,7 +1,7 @@
 # lshaz
 
 [![CI](https://github.com/abokhalill/lshaz/actions/workflows/ci.yml/badge.svg)](https://github.com/abokhalill/lshaz/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/abokhalill/lshaz)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux%20x86--64-blue)]()
 
 Static analysis tool that detects microarchitectural latency hazards in C++ — false sharing, cache-line contention, atomic ordering waste, and allocator serialization — before code ever runs.
