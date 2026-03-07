@@ -76,7 +76,13 @@ void printScanUsage() {
         << "  --allocator <name>       Linked allocator (tcmalloc|jemalloc|mimalloc)\n"
         << "  --watch                  Watch mode: re-scan on file changes\n"
         << "  --watch-interval <N>     Seconds between polls (default: 2)\n"
-        << "  --help                   Show this help\n";
+        << "  --help                   Show this help\n"
+        << "\n"
+        << "Exit Codes:\n"
+        << "  0  Clean — no diagnostics\n"
+        << "  1  Findings — diagnostics emitted\n"
+        << "  2  Parse errors — one or more TUs failed to compile\n"
+        << "  3  Fatal — infrastructure failure (bad arguments, missing files)\n";
 }
 
 bool consumeArg(int &i, int argc, const char **argv, const char *flag,
