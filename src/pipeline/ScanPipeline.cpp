@@ -30,8 +30,12 @@
 #include <algorithm>
 #include <chrono>
 #include <future>
+#include <memory>
+#include <mutex>
 #include <semaphore>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace lshaz {
 
@@ -520,11 +524,53 @@ ScanResult ScanPipeline::run(
 
     auto profileHotFuncs = loadProfileHotFunctions(request);
 
-    // AST analysis.
-    clang::tooling::ClangTool tool(compDB, sources);
-    LshazActionFactory factory(
-        request.config, result.diagnostics, std::move(profileHotFuncs));
-    int toolRet = tool.run(&factory);
+    // AST analysis — parallel when multiple TUs and jobs > 1.
+    unsigned jobs = request.analysisJobs;
+    if (jobs == 0)
+        jobs = std::max(1u, std::thread::hardware_concurrency());
+    if (jobs > static_cast<unsigned>(sources.size()))
+        jobs = static_cast<unsigned>(sources.size());
+
+    int toolRet = 0;
+
+    if (jobs <= 1 || sources.size() <= 1) {
+        // Sequential path.
+        clang::tooling::ClangTool tool(compDB, sources);
+        LshazActionFactory factory(
+            request.config, result.diagnostics, profileHotFuncs);
+        toolRet = tool.run(&factory);
+    } else {
+        // Shard sources across threads.
+        std::vector<std::vector<std::string>> shards(jobs);
+        for (size_t i = 0; i < sources.size(); ++i)
+            shards[i % jobs].push_back(sources[i]);
+
+        std::vector<std::vector<Diagnostic>> shardDiags(jobs);
+        std::vector<int> shardRet(jobs, 0);
+        std::vector<std::thread> threads;
+        threads.reserve(jobs);
+
+        for (unsigned j = 0; j < jobs; ++j) {
+            if (shards[j].empty()) continue;
+            threads.emplace_back([&, j]() {
+                clang::tooling::ClangTool tool(compDB, shards[j]);
+                LshazActionFactory factory(
+                    request.config, shardDiags[j], profileHotFuncs);
+                shardRet[j] = tool.run(&factory);
+            });
+        }
+
+        for (auto &t : threads)
+            t.join();
+
+        // Merge results.
+        for (unsigned j = 0; j < jobs; ++j) {
+            if (shardRet[j] != 0) toolRet = shardRet[j];
+            result.diagnostics.insert(result.diagnostics.end(),
+                std::make_move_iterator(shardDiags[j].begin()),
+                std::make_move_iterator(shardDiags[j].end()));
+        }
+    }
 
     // IR analysis pass.
     if (request.ir.enabled && toolRet == 0) {

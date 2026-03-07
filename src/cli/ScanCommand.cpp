@@ -35,6 +35,7 @@ struct ScanArgs {
     unsigned irJobs = 0;
     unsigned irBatchSize = 1;
     unsigned maxFiles = 0;
+    unsigned jobs = 0;
     std::vector<std::string> includeFiles;
     std::vector<std::string> excludeFiles;
     bool noIR = false;
@@ -61,6 +62,7 @@ void printScanUsage() {
         << "  --no-ir                  Disable LLVM IR analysis pass\n"
         << "  --ir-opt <O0|O1|O2>     IR optimization level (default: O0)\n"
         << "  --ir-jobs <N>            Max parallel IR jobs (default: hardware_concurrency)\n"
+        << "  --jobs <N>               Parallel AST analysis threads (default: hardware_concurrency)\n"
         << "  --max-files <N>          Maximum translation units to analyze\n"
         << "  --include <pattern>      Only analyze files matching pattern (repeatable)\n"
         << "  --exclude <pattern>      Skip files matching pattern (repeatable)\n"
@@ -104,6 +106,7 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (consumeArg(i, argc, argv, "--ir-opt", args.irOpt)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--ir-jobs", args.irJobs)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--ir-batch-size", args.irBatchSize)) continue;
+        if (consumeArgUnsigned(i, argc, argv, "--jobs", args.jobs)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--max-files", args.maxFiles)) continue;
         { std::string v; if (consumeArg(i, argc, argv, "--include", v)) { args.includeFiles.push_back(v); continue; } }
         { std::string v; if (consumeArg(i, argc, argv, "--exclude", v)) { args.excludeFiles.push_back(v); continue; } }
@@ -246,6 +249,8 @@ int runScanCommand(int argc, const char **argv) {
     request.filter.maxFiles = args.maxFiles;
     request.filter.includeFiles = args.includeFiles;
     request.filter.excludeFiles = args.excludeFiles;
+
+    request.analysisJobs = args.jobs;
 
     request.perfProfilePath = args.perfProfile;
     request.hotnessThreshold = args.hotnessThreshold;

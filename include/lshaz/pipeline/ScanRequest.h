@@ -54,6 +54,9 @@ struct ScanRequest {
     FilterOptions filter;
     OutputFormat outputFormat = OutputFormat::CLI;
 
+    // Parallel AST analysis. 0 = hardware_concurrency, 1 = sequential.
+    unsigned analysisJobs = 0;
+
     // Perf profile for hotness-guided analysis.
     std::string perfProfilePath;
     double hotnessThreshold = 1.0;
