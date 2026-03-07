@@ -94,13 +94,19 @@ target_link_libraries(lshaz
     LLVM
 )
 
-# --- Contract tests ---
-add_executable(output_schema_contract_test
-    test/output_schema_contract_test.cpp
+# --- Output contract tests ---
+add_executable(output_contract_test
+    test/output_contract_test.cpp
     src/output/JSONOutput.cpp
     src/output/SARIFOutput.cpp
     src/output/CLIOutput.cpp
     src/core/Diagnostic.cpp
     src/core/Severity.cpp
 )
-target_link_libraries(output_schema_contract_test PRIVATE LLVM)
+target_link_libraries(output_contract_test PRIVATE LLVM)
+
+# --- Scan E2E test ---
+add_executable(scan_e2e_test
+    test/scan_e2e_test.cpp
+)
+target_link_libraries(scan_e2e_test PRIVATE LLVM)
