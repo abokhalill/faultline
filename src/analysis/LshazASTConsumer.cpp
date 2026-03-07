@@ -51,6 +51,11 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                     continue;
                 }
                 decls.push_back(D);
+                // Recurse into record decls for nested types.
+                if (auto *RD = llvm::dyn_cast<clang::CXXRecordDecl>(D)) {
+                    if (RD->isCompleteDefinition())
+                        collect(RD);
+                }
             }
         };
     collect(TU);
