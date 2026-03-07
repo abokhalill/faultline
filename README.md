@@ -154,4 +154,4 @@ lshaz explain FL002
 
 ## License
 
-See repository for license terms.
+Apache 2.0 — see [LICENSE](LICENSE).

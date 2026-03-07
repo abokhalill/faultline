@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #ifndef LSHAZ_ANALYSIS_LAYOUTSAFETY_H
 #define LSHAZ_ANALYSIS_LAYOUTSAFETY_H
 

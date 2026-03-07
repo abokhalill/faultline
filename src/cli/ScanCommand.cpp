@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "ScanCommand.h"
 
 #include "lshaz/core/Config.h"

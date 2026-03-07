@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # Tier 1: Corpus-Scale Regression Harness
-# Runs faultline against real-world codebases and validates output properties.
+# Runs lshaz against real-world codebases and validates output properties.
 #
 # Usage:
 #   ./validation/tier1/run_corpus.sh                # All corpora
@@ -11,7 +12,7 @@
 #   0  All assertions passed
 #   1  One or more assertions failed
 #
-# Requires: built faultline binary, git (for external corpora)
+# Requires: built lshaz binary, git (for external corpora)
 
 set -uo pipefail
 
@@ -63,7 +64,7 @@ assert_no_crash() {
     local corpus="$2"
     local file="$3"
     if [[ "$exit_code" -gt 2 ]]; then
-        log_fail "$corpus/$file: faultline crashed (exit code $exit_code)"
+        log_fail "$corpus/$file: lshaz crashed (exit code $exit_code)"
         return 0
     fi
     if [[ "$exit_code" -eq 2 ]]; then

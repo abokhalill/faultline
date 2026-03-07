@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/EscapeAnalysis.h"
 
 #include <clang/AST/Decl.h>

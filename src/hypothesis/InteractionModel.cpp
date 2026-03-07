@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "lshaz/hypothesis/InteractionModel.h"
 #include "lshaz/hypothesis/HypothesisTemplate.h"
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # lshaz Validation Harness — Top-Level Runner
 # Executes Tier 1 (corpus regression) and/or Tier 2 (ground truth benchmarks).
 #

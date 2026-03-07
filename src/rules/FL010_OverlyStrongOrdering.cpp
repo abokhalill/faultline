@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "lshaz/core/Rule.h"
 #include "lshaz/core/RuleRegistry.h"
 #include "lshaz/core/HotPathOracle.h"

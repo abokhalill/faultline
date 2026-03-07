@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/StructLayoutVisitor.h"
 
 #include <clang/AST/DeclCXX.h>

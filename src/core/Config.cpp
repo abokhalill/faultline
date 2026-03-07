@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "lshaz/core/Config.h"
 
 #include <llvm/Support/YAMLParser.h>

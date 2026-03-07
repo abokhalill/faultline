@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "lshaz/ir/DiagnosticRefiner.h"
 #include "lshaz/ir/ConfidenceModel.h"
 

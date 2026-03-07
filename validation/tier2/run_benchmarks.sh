@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
 # Tier 2: Ground Truth Microbenchmark Runner
-# Builds paired benchmarks, runs faultline analysis, executes benchmarks
+# Builds paired benchmarks, runs lshaz analysis, executes benchmarks
 # with perf counters, and validates claims against hardware evidence.
 #
 # Usage:
@@ -13,7 +14,7 @@
 #   0  All assertions passed
 #   1  One or more assertions failed
 #
-# Requires: built faultline binary, clang++ (any version)
+# Requires: built lshaz binary, clang++ (any version)
 # Optional: perf (hardware counters), python3 + scipy (statistical analysis)
 
 set -uo pipefail
@@ -119,7 +120,7 @@ run_benchmark_suite() {
     echo "=== $rule: $source ==="
     echo "    Hazardous: $hazardous | Fixed: $fixed"
 
-    # --- Phase 1: Faultline Analysis Validation ---
+    # --- Phase 1: lshaz Analysis Validation ---
     echo "  Phase 1: Static analysis validation"
 
     local lshaz_out="$RESULTS_DIR/${rule}_lshaz.json"

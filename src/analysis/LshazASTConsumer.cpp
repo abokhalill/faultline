@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/LshazASTConsumer.h"
 #include "lshaz/analysis/StructLayoutVisitor.h"
 #include "lshaz/core/RuleRegistry.h"
