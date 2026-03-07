@@ -217,6 +217,8 @@ std::string SARIFOutputFormatter::format(
     os << "        \"configPath\": \"" << sarifEscape(meta.configPath) << "\",\n";
     os << "        \"irOptLevel\": \"" << sarifEscape(meta.irOptLevel) << "\",\n";
     os << "        \"irEnabled\": " << (meta.irEnabled ? "true" : "false") << ",\n";
+    os << "        \"totalTUs\": " << meta.totalTUs << ",\n";
+    os << "        \"failedTUCount\": " << meta.failedTUCount << ",\n";
     os << "        \"compilers\": [";
     for (size_t i = 0; i < meta.compilers.size(); ++i) {
         os << "{\"path\": \"" << sarifEscape(meta.compilers[i].path) << "\"}";
@@ -244,6 +246,13 @@ std::string SARIFOutputFormatter::format(
 
         os << "\n      {\n";
         os << "        \"ruleId\": \"" << sarifEscape(d.ruleID) << "\",\n";
+        // ruleIndex for spec compliance.
+        for (size_t ri = 0; ri < seenRules.size(); ++ri) {
+            if (seenRules[ri] == d.ruleID) {
+                os << "        \"ruleIndex\": " << ri << ",\n";
+                break;
+            }
+        }
         os << "        \"level\": \"" << sarifLevel(d.severity) << "\",\n";
         os << "        \"message\": { \"text\": \"" << sarifEscape(d.hardwareReasoning) << "\" },\n";
 
