@@ -140,20 +140,48 @@ static lshaz::EvidenceTier parseEvidenceTier(const std::string &s) {
 }
 
 int main(int argc, const char **argv) {
-    // Subcommand dispatch: `lshaz scan ...` routes to the scan handler
-    // before LLVM's CommandLine parser consumes argv.
     if (argc >= 2 && std::strcmp(argv[1], "scan") == 0)
         return lshaz::runScanCommand(argc - 2, argv + 2);
     if (argc >= 2 && std::strcmp(argv[1], "explain") == 0)
         return lshaz::runExplainCommand(argc - 2, argv + 2);
 
+    // `lshaz version` as a first-class subcommand.
+    if (argc >= 2 && (std::strcmp(argv[1], "version") == 0 ||
+                      std::strcmp(argv[1], "--version") == 0)) {
+        llvm::outs() << lshaz::kToolName << " version " << lshaz::kToolVersion
+                     << " (output schema " << lshaz::kOutputSchemaVersion << ")\n";
+        return 0;
+    }
+
+    // `lshaz help` or `lshaz` with no args.
+    if (argc < 2 || std::strcmp(argv[1], "help") == 0 ||
+        std::strcmp(argv[1], "--help") == 0 ||
+        std::strcmp(argv[1], "-h") == 0) {
+        llvm::outs()
+            << "lshaz " << lshaz::kToolVersion << "\n"
+            << "Static analysis for microarchitectural latency hazards in C++\n"
+            << "\n"
+            << "Usage:\n"
+            << "  lshaz scan <path> [options]   Analyze a project\n"
+            << "  lshaz explain [rule]          Show rule documentation\n"
+            << "  lshaz version                 Print version\n"
+            << "  lshaz help                    Show this help\n"
+            << "\n"
+            << "Run 'lshaz scan --help' for scan options.\n";
+        return 0;
+    }
+
+    // Legacy CLI: bare source files with `-- <flags>`.
+    // Deprecated since 0.2.0, removal in 0.4.0.
     llvm::cl::SetVersionPrinter([](llvm::raw_ostream &OS) {
         OS << lshaz::kToolName << " version " << lshaz::kToolVersion
            << " (output schema " << lshaz::kOutputSchemaVersion << ")\n";
     });
 
-    llvm::errs() << "lshaz: warning: legacy CLI is deprecated. "
-                    "Use 'lshaz scan <path>' instead.\n";
+    llvm::errs() << "lshaz: warning: legacy CLI is deprecated and will be "
+                    "removed in 0.4.0.\n"
+                    "  Equivalent: lshaz scan <path> --compile-db <db>\n"
+                    "  Run 'lshaz scan --help' for the new interface.\n\n";
 
     auto parser = CommonOptionsParser::create(argc, argv, LshazCat);
     if (!parser) {
