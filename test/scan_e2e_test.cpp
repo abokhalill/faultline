@@ -451,6 +451,42 @@ void testDeterminism(const std::string &bin, const std::string &fixture) {
     fs::remove_all(tmp);
 }
 
+// ===== Parallel determinism =====
+
+void testParallelDeterminism(const std::string &bin, const std::string &fixture) {
+    std::cerr << "test: parallel determinism (--jobs 4, 5 iterations)\n";
+    auto tmp = isolateFixture(fixture, "pardet");
+    auto project = (tmp / "project").string();
+    std::string config = project + "/lshaz.config.yaml";
+
+    auto strip = [](std::string s) {
+        auto pos = s.find("\"timestamp\"");
+        if (pos != std::string::npos) {
+            auto end = s.find(',', pos);
+            if (end == std::string::npos) end = s.find('}', pos);
+            if (end != std::string::npos) s.erase(pos, end - pos + 1);
+        }
+        return s;
+    };
+
+    std::string cmd = bin + " scan " + project + " --config " + config +
+                      " --no-ir --format json --jobs 4";
+    auto baseline = run(cmd);
+    std::string baseStripped = strip(baseline.out);
+
+    bool allMatch = true;
+    for (int i = 1; i < 5; ++i) {
+        auto ri = run(cmd);
+        if (strip(ri.out) != baseStripped) {
+            allMatch = false;
+            break;
+        }
+    }
+    check(allMatch, "5 parallel runs produce identical output");
+
+    fs::remove_all(tmp);
+}
+
 // ===== Exit code semantics =====
 
 void testExitCodeClean(const std::string &bin, const std::string &fixture) {
@@ -514,6 +550,7 @@ int main() {
 
     // Determinism.
     testDeterminism(bin, fixture);
+    testParallelDeterminism(bin, fixture);
 
     // Exit code semantics.
     testExitCodeClean(bin, fixture);

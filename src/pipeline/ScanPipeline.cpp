@@ -540,7 +540,12 @@ ScanResult ScanPipeline::run(
             request.config, result.diagnostics, profileHotFuncs);
         toolRet = tool.run(&factory);
     } else {
-        // Shard sources across threads.
+        // Shard sources across threads. Thread-safety:
+        //   - compDB: read-only, shared safely.
+        //   - request.config: const ref, read-only.
+        //   - profileHotFuncs: copied by value into each factory.
+        //   - shardDiags[j]: exclusive per-thread, no contention.
+        //   - HotPathOracle: constructed per-TU inside LshazASTConsumer.
         std::vector<std::vector<std::string>> shards(jobs);
         for (size_t i = 0; i < sources.size(); ++i)
             shards[i % jobs].push_back(sources[i]);
