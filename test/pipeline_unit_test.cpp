@@ -52,10 +52,16 @@ void testMatchesGlobContainment() {
 }
 
 void testMatchesGlobSubstring() {
-    std::cerr << "test: matchesGlob substring fallback\n";
+    std::cerr << "test: matchesGlob fnmatch literals\n";
     using lshaz::matchesGlob;
-    check(matchesGlob("/a/b/feed_handler.cpp", "feed_handler"), "plain substring");
-    check(!matchesGlob("/a/b/order_book.cpp", "feed_handler"), "rejects non-match");
+    // fnmatch: bare string is a literal match, not substring.
+    check(!matchesGlob("/a/b/feed_handler.cpp", "feed_handler"), "bare literal no match");
+    check(matchesGlob("feed_handler", "feed_handler"), "exact literal match");
+    check(matchesGlob("/a/b/feed_handler.cpp", "*feed_handler*"), "containment via *...*");
+    check(!matchesGlob("/a/b/order_book.cpp", "*feed_handler*"), "rejects non-match");
+    // fnmatch supports ? and character classes.
+    check(matchesGlob("/a/b/foo.cpp", "/a/b/fo?.cpp"), "? wildcard");
+    check(matchesGlob("/a/b/foo.cpp", "/a/b/[fg]oo.cpp"), "character class");
 }
 
 void testMatchesGlobEmpty() {

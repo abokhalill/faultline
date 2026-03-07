@@ -1,21 +1,15 @@
 #include "lshaz/pipeline/SourceFilter.h"
 
+#include <fnmatch.h>
+
 namespace lshaz {
 
 bool matchesGlob(const std::string &path, const std::string &pattern) {
     if (pattern.empty())
         return false;
-
-    if (pattern.front() == '*' && pattern.back() == '*' && pattern.size() > 2) {
-        std::string sub = pattern.substr(1, pattern.size() - 2);
-        return path.find(sub) != std::string::npos;
-    }
-    if (pattern.front() == '*') {
-        std::string suffix = pattern.substr(1);
-        return path.size() >= suffix.size() &&
-               path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0;
-    }
-    return path.find(pattern) != std::string::npos;
+    // FNM_PATHNAME not set: * matches across /. Consistent with
+    // hot_file_patterns in lshaz.config.yaml and --include/--exclude CLI.
+    return fnmatch(pattern.c_str(), path.c_str(), 0) == 0;
 }
 
 std::vector<std::string> filterSources(
