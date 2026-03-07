@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - { cc: gcc-14, cxx: g++-14, llvm: 18 }
+          - { cc: gcc-15, cxx: g++-15, llvm: 19 } 
+          - { cc: clang-19, cxx: clang++-19, llvm: 19 }
+          - { cc: clang-20, cxx: clang++-20, llvm: 20 } 
+
+    env:
+      CC: ${{ matrix.compiler.cc }}
+      CXX: ${{ matrix.compiler.cxx }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ${{ runner.os }}-${{ matrix.compiler.cc }}-${{ github.sha }}
+          restore-keys: ${{ runner.os }}-${{ matrix.compiler.cc }}-
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build ccache \
+            ${{ matrix.compiler.cc }} ${{ matrix.compiler.cxx }} \
+            llvm-${{ matrix.compiler.llvm }}-dev \
+            libclang-${{ matrix.compiler.llvm }}-dev \
+            libyaml-cpp-dev
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DLLVM_DIR=/usr/lib/llvm-${{ matrix.compiler.llvm }}/cmake \
+            -DClang_DIR=/usr/lib/llvm-${{ matrix.compiler.llvm }}/lib/cmake/clang
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run Tests
+        run: |
+          ./build/output_contract_test
+          ./build/pipeline_unit_test
+          ./build/scan_e2e_test
