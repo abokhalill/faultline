@@ -1,4 +1,5 @@
 #include "lshaz/analysis/CacheLineMap.h"
+#include "lshaz/analysis/LayoutSafety.h"
 
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
@@ -12,7 +13,7 @@ CacheLineMap::CacheLineMap(const clang::CXXRecordDecl *RD,
                            uint64_t cacheLineBytes)
     : cacheLineBytes_(cacheLineBytes) {
 
-    if (!RD || !RD->isCompleteDefinition())
+    if (!canComputeRecordLayout(RD, Ctx))
         return;
 
     const auto &layout = Ctx.getASTRecordLayout(RD);
@@ -73,7 +74,7 @@ bool CacheLineMap::isFieldMutable(const clang::FieldDecl *FD) {
 void CacheLineMap::collectFields(const clang::CXXRecordDecl *RD,
                                  clang::ASTContext &Ctx,
                                  uint64_t baseOffsetBytes) {
-    if (!RD || !RD->isCompleteDefinition())
+    if (!canComputeRecordLayout(RD, Ctx))
         return;
 
     const auto &layout = Ctx.getASTRecordLayout(RD);
@@ -105,6 +106,8 @@ void CacheLineMap::collectFields(const clang::CXXRecordDecl *RD,
         uint64_t offsetBytes = offsetBits / 8;
         uint64_t absOffset = baseOffsetBytes + offsetBytes;
 
+        if (!canComputeTypeSize(field->getType(), Ctx))
+            continue;
         uint64_t fieldSize = Ctx.getTypeSizeInChars(field->getType()).getQuantity();
 
         uint64_t startLine = absOffset / cacheLineBytes_;

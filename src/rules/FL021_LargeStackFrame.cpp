@@ -1,3 +1,4 @@
+#include "lshaz/analysis/LayoutSafety.h"
 #include "lshaz/core/Rule.h"
 #include "lshaz/core/RuleRegistry.h"
 #include "lshaz/core/HotPathOracle.h"
@@ -52,7 +53,7 @@ public:
                         if (!VD->hasLocalStorage())
                             continue;
                         clang::QualType QT = VD->getType();
-                        if (QT->isIncompleteType() || QT->isDependentType())
+                        if (!canComputeTypeSize(QT, Ctx))
                             continue;
 
                         uint64_t sz = Ctx.getTypeSizeInChars(QT).getQuantity();
@@ -68,9 +69,9 @@ public:
         // Also account for parameters passed by value.
         for (const auto *param : FD->parameters()) {
             clang::QualType QT = param->getType();
-            if (QT->isIncompleteType() || QT->isDependentType())
-                continue;
             if (!QT->isReferenceType() && !QT->isPointerType()) {
+                if (!canComputeTypeSize(QT, Ctx))
+                    continue;
                 uint64_t sz = Ctx.getTypeSizeInChars(QT).getQuantity();
                 totalBytes += sz;
             }

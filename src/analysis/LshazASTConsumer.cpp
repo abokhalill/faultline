@@ -31,6 +31,11 @@ LshazASTConsumer::LshazASTConsumer(
 }
 
 void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
+    // Skip TUs that had fatal parse errors — partial ASTs contain
+    // error-recovery types that crash Clang's layout computation.
+    if (Ctx.getDiagnostics().hasFatalErrorOccurred())
+        return;
+
     auto *TU = Ctx.getTranslationUnitDecl();
     const auto &SM = Ctx.getSourceManager();
 
@@ -50,6 +55,19 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                     collect(LS);
                     continue;
                 }
+                // Skip dependent or invalid decls — getASTRecordLayout
+                // crashes on records with unresolved template parameters.
+                if (D->isInvalidDecl())
+                    continue;
+                if (auto *RD = llvm::dyn_cast<clang::CXXRecordDecl>(D)) {
+                    if (RD->isDependentType())
+                        continue;
+                }
+                if (auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D)) {
+                    if (FD->isDependentContext())
+                        continue;
+                }
+
                 decls.push_back(D);
                 // Recurse into record decls for nested types.
                 if (auto *RD = llvm::dyn_cast<clang::CXXRecordDecl>(D)) {

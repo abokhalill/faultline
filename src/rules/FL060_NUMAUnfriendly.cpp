@@ -1,3 +1,4 @@
+#include "lshaz/analysis/LayoutSafety.h"
 #include "lshaz/core/Rule.h"
 #include "lshaz/core/RuleRegistry.h"
 #include "lshaz/core/HotPathOracle.h"
@@ -37,6 +38,8 @@ public:
         if (!RD || !RD->isCompleteDefinition())
             return;
         if (RD->isImplicit() || RD->isLambda())
+            return;
+        if (!canComputeRecordLayout(RD, Ctx))
             return;
 
         const auto &layout = Ctx.getASTRecordLayout(RD);
