@@ -414,6 +414,76 @@ static void applyPMUFeedback(
         feedbackLoop.savePriors(fb.pmuPriorsPath);
 }
 
+// Cross-TU escape suppression: diagnostics that rely on thread_escape=true
+// but have atomics=no are likely false positives when the type only appears
+// in a single TU. Must be called BEFORE dedup so that duplicate diagnostics
+// from multiple TUs are still present (multiplicity > 1 = multi-TU evidence).
+static unsigned applyCrossTUEscapeSuppression(
+        std::vector<Diagnostic> &diagnostics,
+        unsigned totalTUs) {
+    if (totalTUs <= 1)
+        return 0;
+
+    // Count how many times each (ruleID, file, line) appears in the raw
+    // (pre-dedup) diagnostic list. A header included by N TUs produces
+    // N duplicate diagnostics for the same struct.
+    struct DiagKey {
+        std::string ruleID;
+        std::string file;
+        unsigned line;
+        bool operator==(const DiagKey &o) const {
+            return ruleID == o.ruleID && file == o.file && line == o.line;
+        }
+    };
+    struct DiagKeyHash {
+        size_t operator()(const DiagKey &k) const {
+            size_t h = std::hash<std::string>{}(k.ruleID);
+            h ^= std::hash<std::string>{}(k.file) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= std::hash<unsigned>{}(k.line) + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+
+    std::unordered_map<DiagKey, unsigned, DiagKeyHash> keyCounts;
+    for (const auto &d : diagnostics) {
+        auto eit = d.structuralEvidence.find("thread_escape");
+        if (eit == d.structuralEvidence.end()) continue;
+        if (eit->second != "true" && eit->second != "yes") continue;
+        keyCounts[{d.ruleID, d.location.file, d.location.line}]++;
+    }
+
+    unsigned suppressed = 0;
+    for (auto &d : diagnostics) {
+        if (d.suppressed) continue;
+
+        auto eit = d.structuralEvidence.find("thread_escape");
+        if (eit == d.structuralEvidence.end()) continue;
+        if (eit->second != "true" && eit->second != "yes") continue;
+
+        // Atomics present = structurally confirmed escape. Skip.
+        auto ait = d.structuralEvidence.find("atomics");
+        if (ait != d.structuralEvidence.end() &&
+            (ait->second == "yes" || ait->second == "true"))
+            continue;
+
+        // Proven-tier findings are never suppressed.
+        if (d.evidenceTier == EvidenceTier::Proven)
+            continue;
+
+        DiagKey key{d.ruleID, d.location.file, d.location.line};
+        auto it = keyCounts.find(key);
+        if (it != keyCounts.end() && it->second > 1)
+            continue; // Multi-TU: diagnosed from multiple compilation contexts.
+
+        // Single-TU, no atomics, not proven: suppress.
+        d.suppressed = true;
+        d.escalations.push_back(
+            "cross-TU suppression: no multi-TU evidence of thread escape");
+        ++suppressed;
+    }
+    return suppressed;
+}
+
 static void filterAndSort(const FilterOptions &filter,
                            std::vector<Diagnostic> &diagnostics) {
     diagnostics.erase(
@@ -636,6 +706,15 @@ ScanResult ScanPipeline::run(
         report("ir", "IR emission and analysis");
         runIRPass(request, compDB, sources,
                   result.diagnostics, result.metadata);
+    }
+
+    // Cross-TU escape suppression (before dedup: needs multiplicity signal).
+    if (sources.size() > 1) {
+        unsigned crossTUSuppressed = applyCrossTUEscapeSuppression(
+            result.diagnostics, result.totalTUsAnalyzed);
+        if (crossTUSuppressed > 0)
+            report("cross_tu", std::to_string(crossTUSuppressed) +
+                   " finding(s) suppressed (no cross-TU escape evidence)");
     }
 
     // Cross-TU deduplication.
