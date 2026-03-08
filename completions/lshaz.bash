@@ -11,7 +11,7 @@ _lshaz() {
     subcmd=""
     for ((i=1; i < COMP_CWORD; i++)); do
         case "${COMP_WORDS[i]}" in
-            scan|init|diff|explain|version|help)
+            scan|fix|init|diff|explain|version|help)
                 subcmd="${COMP_WORDS[i]}"
                 break
                 ;;
@@ -20,14 +20,14 @@ _lshaz() {
 
     # Top-level completion.
     if [[ -z "$subcmd" ]]; then
-        COMPREPLY=($(compgen -W "scan init diff explain version help" -- "$cur"))
+        COMPREPLY=($(compgen -W "scan fix init diff explain version help" -- "$cur"))
         return
     fi
 
     case "$subcmd" in
         scan)
             case "$prev" in
-                --compile-db|--config|--output|--perf-profile|--calibration-store|--pmu-trace|--pmu-priors)
+                --compile-db|--config|--output|--perf-profile|--calibration-store|--pmu-trace|--pmu-priors|--changed-files)
                     COMPREPLY=($(compgen -f -- "$cur"))
                     return
                     ;;
@@ -51,6 +51,10 @@ _lshaz() {
                     COMPREPLY=($(compgen -W "tcmalloc jemalloc mimalloc" -- "$cur"))
                     return
                     ;;
+                --target-arch)
+                    COMPREPLY=($(compgen -W "x86-64 arm64 arm64-apple" -- "$cur"))
+                    return
+                    ;;
                 --ir-jobs|--ir-batch-size|--jobs|--max-files|--watch-interval|--hotness-threshold)
                     return
                     ;;
@@ -60,7 +64,7 @@ _lshaz() {
                     ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--compile-db --config --format --output --min-severity --min-evidence --no-ir --ir-opt --ir-jobs --ir-batch-size --no-ir-cache --jobs --max-files --include --exclude --perf-profile --hotness-threshold --allocator --calibration-store --pmu-trace --pmu-priors --watch --watch-interval --trust-build-system --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "--compile-db --config --format --output --min-severity --min-evidence --no-ir --ir-opt --ir-jobs --ir-batch-size --no-ir-cache --jobs --max-files --include --exclude --perf-profile --hotness-threshold --allocator --calibration-store --pmu-trace --pmu-priors --watch --watch-interval --trust-build-system --changed-files --target-arch --help" -- "$cur"))
             else
                 COMPREPLY=($(compgen -d -- "$cur"))
             fi
@@ -74,6 +78,23 @@ _lshaz() {
             ;;
         diff)
             COMPREPLY=($(compgen -f -X '!*.json' -- "$cur"))
+            ;;
+        fix)
+            case "$prev" in
+                --compile-db|--config)
+                    COMPREPLY=($(compgen -f -- "$cur"))
+                    return
+                    ;;
+                --rules)
+                    COMPREPLY=($(compgen -W "FL001" -- "$cur"))
+                    return
+                    ;;
+            esac
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=($(compgen -W "--compile-db --config --dry-run --rules --help" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -d -f -- "$cur"))
+            fi
             ;;
         explain)
             if [[ "$cur" == -* ]]; then

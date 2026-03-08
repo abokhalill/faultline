@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # fish completion for lshaz
 
-set -l subcmds scan init diff explain version help
+set -l subcmds scan fix init diff explain version help
 
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a scan -d "Analyze a project"
+complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a fix -d "Auto-remediate fixable findings"
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a init -d "Generate compile_commands.json and config"
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a diff -d "Compare two scan results"
 complete -c lshaz -f -n "not __fish_seen_subcommand_from $subcmds" -a explain -d "Show rule documentation"
@@ -35,7 +36,16 @@ complete -c lshaz -n "__fish_seen_subcommand_from scan" -l pmu-priors -rF -d "PM
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l watch -d "Watch mode"
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l watch-interval -r -d "Watch poll seconds"
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l trust-build-system -d "Allow build system on cloned repos"
+complete -c lshaz -n "__fish_seen_subcommand_from scan" -l changed-files -rF -d "Only scan TUs affected by listed files"
+complete -c lshaz -n "__fish_seen_subcommand_from scan" -l target-arch -r -a "x86-64 arm64 arm64-apple" -d "Target architecture"
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l help -d "Show help"
+
+# fix
+complete -c lshaz -n "__fish_seen_subcommand_from fix" -l compile-db -rF -d "Path to compile_commands.json"
+complete -c lshaz -n "__fish_seen_subcommand_from fix" -l config -rF -d "Path to lshaz.config.yaml"
+complete -c lshaz -n "__fish_seen_subcommand_from fix" -l dry-run -d "Show patches without modifying files"
+complete -c lshaz -n "__fish_seen_subcommand_from fix" -l rules -r -d "Comma-separated rules to fix"
+complete -c lshaz -n "__fish_seen_subcommand_from fix" -l help -d "Show help"
 
 # init
 complete -c lshaz -n "__fish_seen_subcommand_from init" -l no-config -d "Skip config generation"

@@ -5,6 +5,7 @@ _lshaz() {
     local -a subcmds
     subcmds=(
         'scan:Analyze a project for hardware-level performance hazards'
+        'fix:Auto-remediate fixable findings'
         'init:Generate compile_commands.json and starter config'
         'diff:Compare two JSON scan results'
         'explain:Show rule documentation'
@@ -48,6 +49,8 @@ _lshaz() {
                         '--watch[Watch mode]' \
                         '--watch-interval[Watch poll interval]:seconds:' \
                         '--trust-build-system[Allow build system execution on cloned repos]' \
+                        '--changed-files[Only scan TUs affected by listed files]:file:_files' \
+                        '--target-arch[Target architecture]:arch:(x86-64 arm64 arm64-apple)' \
                         '--help[Show help]' \
                         '1:target:_files -/'
                     ;;
@@ -62,6 +65,15 @@ _lshaz() {
                     _arguments \
                         '1:before:_files -g "*.json"' \
                         '2:after:_files -g "*.json"'
+                    ;;
+                fix)
+                    _arguments \
+                        '--compile-db[Path to compile_commands.json]:file:_files' \
+                        '--config[Path to lshaz.config.yaml]:file:_files' \
+                        '--dry-run[Show patches without modifying files]' \
+                        '--rules[Comma-separated rules to fix]:rules:' \
+                        '--help[Show help]' \
+                        '1:target:_files'
                     ;;
                 explain)
                     _arguments \
