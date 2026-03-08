@@ -42,17 +42,29 @@ BuildSystem detectBuildSystem(const std::string &dir) {
 }
 
 bool hasCompileDB(const std::string &dir) {
-    const char *candidates[] = {
-        "compile_commands.json",
-        "build/compile_commands.json",
-    };
-    for (const char *c : candidates) {
-        llvm::SmallString<256> p(dir);
-        llvm::sys::path::append(p, c);
-        if (llvm::sys::fs::exists(p))
-            return true;
-    }
+    llvm::SmallString<256> p(dir);
+    llvm::sys::path::append(p, "compile_commands.json");
+    if (llvm::sys::fs::exists(p))
+        return true;
+
+    p = llvm::StringRef(dir);
+    llvm::sys::path::append(p, "build");
+    llvm::sys::path::append(p, "compile_commands.json");
+    if (llvm::sys::fs::exists(p))
+        return true;
+
     return false;
+}
+
+// Shell-escape a single argument for sh -c.
+std::string shellQuote(const std::string &s) {
+    std::string out = "'";
+    for (char c : s) {
+        if (c == '\'') out += "'\\''";
+        else out += c;
+    }
+    out += "'";
+    return out;
 }
 
 int runExternal(const std::string &program,
@@ -64,10 +76,24 @@ int runExternal(const std::string &program,
         return -1;
     }
 
-    std::vector<llvm::StringRef> argv;
-    argv.push_back(*found);
+    // llvm::sys::ExecuteAndWait has no cwd parameter.
+    // Route through sh -c 'cd <dir> && exec <cmd> <args>' to
+    // guarantee the child process runs in the target directory.
+    auto sh = llvm::sys::findProgramByName("sh");
+    if (!sh) {
+        llvm::errs() << "lshaz init: 'sh' not found\n";
+        return -1;
+    }
+
+    std::string cmdline = "cd " + shellQuote(cwd) + " && exec " +
+                          shellQuote(*found);
     for (const auto &a : args)
-        argv.push_back(a);
+        cmdline += " " + shellQuote(a);
+
+    std::vector<llvm::StringRef> argv;
+    argv.push_back(*sh);
+    argv.push_back("-c");
+    argv.push_back(cmdline);
 
     llvm::SmallString<256> outFile, errFile;
     llvm::sys::path::system_temp_directory(true, outFile);
@@ -84,7 +110,7 @@ int runExternal(const std::string &program,
     std::string execErr;
     bool failed = false;
     int rc = llvm::sys::ExecuteAndWait(
-        *found, argv,
+        *sh, argv,
         /*Env=*/std::nullopt, redirects,
         timeout, /*MemoryLimit=*/0,
         &execErr, &failed);
