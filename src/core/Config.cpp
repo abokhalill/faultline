@@ -16,6 +16,16 @@ namespace llvm {
 namespace yaml {
 
 template <>
+struct ScalarEnumerationTraits<lshaz::TargetArch> {
+    static void enumeration(IO &io, lshaz::TargetArch &arch) {
+        io.enumCase(arch, "x86-64",      lshaz::TargetArch::X86_64);
+        io.enumCase(arch, "x86_64",      lshaz::TargetArch::X86_64);
+        io.enumCase(arch, "arm64",       lshaz::TargetArch::ARM64);
+        io.enumCase(arch, "arm64-apple", lshaz::TargetArch::ARM64Apple);
+    }
+};
+
+template <>
 struct MappingTraits<lshaz::Config> {
     static void mapping(IO &io, lshaz::Config &cfg) {
         io.mapOptional("cache_line_bytes",       cfg.cacheLineBytes);
@@ -33,6 +43,7 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("perf_profile_path",      cfg.perfProfilePath);
         io.mapOptional("hotness_threshold_pct",  cfg.hotnessThresholdPct);
         io.mapOptional("linked_allocator",       cfg.linkedAllocator);
+        io.mapOptional("target_arch",             cfg.targetArch);
     }
 };
 
@@ -61,6 +72,18 @@ Config Config::loadFromFile(const std::string &path) {
         llvm::errs() << "lshaz: warning: config parse error in '"
                      << path << "', using defaults\n";
         return defaults();
+    }
+
+    // Apply architecture defaults when target_arch is set but cache model
+    // fields were not explicitly overridden (still at x86-64 defaults).
+    if (cfg.targetArch == TargetArch::ARM64Apple) {
+        Config def;
+        if (cfg.cacheLineBytes == def.cacheLineBytes)
+            cfg.cacheLineBytes = 128;
+        if (cfg.cacheLineSpanWarn == def.cacheLineSpanWarn)
+            cfg.cacheLineSpanWarn = 128;
+        if (cfg.cacheLineSpanCrit == def.cacheLineSpanCrit)
+            cfg.cacheLineSpanCrit = 256;
     }
 
     return cfg;

@@ -1,0 +1,26 @@
+[
+{
+  "directory": "/home/ousef/lshaz/test/fixtures/hft_core/build",
+  "command": "/usr/bin/c++  -I/home/ousef/lshaz/test/fixtures/hft_core/include -std=gnu++20 -o CMakeFiles/hft_core.dir/src/main.cpp.o -c /home/ousef/lshaz/test/fixtures/hft_core/src/main.cpp",
+  "file": "/home/ousef/lshaz/test/fixtures/hft_core/src/main.cpp",
+  "output": "CMakeFiles/hft_core.dir/src/main.cpp.o"
+},
+{
+  "directory": "/home/ousef/lshaz/test/fixtures/hft_core/build",
+  "command": "/usr/bin/c++  -I/home/ousef/lshaz/test/fixtures/hft_core/include -std=gnu++20 -o CMakeFiles/hft_core.dir/src/order_book.cpp.o -c /home/ousef/lshaz/test/fixtures/hft_core/src/order_book.cpp",
+  "file": "/home/ousef/lshaz/test/fixtures/hft_core/src/order_book.cpp",
+  "output": "CMakeFiles/hft_core.dir/src/order_book.cpp.o"
+},
+{
+  "directory": "/home/ousef/lshaz/test/fixtures/hft_core/build",
+  "command": "/usr/bin/c++  -I/home/ousef/lshaz/test/fixtures/hft_core/include -std=gnu++20 -o CMakeFiles/hft_core.dir/src/matching_engine.cpp.o -c /home/ousef/lshaz/test/fixtures/hft_core/src/matching_engine.cpp",
+  "file": "/home/ousef/lshaz/test/fixtures/hft_core/src/matching_engine.cpp",
+  "output": "CMakeFiles/hft_core.dir/src/matching_engine.cpp.o"
+},
+{
+  "directory": "/home/ousef/lshaz/test/fixtures/hft_core/build",
+  "command": "/usr/bin/c++  -I/home/ousef/lshaz/test/fixtures/hft_core/include -std=gnu++20 -o CMakeFiles/hft_core.dir/src/feed_handler.cpp.o -c /home/ousef/lshaz/test/fixtures/hft_core/src/feed_handler.cpp",
+  "file": "/home/ousef/lshaz/test/fixtures/hft_core/src/feed_handler.cpp",
+  "output": "CMakeFiles/hft_core.dir/src/feed_handler.cpp.o"
+}
+]
