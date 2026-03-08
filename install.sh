@@ -47,38 +47,38 @@ fi
 info "using LLVM at $LLVM_PREFIX"
 
 # Clone into temp directory.
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
 
 info "cloning lshaz..."
-git clone --depth 1 "$REPO" "$TMPDIR/lshaz" > "$TMPDIR/clone.log" 2>&1 \
-    || { cat "$TMPDIR/clone.log"; die "clone failed"; }
+git clone --depth 1 "$REPO" "$WORK_DIR/lshaz" > "$WORK_DIR/clone.log" 2>&1 \
+    || { cat "$WORK_DIR/clone.log"; die "clone failed"; }
 
 # Build.
 info "building (${BUILD_TYPE})..."
-cmake -S "$TMPDIR/lshaz" -B "$TMPDIR/lshaz/build" \
+cmake -S "$WORK_DIR/lshaz" -B "$WORK_DIR/lshaz/build" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
-    > "$TMPDIR/cmake.log" 2>&1 \
-    || { cat "$TMPDIR/cmake.log"; die "cmake configure failed"; }
+    > "$WORK_DIR/cmake.log" 2>&1 \
+    || { cat "$WORK_DIR/cmake.log"; die "cmake configure failed"; }
 
-cmake --build "$TMPDIR/lshaz/build" -j"$(nproc)" \
-    > "$TMPDIR/build.log" 2>&1 \
-    || { tail -20 "$TMPDIR/build.log"; die "build failed"; }
+cmake --build "$WORK_DIR/lshaz/build" -j"$(nproc)" \
+    > "$WORK_DIR/build.log" 2>&1 \
+    || { tail -20 "$WORK_DIR/build.log"; die "build failed"; }
 
 # Verify.
-"$TMPDIR/lshaz/build/lshaz" --version >/dev/null 2>&1 \
+"$WORK_DIR/lshaz/build/lshaz" --version >/dev/null 2>&1 \
     || die "built binary does not execute"
 
 # Run contract tests.
 info "running contract tests..."
-"$TMPDIR/lshaz/build/output_contract_test" \
-    > "$TMPDIR/test.log" 2>&1 \
-    || { cat "$TMPDIR/test.log"; die "contract tests failed"; }
+"$WORK_DIR/lshaz/build/output_contract_test" \
+    > "$WORK_DIR/test.log" 2>&1 \
+    || { cat "$WORK_DIR/test.log"; die "contract tests failed"; }
 
 # Install.
 mkdir -p "$INSTALL_DIR"
-cp "$TMPDIR/lshaz/build/lshaz" "$INSTALL_DIR/lshaz"
+cp "$WORK_DIR/lshaz/build/lshaz" "$INSTALL_DIR/lshaz"
 chmod +x "$INSTALL_DIR/lshaz"
 
 info "installed to $INSTALL_DIR/lshaz"
