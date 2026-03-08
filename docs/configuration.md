@@ -72,6 +72,7 @@ lshaz scan <path> [options]
 | `--watch` | Watch mode: re-scan on file changes |
 | `--watch-interval <N>` | Seconds between watch polls (default: 2) |
 | `--trust-build-system` | Allow cmake/meson/bear execution on cloned remote repos |
+| `--changed-files <path>` | Incremental mode: only scan TUs affected by files listed in `<path>` (one per line). Header changes trigger full scan conservatively. |
 | `--help` | Show help with exit code reference |
 
 ---

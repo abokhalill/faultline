@@ -8,7 +8,9 @@
 #include "lshaz/pipeline/ScanPipeline.h"
 
 #include <clang/Tooling/CompilationDatabase.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -49,6 +51,7 @@ struct ScanArgs {
     bool watch = false;
     unsigned watchInterval = 2;
     bool trustBuildSystem = false;
+    std::string changedFilesPath;
     bool help = false;
     std::vector<std::string> compilerFlags;
 };
@@ -81,6 +84,7 @@ void printScanUsage() {
         << "  --watch                  Watch mode: re-scan on file changes\n"
         << "  --watch-interval <N>     Seconds between polls (default: 2)\n"
         << "  --trust-build-system     Allow cmake/meson/bear on cloned repos\n"
+        << "  --changed-files <path>   Only scan TUs affected by files listed in <path>\n"
         << "  --help                   Show this help\n"
         << "\n"
         << "Single-file mode:\n"
@@ -148,6 +152,7 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (std::strcmp(argv[i], "--no-ir-cache") == 0) { args.noIRCache = true; continue; }
         if (std::strcmp(argv[i], "--watch") == 0) { args.watch = true; continue; }
         if (std::strcmp(argv[i], "--trust-build-system") == 0) { args.trustBuildSystem = true; continue; }
+        if (consumeArg(i, argc, argv, "--changed-files", args.changedFilesPath)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--watch-interval", args.watchInterval)) continue;
 
         if (argv[i][0] == '-') {
@@ -343,6 +348,24 @@ int runScanCommand(int argc, const char **argv) {
     request.filter.maxFiles = args.maxFiles;
     request.filter.includeFiles = args.includeFiles;
     request.filter.excludeFiles = args.excludeFiles;
+
+    if (!args.changedFilesPath.empty()) {
+        auto bufOrErr = llvm::MemoryBuffer::getFile(args.changedFilesPath);
+        if (!bufOrErr) {
+            llvm::errs() << "lshaz scan: cannot read changed-files '"
+                         << args.changedFilesPath << "': "
+                         << bufOrErr.getError().message() << "\n";
+            return 3;
+        }
+        llvm::StringRef contents = (*bufOrErr)->getBuffer();
+        llvm::SmallVector<llvm::StringRef, 64> lines;
+        contents.split(lines, '\n', /*MaxSplit=*/-1, /*KeepEmpty=*/false);
+        for (auto &line : lines)
+            request.filter.changedFiles.push_back(line.trim().str());
+        llvm::errs() << "lshaz: incremental mode — "
+                     << request.filter.changedFiles.size()
+                     << " changed file(s)\n";
+    }
 
     request.analysisJobs = args.jobs;
 

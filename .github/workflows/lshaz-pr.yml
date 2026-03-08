@@ -33,8 +33,15 @@ jobs:
           lshaz scan . --no-ir --format json --output /tmp/baseline.json 2>/dev/null || true
           git checkout ${{ github.event.pull_request.head.sha }}
 
-      - name: Scan PR head
-        run: lshaz scan . --no-ir --format json --output /tmp/head.json 2>/dev/null || true
+      - name: Compute changed files
+        run: |
+          git diff --name-only ${{ github.event.pull_request.base.sha }} \
+            ${{ github.event.pull_request.head.sha }} > /tmp/changed-files.txt
+
+      - name: Scan PR head (incremental)
+        run: |
+          lshaz scan . --no-ir --format json --output /tmp/head.json \
+            --changed-files /tmp/changed-files.txt 2>/dev/null || true
 
       - name: Diff findings
         id: diff

@@ -37,6 +37,11 @@ struct FilterOptions {
     std::vector<std::string> includeFiles;
     std::vector<std::string> excludeFiles;
     unsigned maxFiles             = 0;  // 0 = unlimited
+
+    // Incremental mode: only analyze TUs that match changed files.
+    // If any changed file is a header (.h/.hpp/.hxx), all TUs are included
+    // (conservative: no dependency graph resolution).
+    std::vector<std::string> changedFiles;
 };
 
 struct ScanRequest {
