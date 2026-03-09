@@ -1,0 +1,44 @@
+# Example GitHub Actions workflow for lshaz clang-tidy-compatible CI checks.
+# Add this to .github/workflows/lshaz.yml in your project.
+#
+# Runs lshaz in tidy output format. Each rule can be gated independently
+# using --rule flags. Exit code 1 = findings (fail the check).
+
+name: lshaz Latency Hazard Check
+
+on:
+  pull_request:
+    paths: ['**.cpp', '**.cc', '**.cxx', '**.h', '**.hpp', '**.hxx']
+
+jobs:
+  lshaz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lshaz
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/abokhalill/lshaz/main/install.sh | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Generate compile_commands.json
+        run: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON .
+
+      - name: Run lshaz (all rules)
+        run: lshaz scan . --format tidy --min-severity Medium
+
+      # Or gate on specific rules:
+      # - name: Check cache layout (FL001)
+      #   run: lshaz scan . --format tidy --rule FL001
+      #
+      # - name: Check false sharing (FL002)
+      #   run: lshaz scan . --format tidy --rule FL002
+      #
+      # - name: Check atomic ordering (FL010)
+      #   run: lshaz scan . --format tidy --rule FL010
+      #
+      # - name: Check hot-path heap alloc (FL020)
+      #   run: lshaz scan . --format tidy --rule FL020
+      #
+      # - name: Check virtual dispatch (FL030)
+      #   run: lshaz scan . --format tidy --rule FL030

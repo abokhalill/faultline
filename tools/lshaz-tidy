@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# lshaz-tidy — clang-tidy-compatible wrapper for lshaz static analysis.
+#
+# Usage:
+#   lshaz-tidy <project-path> [--rule FL001] [--min-severity High] [lshaz-opts...]
+#
+# Emits diagnostics in clang-tidy format (file:line:col: severity: msg [check])
+# so CI systems (GitHub Actions, Jenkins, etc.) can consume output directly.
+#
+# Exit codes match clang-tidy convention:
+#   0 — no findings
+#   1 — findings emitted
+#   2 — parse errors
+#   3 — fatal (bad args, missing files)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Find lshaz binary: next to this script, in PATH, or in build/.
+LSHAZ=""
+if [[ -x "${SCRIPT_DIR}/../build/lshaz" ]]; then
+    LSHAZ="${SCRIPT_DIR}/../build/lshaz"
+elif command -v lshaz &>/dev/null; then
+    LSHAZ="lshaz"
+elif [[ -x "${SCRIPT_DIR}/lshaz" ]]; then
+    LSHAZ="${SCRIPT_DIR}/lshaz"
+else
+    echo "error: lshaz binary not found" >&2
+    exit 3
+fi
+
+exec "$LSHAZ" scan "$@" --format tidy

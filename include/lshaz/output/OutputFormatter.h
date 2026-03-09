@@ -38,4 +38,9 @@ public:
                        const ExecutionMetadata &meta) override;
 };
 
+class ClangTidyOutputFormatter : public OutputFormatter {
+public:
+    std::string format(const std::vector<Diagnostic> &diagnostics) override;
+};
+
 } // namespace lshaz

@@ -36,6 +36,7 @@ set(LSHAZ_SOURCES
     src/output/CLIOutput.cpp
     src/output/JSONOutput.cpp
     src/output/SARIFOutput.cpp
+    src/output/ClangTidyOutput.cpp
     src/analysis/LshazAction.cpp
     src/analysis/LshazASTConsumer.cpp
     src/analysis/StructLayoutVisitor.cpp

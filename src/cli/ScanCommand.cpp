@@ -2,6 +2,7 @@
 #include "ScanCommand.h"
 
 #include "lshaz/core/Config.h"
+#include "lshaz/core/RuleRegistry.h"
 #include "lshaz/core/Version.h"
 #include "lshaz/output/OutputFormatter.h"
 #include "lshaz/pipeline/RepoProvider.h"
@@ -20,10 +21,23 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace lshaz {
 
 namespace {
+
+void applyRuleFilter(Config &cfg,
+                     const std::vector<std::string> &enabledRules) {
+    if (enabledRules.empty()) return;
+    std::unordered_set<std::string> enabled(enabledRules.begin(),
+                                             enabledRules.end());
+    for (const auto &rule : RuleRegistry::instance().rules()) {
+        std::string id(rule->getID());
+        if (!enabled.count(id))
+            cfg.disabledRules.push_back(id);
+    }
+}
 
 struct ScanArgs {
     std::string target;           // path or URL
@@ -53,6 +67,7 @@ struct ScanArgs {
     bool trustBuildSystem = false;
     std::string changedFilesPath;
     std::string targetArch;
+    std::vector<std::string> enabledRules;  // --rule FL001 (repeatable)
     bool help = false;
     std::vector<std::string> compilerFlags;
 };
@@ -69,7 +84,7 @@ void printScanUsage() {
         << "Options:\n"
         << "  --compile-db <path>      Explicit path to compile_commands.json\n"
         << "  --config <path>          Path to lshaz.config.yaml\n"
-        << "  --format <cli|json|sarif> Output format (default: cli)\n"
+        << "  --format <fmt>           Output format: cli, json, sarif, tidy (default: cli)\n"
         << "  --output <path>          Write output to file instead of stdout\n"
         << "  --min-severity <level>   Minimum severity (Informational|Medium|High|Critical)\n"
         << "  --min-evidence <tier>    Minimum evidence tier (proven|likely|speculative)\n"
@@ -87,6 +102,7 @@ void printScanUsage() {
         << "  --trust-build-system     Allow cmake/meson/bear on cloned repos\n"
         << "  --changed-files <path>   Only scan TUs affected by files listed in <path>\n"
         << "  --target-arch <arch>     Target architecture: x86-64, arm64, arm64-apple\n"
+        << "  --rule <id>              Only run specific rule (repeatable, e.g. FL001)\n"
         << "  --help                   Show this help\n"
         << "\n"
         << "Single-file mode:\n"
@@ -156,6 +172,7 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (std::strcmp(argv[i], "--trust-build-system") == 0) { args.trustBuildSystem = true; continue; }
         if (consumeArg(i, argc, argv, "--changed-files", args.changedFilesPath)) continue;
         if (consumeArg(i, argc, argv, "--target-arch", args.targetArch)) continue;
+        { std::string v; if (consumeArg(i, argc, argv, "--rule", v)) { args.enabledRules.push_back(v); continue; } }
         if (consumeArgUnsigned(i, argc, argv, "--watch-interval", args.watchInterval)) continue;
 
         if (argv[i][0] == '-') {
@@ -193,6 +210,8 @@ int emitOutput(const ScanResult &result, const ScanRequest &request,
         formatter = std::make_unique<SARIFOutputFormatter>();
     else if (format == "json")
         formatter = std::make_unique<JSONOutputFormatter>();
+    else if (format == "tidy")
+        formatter = std::make_unique<ClangTidyOutputFormatter>();
     else
         formatter = std::make_unique<CLIOutputFormatter>();
 
@@ -253,6 +272,7 @@ int runScanCommand(int argc, const char **argv) {
         if (!args.allocator.empty())
             request.config.linkedAllocator = args.allocator;
         request.config.minSeverity = parseSeverity(args.minSeverity);
+        applyRuleFilter(request.config, args.enabledRules);
         request.ir.enabled = !args.noIR;
         request.ir.optLevel = args.irOpt;
         request.ir.cacheEnabled = !args.noIRCache;
@@ -264,6 +284,8 @@ int runScanCommand(int argc, const char **argv) {
             request.outputFormat = OutputFormat::SARIF;
         else if (args.format == "json")
             request.outputFormat = OutputFormat::JSON;
+        else if (args.format == "tidy")
+            request.outputFormat = OutputFormat::CLI;
 
         ScanPipeline pipeline([](const std::string &stage,
                                  const std::string &detail) {
@@ -340,6 +362,7 @@ int runScanCommand(int argc, const char **argv) {
     if (!args.allocator.empty())
         cfg.linkedAllocator = args.allocator;
     cfg.minSeverity = parseSeverity(args.minSeverity);
+    applyRuleFilter(cfg, args.enabledRules);
 
     ScanRequest request;
     request.config = cfg;
@@ -398,6 +421,8 @@ int runScanCommand(int argc, const char **argv) {
         request.outputFormat = OutputFormat::SARIF;
     else if (args.format == "json")
         request.outputFormat = OutputFormat::JSON;
+    else if (args.format == "tidy")
+        request.outputFormat = OutputFormat::CLI;
     else
         request.outputFormat = OutputFormat::CLI;
 
