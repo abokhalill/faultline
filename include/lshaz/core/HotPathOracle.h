@@ -13,6 +13,7 @@ class Attr;
 
 namespace lshaz {
 
+class CallGraph;
 struct Config;
 
 // Determines whether a given declaration resides on a hot path.
@@ -29,6 +30,11 @@ public:
     bool isFunctionHot(const clang::FunctionDecl *FD) const;
 
     void markHot(const clang::FunctionDecl *FD);
+
+    // Propagate hotness transitively through a call graph.
+    // All functions reachable from currently-hot roots within maxDepth
+    // call edges are marked hot.
+    void propagateViaCallGraph(const CallGraph &cg, unsigned maxDepth = 8);
 
     // Load profile-derived hot function names (demangled qualified names).
     void loadProfileHotFunctions(std::unordered_set<std::string> names);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/LshazASTConsumer.h"
+#include "lshaz/analysis/CallGraph.h"
 #include "lshaz/analysis/StructLayoutVisitor.h"
 #include "lshaz/core/RuleRegistry.h"
 
@@ -88,6 +89,11 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
         if (auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D))
             oracle_.isFunctionHot(FD);
     }
+
+    // Pass 1.5: build call graph and propagate hotness transitively.
+    CallGraph cg(Ctx);
+    cg.buildFromTU(TU);
+    oracle_.propagateViaCallGraph(cg);
 
     // Second pass: run enabled rules.
     size_t diagsBefore = diagnostics_.size();

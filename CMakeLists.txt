@@ -41,6 +41,7 @@ set(LSHAZ_SOURCES
     src/analysis/StructLayoutVisitor.cpp
     src/analysis/EscapeAnalysis.cpp
     src/analysis/CacheLineMap.cpp
+    src/analysis/CallGraph.cpp
     src/analysis/AllocatorTopology.cpp
     src/analysis/NUMATopology.cpp
     src/rules/FL001_CacheLineSpanning.cpp

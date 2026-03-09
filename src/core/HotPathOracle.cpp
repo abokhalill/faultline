@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/core/HotPathOracle.h"
 #include "lshaz/core/Config.h"
+#include "lshaz/analysis/CallGraph.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Attr.h>
@@ -90,6 +91,19 @@ bool HotPathOracle::matchesConfigPattern(const clang::FunctionDecl *FD) const {
     }
 
     return false;
+}
+
+void HotPathOracle::propagateViaCallGraph(const CallGraph &cg,
+                                           unsigned maxDepth) {
+    // Snapshot current hot roots (avoid iterator invalidation).
+    std::unordered_set<const clang::FunctionDecl *> roots(hotCache_);
+
+    if (roots.empty())
+        return;
+
+    auto reachable = cg.transitiveCallees(roots, maxDepth);
+    for (const auto *fn : reachable)
+        hotCache_.insert(fn);
 }
 
 } // namespace lshaz
