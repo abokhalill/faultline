@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "cli/DiffCommand.h"
+#include "cli/ExpCommand.h"
 #include "cli/ExplainCommand.h"
 #include "cli/FixCommand.h"
+#include "cli/HypCommand.h"
 #include "cli/InitCommand.h"
 #include "cli/ScanCommand.h"
 
@@ -22,6 +24,10 @@ int main(int argc, const char **argv) {
         return lshaz::runDiffCommand(argc - 2, argv + 2);
     if (argc >= 2 && std::strcmp(argv[1], "fix") == 0)
         return lshaz::runFixCommand(argc - 2, argv + 2);
+    if (argc >= 2 && std::strcmp(argv[1], "hyp") == 0)
+        return lshaz::runHypCommand(argc - 2, argv + 2);
+    if (argc >= 2 && std::strcmp(argv[1], "exp") == 0)
+        return lshaz::runExpCommand(argc - 2, argv + 2);
 
     if (argc >= 2 && (std::strcmp(argv[1], "version") == 0 ||
                       std::strcmp(argv[1], "--version") == 0)) {
@@ -40,6 +46,8 @@ int main(int argc, const char **argv) {
             << "Usage:\n"
             << "  lshaz scan <path> [options]   Analyze a project\n"
             << "  lshaz fix <path> [options]    Auto-remediate fixable findings\n"
+            << "  lshaz hyp <scan.json>         Construct latency hypotheses\n"
+            << "  lshaz exp <scan.json> -o dir   Synthesize experiment bundles\n"
             << "  lshaz init [path]             Generate compile_commands.json and config\n"
             << "  lshaz diff <a.json> <b.json>  Compare two scan results\n"
             << "  lshaz explain [rule]          Show rule documentation\n"
@@ -51,7 +59,7 @@ int main(int argc, const char **argv) {
     }
 
     llvm::errs() << "lshaz: unknown command '" << argv[1] << "'\n\n"
-                 << "Available commands: scan, init, diff, explain, version, help\n"
+                 << "Available commands: scan, fix, hyp, exp, init, diff, explain, version, help\n"
                  << "Run 'lshaz help' for usage.\n";
     return 3;
 }
