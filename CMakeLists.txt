@@ -119,6 +119,28 @@ add_executable(pipeline_unit_test
 )
 target_link_libraries(pipeline_unit_test PRIVATE LLVM)
 
+# --- Analysis ground truth test ---
+add_executable(analysis_ground_truth_test
+    test/analysis_ground_truth_test.cpp
+    src/analysis/CacheLineMap.cpp
+)
+target_link_libraries(analysis_ground_truth_test PRIVATE
+    clangTooling
+    clangFrontend
+    clangSerialization
+    clangDriver
+    clangParse
+    clangSema
+    clangAnalysis
+    clangAST
+    clangASTMatchers
+    clangBasic
+    clangEdit
+    clangLex
+    clangRewrite
+    LLVM
+)
+
 # --- Scan E2E test ---
 add_executable(scan_e2e_test
     test/scan_e2e_test.cpp
