@@ -18,17 +18,14 @@ bool isStructLevelRule(const std::string &ruleID) {
 
 std::string makeKey(const Diagnostic &d) {
     if (isStructLevelRule(d.ruleID)) {
-        // Struct rules: keyed by declaration site.
-        return d.ruleID + "\0" + d.location.file + "\0" +
+        return d.ruleID + "|" + d.location.file + "|" +
                std::to_string(d.location.line);
     }
-    // Function rules: keyed by qualified function name.
     if (!d.functionName.empty())
-        return d.ruleID + "\0" + d.functionName + "\0" +
+        return d.ruleID + "|" + d.functionName + "|" +
                std::to_string(d.location.line);
-    // Fallback: full location.
-    return d.ruleID + "\0" + d.location.file + "\0" +
-           std::to_string(d.location.line) + "\0" +
+    return d.ruleID + "|" + d.location.file + "|" +
+           std::to_string(d.location.line) + "|" +
            std::to_string(d.location.column);
 }
 
