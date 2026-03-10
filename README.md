@@ -12,36 +12,63 @@ Static analysis tool that detects microarchitectural latency hazards in C and C+
 
 It is not a linter. Every diagnostic maps to a specific hardware mechanism on x86-64.
 
-## Quick Start
+## Install
 
-**Install:**
+Linux x86-64 and WSL2. Requires LLVM/Clang development libraries.
 
 ```bash
 curl -sL https://raw.githubusercontent.com/abokhalill/lshaz/main/install.sh | bash
 ```
 
-**Scan a repository:**
-
-```bash
-lshaz scan https://github.com/abseil/abseil-cpp
-```
-
-**Scan a local project:**
-
-```bash
-lshaz scan /path/to/your/project
-```
-
-> Requires `compile_commands.json`. Run `lshaz init` to generate it, or use CMake with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.
-
-### Build from source
+Or build from source:
 
 ```bash
 apt install llvm-18-dev libclang-18-dev clang-18 cmake    # Ubuntu/Debian
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-./build/lshaz scan /path/to/project
 ```
+
+## Usage
+
+**Set up a project** (one time — generates `compile_commands.json`):
+
+```bash
+lshaz init /path/to/project
+```
+
+**Scan it:**
+
+```bash
+lshaz scan /path/to/project
+```
+
+That's it. lshaz finds `compile_commands.json`, parses every translation unit in parallel, and prints diagnostics to the terminal. You can also scan a remote repo directly:
+
+```bash
+lshaz scan https://github.com/abseil/abseil-cpp
+```
+
+**Filter output:**
+
+```bash
+lshaz scan . --min-severity Critical          # only critical findings
+lshaz scan . --rule FL002                     # only false sharing
+lshaz scan . --format json --output results.json  # machine-readable
+```
+
+**Compare two scans** (CI gating — exits non-zero on regressions):
+
+```bash
+lshaz diff before.json after.json
+```
+
+**Understand a finding:**
+
+```bash
+lshaz explain FL002
+```
+
+All CLI flags, output formats (JSON, SARIF, clang-tidy), inline suppression, and config file options are in [docs/configuration.md](docs/configuration.md).
 
 ## Example Output
 
@@ -60,57 +87,6 @@ lshaz: 157/157 TU(s) parsed, 246 diagnostic(s)
   Evidence: sizeof=280B; lines_spanned=5; straddling_fields=1
   Hardware: Struct occupies 280B across 5 cache lines. 1 field straddles
             a line boundary (split load/store penalty).
-```
-
-## Platform Support
-
-| Platform | Status |
-|---|---|
-| Linux x86-64 | **Supported** |
-| WSL2 | Supported |
-| macOS / Windows | Not supported |
-
-## Usage
-
-```bash
-# Generate compile_commands.json (detects CMake, Meson, Make/Bear)
-lshaz init /path/to/project
-
-# Scan a project (autodiscovers compile_commands.json)
-lshaz scan /path/to/project
-
-# Scan a GitHub repo directly
-lshaz scan https://github.com/org/repo
-
-# JSON output, critical only
-lshaz scan . --format json --min-severity Critical
-
-# SARIF for GitHub Code Scanning
-lshaz scan . --format sarif --output results.sarif
-
-# clang-tidy-compatible output for CI parsers
-lshaz scan . --format tidy
-
-# Run a single rule (repeatable)
-lshaz scan . --format tidy --rule FL001
-
-# Parallel, AST-only (fast)
-lshaz scan . --jobs 8 --no-ir
-
-# Compare two scan results (CI gating)
-lshaz diff before.json after.json
-
-# Generate a hypothesis for a finding
-lshaz hyp scan-results.json
-
-# Synthesize a runnable experiment
-lshaz exp scan-results.json --output ./experiments
-
-# Explain a rule
-lshaz explain FL002
-
-# Suppress a finding inline
-// lshaz-suppress FL001,FL002
 ```
 
 ## Rules
@@ -133,25 +109,7 @@ lshaz explain FL002
 | FL061 | Centralized dispatcher bottleneck | High |
 | FL090 | Hazard amplification (compound) | Critical |
 
-`lshaz explain --list` for full details. See [docs/rules.md](docs/rules.md) for hardware mechanisms, detection logic, and mitigations.
-
-## Output Formats
-
-| Format | Flag | Use Case |
-|---|---|---|
-| CLI | `--format cli` | Terminal (default) |
-| JSON | `--format json` | Programmatic consumption |
-| SARIF 2.1.0 | `--format sarif` | GitHub Code Scanning, VS Code |
-| Clang-Tidy | `--format tidy` | CI parsers, clang-tidy tooling integration |
-
-## Exit Codes
-
-| Code | Meaning |
-|---|---|
-| 0 | Clean |
-| 1 | Findings emitted |
-| 2 | Parse errors |
-| 3 | Infrastructure failure |
+See [docs/rules.md](docs/rules.md) for hardware mechanisms, detection logic, and mitigations. Run `lshaz explain <ID>` for any rule.
 
 ## CI Integration
 
@@ -166,12 +124,10 @@ Copy these into any project that has `compile_commands.json` (run `lshaz init` f
 
 ## Limitations
 
-- **Hot-path rules require classification** — FL010, FL011, FL012, FL020, FL030, FL031, FL050, FL061 only fire on functions marked hot via `__attribute__((hot))`, `[[clang::annotate("lshaz_hot")]]`, config patterns, or `--perf-profile`. Structural rules (FL001, FL002, FL021, FL041, FL060) work without any hot-path signal.
 - **Static analysis only** — identifies structural risk, does not measure runtime impact. Use `perf` to validate.
 - **Single-TU scope** — escape analysis does not cross translation unit boundaries.
-- **Requires `compile_commands.json`** — TUs that fail to parse (missing headers) are skipped, not crashed.
-- **Parallel scans** — `compile_commands.json` with relative paths (common with `make`/`compiledb`) is handled automatically; lshaz resolves all paths to absolute at load time to avoid Clang tooling `chdir()` races.
-- **x86-64 default** — assumes 64-byte cache lines and TSO by default. Use `--target-arch arm64` or `--target-arch arm64-apple` (128B lines) for ARM64 analysis.
+- **Hot-path rules need a signal** — FL010–FL061 only fire on functions marked hot (via attribute, config pattern, or `--perf-profile`). Structural rules (FL001, FL002, FL021, FL040, FL041, FL060, FL090) work without any hot-path signal.
+- **x86-64 default** — assumes 64-byte cache lines and TSO. Use `--target-arch arm64` or `--target-arch arm64-apple` for ARM64.
 
 ## Documentation
 
