@@ -42,11 +42,11 @@ public:
 
         CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
 
-        if (map.linesSpanned() <= 1)
+        if (map.maxLinesSpanned() <= 1)
             return;
 
         uint64_t sizeBytes = map.recordSizeBytes();
-        uint64_t lines = map.linesSpanned();
+        uint64_t lines = map.maxLinesSpanned();
 
         Severity sev = Severity::High;
         std::vector<std::string> escalations;

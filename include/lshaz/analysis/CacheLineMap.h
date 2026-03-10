@@ -17,9 +17,11 @@ struct FieldLineEntry {
     std::string name;
     uint64_t offsetBytes = 0;
     uint64_t sizeBytes   = 0;
-    uint64_t startLine   = 0;   // 0-indexed cache line index
-    uint64_t endLine     = 0;   // inclusive
-    bool straddles       = false; // field spans a line boundary
+    uint64_t startLine   = 0;   // 0-indexed cache line index (best case base alignment)
+    uint64_t endLine     = 0;   // inclusive (best case)
+    uint64_t worstStartLine = 0; // worst case: base shifted to maximize line index
+    uint64_t worstEndLine   = 0; // worst case: inclusive
+    bool straddles       = false; // field spans a line boundary under any valid base alignment
     bool isAtomic        = false;
     bool isMutable       = false;
 };
@@ -42,7 +44,10 @@ public:
 
     uint64_t recordSizeBytes() const { return sizeBytes_; }
     uint64_t linesSpanned() const { return linesSpanned_; }
+    uint64_t maxLinesSpanned() const { return maxLinesSpanned_; }
     uint64_t cacheLineBytes() const { return cacheLineBytes_; }
+    uint64_t recordAlign() const { return recordAlign_; }
+    bool isCacheLineAligned() const { return recordAlign_ >= cacheLineBytes_; }
 
     const std::vector<FieldLineEntry> &fields() const { return fields_; }
     const std::vector<CacheLineBucket> &buckets() const { return buckets_; }
@@ -77,8 +82,10 @@ private:
     static bool isFieldMutable(const clang::FieldDecl *FD);
 
     uint64_t cacheLineBytes_;
+    uint64_t recordAlign_  = 1;
     uint64_t sizeBytes_    = 0;
     uint64_t linesSpanned_ = 0;
+    uint64_t maxLinesSpanned_ = 0;
     unsigned totalAtomics_  = 0;
     unsigned totalMutables_ = 0;
 

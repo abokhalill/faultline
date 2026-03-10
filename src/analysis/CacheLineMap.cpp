@@ -19,7 +19,23 @@ CacheLineMap::CacheLineMap(const clang::RecordDecl *RD,
 
     const auto &layout = Ctx.getASTRecordLayout(RD);
     sizeBytes_ = layout.getSize().getQuantity();
+    recordAlign_ = layout.getAlignment().getQuantity();
+    if (recordAlign_ == 0)
+        recordAlign_ = 1;
+
+    // Best case: struct base is cache-line-aligned (offset 0 within line).
     linesSpanned_ = (sizeBytes_ + cacheLineBytes_ - 1) / cacheLineBytes_;
+
+    // Worst case: struct base shifted to maximize cache line span.
+    // The base can start at any multiple of recordAlign_ within a cache line.
+    // The worst shift is the largest valid shift such that
+    // (shift + sizeBytes_) crosses the most line boundaries.
+    if (recordAlign_ >= cacheLineBytes_) {
+        maxLinesSpanned_ = linesSpanned_;
+    } else {
+        uint64_t worstShift = cacheLineBytes_ - recordAlign_;
+        maxLinesSpanned_ = (worstShift + sizeBytes_ + cacheLineBytes_ - 1) / cacheLineBytes_;
+    }
 
     collectFields(RD, Ctx, 0);
     buildBuckets();
@@ -113,9 +129,32 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
             continue;
         uint64_t fieldSize = Ctx.getTypeSizeInChars(field->getType()).getQuantity();
 
+        // Best case (base at cache line boundary): shift = 0.
         uint64_t startLine = absOffset / cacheLineBytes_;
         uint64_t endByte = absOffset + fieldSize;
         uint64_t endLine = (endByte > 0) ? (endByte - 1) / cacheLineBytes_ : startLine;
+
+        // Worst case: base shifted by maximum valid offset within a cache line.
+        // Valid shifts are multiples of recordAlign_ in [0, cacheLineBytes_).
+        uint64_t worstShift = (recordAlign_ >= cacheLineBytes_)
+            ? 0
+            : cacheLineBytes_ - recordAlign_;
+        uint64_t wStart = (absOffset + worstShift) / cacheLineBytes_;
+        uint64_t wEndByte = absOffset + worstShift + fieldSize;
+        uint64_t wEnd = (wEndByte > 0) ? (wEndByte - 1) / cacheLineBytes_ : wStart;
+
+        // A field straddles if ANY valid base alignment causes it to span
+        // a cache line boundary. Check all shifts in recordAlign_ steps.
+        bool straddles = (startLine != endLine) || (wStart != wEnd);
+        if (!straddles && recordAlign_ < cacheLineBytes_) {
+            for (uint64_t shift = recordAlign_; shift < cacheLineBytes_;
+                 shift += recordAlign_) {
+                uint64_t sB = (absOffset + shift) / cacheLineBytes_;
+                uint64_t eByte = absOffset + shift + fieldSize;
+                uint64_t eL = (eByte > 0) ? (eByte - 1) / cacheLineBytes_ : sB;
+                if (sB != eL) { straddles = true; break; }
+            }
+        }
 
         bool atomic = isAtomicType(field->getType());
         bool mutable_ = isFieldMutable(field);
@@ -124,15 +163,17 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
         if (mutable_) ++totalMutables_;
 
         FieldLineEntry entry;
-        entry.decl        = field;
-        entry.name        = field->getNameAsString();
-        entry.offsetBytes = absOffset;
-        entry.sizeBytes   = fieldSize;
-        entry.startLine   = startLine;
-        entry.endLine     = endLine;
-        entry.straddles   = (startLine != endLine);
-        entry.isAtomic    = atomic;
-        entry.isMutable   = mutable_;
+        entry.decl            = field;
+        entry.name            = field->getNameAsString();
+        entry.offsetBytes     = absOffset;
+        entry.sizeBytes       = fieldSize;
+        entry.startLine       = startLine;
+        entry.endLine         = endLine;
+        entry.worstStartLine  = wStart;
+        entry.worstEndLine    = wEnd;
+        entry.straddles       = straddles;
+        entry.isAtomic        = atomic;
+        entry.isMutable       = mutable_;
 
         // Recurse into nested record types for sub-field granularity.
         auto qt = field->getType().getCanonicalType();
@@ -148,15 +189,20 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
 }
 
 void CacheLineMap::buildBuckets() {
-    if (linesSpanned_ == 0)
+    if (maxLinesSpanned_ == 0)
         return;
 
-    buckets_.resize(linesSpanned_);
-    for (uint64_t i = 0; i < linesSpanned_; ++i)
+    buckets_.resize(maxLinesSpanned_);
+    for (uint64_t i = 0; i < maxLinesSpanned_; ++i)
         buckets_[i].lineIndex = i;
 
     for (auto &f : fields_) {
-        for (uint64_t line = f.startLine; line <= f.endLine && line < linesSpanned_; ++line) {
+        // Union of best-case [startLine, endLine] and worst-case
+        // [worstStartLine, worstEndLine]. A field belongs to every bucket
+        // it could occupy under any valid struct base alignment.
+        uint64_t lo = std::min(f.startLine, f.worstStartLine);
+        uint64_t hi = std::max(f.endLine, f.worstEndLine);
+        for (uint64_t line = lo; line <= hi && line < maxLinesSpanned_; ++line) {
             buckets_[line].fields.push_back(&f);
             if (f.isAtomic)  ++buckets_[line].atomicCount;
             if (f.isMutable) ++buckets_[line].mutableCount;

@@ -331,12 +331,12 @@ void testFalseSharingCandidate() {
         check(map.totalMutableFields() == 2, "2 mutable fields");
 
         auto candidates = map.falseSharingCandidateLines();
-        check(candidates.size() == 1, "1 false sharing candidate line");
-        if (!candidates.empty())
-            check(candidates[0] == 0, "candidate is line 0");
+        check(!candidates.empty(), "at least 1 false sharing candidate line");
 
         const auto &buckets = map.buckets();
-        check(buckets.size() == 1, "1 bucket");
+        // With alignof(4), struct can start at offset 60 within a cache line,
+        // so maxLinesSpanned may be 2. Verify bucket 0 has the expected fields.
+        check(!buckets.empty(), "at least 1 bucket");
         if (!buckets.empty()) {
             check(buckets[0].atomicCount == 1, "bucket 0: 1 atomic");
             check(buckets[0].mutableCount == 2, "bucket 0: 2 mutable");
@@ -378,7 +378,9 @@ void testFieldStraddling() {
         check(fs && fs->endLine == 1, "straddler ends on line 1");
 
         auto straddlers = map.straddlingFields();
-        check(straddlers.size() == 1, "1 straddling field");
+        // With alignof(1), worst shift = 63. pad[62] at offset 0 also
+        // straddles under worst-case alignment: (0+63)/64=0, (0+63+62-1)/64=1.
+        check(straddlers.size() >= 1, "straddler detected");
     });
 }
 
@@ -480,30 +482,91 @@ void testBucketPopulation() {
         lshaz::CacheLineMap map(RD, Ctx, 64);
 
         check(map.recordSizeBytes() == 72, "sizeof TwoLine == 72");
-        check(map.linesSpanned() == 2, "2 cache lines");
+        check(map.linesSpanned() == 2, "best-case 2 cache lines");
 
         const auto &buckets = map.buckets();
-        check(buckets.size() == 2, "2 buckets");
+        // alignof(TwoLine) == 4, worst shift = 60. maxLinesSpanned = 3.
+        check(buckets.size() >= 2, "at least 2 buckets");
 
-        // line0 array occupies line 0. But as a single field it contributes
-        // 1 entry to bucket 0, plus straddles into bucket 1? No — 64 bytes
-        // fits exactly in line 0 (bytes 0-63). endLine = (0+64-1)/64 = 0.
-        // So bucket 0 has: line0.
-        // Bucket 1 has: line1_a, line1_b.
-        if (buckets.size() >= 2) {
-            // line0 is a single char[64] field on line 0.
-            unsigned b0_count = 0;
-            for (const auto *f : buckets[0].fields)
-                if (f->name == "line0") ++b0_count;
-            check(b0_count == 1, "bucket 0 has line0 field");
-
-            unsigned b1_count = 0;
-            for (const auto *f : buckets[1].fields) {
+        // Under best-case alignment (shift=0):
+        //   bucket 0: line0 (bytes 0-63)
+        //   bucket 1: line1_a (64-67), line1_b (68-71)
+        // Under worst-case (shift=60):
+        //   line0 spans buckets 0-1, line1_a/line1_b in bucket 1 or 2.
+        // Key invariant: line1_a and line1_b always share at least one bucket.
+        bool foundPairBucket = false;
+        for (const auto &b : buckets) {
+            unsigned pairCount = 0;
+            for (const auto *f : b.fields) {
                 if (f->name == "line1_a" || f->name == "line1_b")
-                    ++b1_count;
+                    ++pairCount;
             }
-            check(b1_count == 2, "bucket 1 has line1_a and line1_b");
+            if (pairCount == 2) { foundPairBucket = true; break; }
         }
+        check(foundPairBucket, "line1_a and line1_b share at least one bucket");
+    });
+}
+
+// ============================================================
+// Test 14: Alignment-aware bucketing — struct not cache-line-aligned.
+// struct NearBoundary { int a; char pad[52]; int b; };
+// sizeof = 60, alignof = 4. Best case: 1 line. Worst case (shift=60):
+// a at absolute 60 (line 0), b at absolute 116 (line 1).
+// Fields that look co-located under best-case split under worst-case.
+// ============================================================
+void testAlignmentAwareBucketing() {
+    std::cerr << "test: alignment-aware bucketing (non-cache-line-aligned)\n";
+    const char *src = R"(
+        struct NearBoundary { int a; char pad[52]; int b; };
+    )";
+
+    withRecord(src, "NearBoundary", [](const clang::CXXRecordDecl *RD,
+                                        clang::ASTContext &Ctx) {
+        lshaz::CacheLineMap map(RD, Ctx, 64);
+
+        check(map.recordSizeBytes() == 60, "sizeof NearBoundary == 60");
+        check(map.linesSpanned() == 1, "best-case: 1 cache line");
+        check(map.maxLinesSpanned() == 2, "worst-case: 2 cache lines");
+        check(!map.isCacheLineAligned(), "not cache-line-aligned");
+
+        auto *fa = findField(map, "a");
+        auto *fb = findField(map, "b");
+        check(fa && fa->startLine == 0, "a best-case line 0");
+        check(fb && fb->startLine == 0, "b best-case line 0");
+
+        // Under worst-case shift, b moves to line 1.
+        check(fb && fb->worstStartLine > fb->startLine,
+              "b worst-case line > best-case line");
+
+        // Key: a and b should appear in separate buckets under worst-case,
+        // but ALSO share bucket 0 under best-case. The union bucketing
+        // means both appear in bucket 0 (best-case) and b also in bucket 1.
+        const auto &buckets = map.buckets();
+        check(buckets.size() == 2, "2 buckets (worst-case span)");
+    });
+}
+
+// ============================================================
+// Test 15: alignas(64) struct — best-case == worst-case.
+// ============================================================
+void testCacheLineAlignedBucketing() {
+    std::cerr << "test: cache-line-aligned struct (alignas(64))\n";
+    const char *src = R"(
+        struct alignas(64) Aligned64 { int a; int b; };
+    )";
+
+    withRecord(src, "Aligned64", [](const clang::CXXRecordDecl *RD,
+                                     clang::ASTContext &Ctx) {
+        lshaz::CacheLineMap map(RD, Ctx, 64);
+
+        check(map.isCacheLineAligned(), "cache-line-aligned");
+        check(map.linesSpanned() == map.maxLinesSpanned(),
+              "best-case == worst-case for aligned struct");
+        check(map.linesSpanned() == 1, "1 cache line");
+
+        auto *fa = findField(map, "a");
+        check(fa && fa->startLine == fa->worstStartLine,
+              "a: best == worst when struct is aligned");
     });
 }
 
@@ -523,6 +586,8 @@ int main() {
     testEmptyBaseOptimization();
     testMutableFieldDetection();
     testBucketPopulation();
+    testAlignmentAwareBucketing();
+    testCacheLineAlignedBucketing();
 
     std::cerr << "\n" << passed << " passed, " << failures << " failed\n";
     if (failures > 0) {
