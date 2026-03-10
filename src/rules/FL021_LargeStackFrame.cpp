@@ -9,6 +9,7 @@
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/RecordLayout.h>
+#include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Stmt.h>
 #include <clang/AST/Type.h>
 #include <clang/Basic/SourceManager.h>
@@ -39,7 +40,8 @@ public:
         if (!FD || !FD->doesThisDeclarationHaveABody())
             return;
 
-        // Estimate stack frame size from local variable declarations.
+        // Estimate stack frame size from all local variable declarations,
+        // including those inside nested blocks, loops, and conditionals.
         uint64_t totalBytes = 0;
         std::vector<std::pair<std::string, uint64_t>> largeLocals;
 
@@ -47,25 +49,32 @@ public:
         if (!body)
             return;
 
-        for (const auto *child : body->children()) {
-            if (const auto *DS = llvm::dyn_cast<clang::DeclStmt>(child)) {
-                for (const auto *decl : DS->decls()) {
-                    if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(decl)) {
-                        if (!VD->hasLocalStorage())
-                            continue;
-                        clang::QualType QT = VD->getType();
-                        if (!canComputeTypeSize(QT, Ctx))
-                            continue;
+        class LocalVarVisitor
+            : public clang::RecursiveASTVisitor<LocalVarVisitor> {
+        public:
+            clang::ASTContext &ctx;
+            uint64_t &total;
+            std::vector<std::pair<std::string, uint64_t>> &large;
+            LocalVarVisitor(clang::ASTContext &c, uint64_t &t,
+                            std::vector<std::pair<std::string, uint64_t>> &l)
+                : ctx(c), total(t), large(l) {}
 
-                        uint64_t sz = Ctx.getTypeSizeInChars(QT).getQuantity();
-                        totalBytes += sz;
-
-                        if (sz >= 256)
-                            largeLocals.push_back({VD->getNameAsString(), sz});
-                    }
-                }
+            bool VisitVarDecl(clang::VarDecl *VD) {
+                if (!VD->hasLocalStorage())
+                    return true;
+                clang::QualType QT = VD->getType();
+                if (!canComputeTypeSize(QT, ctx))
+                    return true;
+                uint64_t sz = ctx.getTypeSizeInChars(QT).getQuantity();
+                total += sz;
+                if (sz >= 256)
+                    large.push_back({VD->getNameAsString(), sz});
+                return true;
             }
-        }
+        };
+
+        LocalVarVisitor localVisitor(Ctx, totalBytes, largeLocals);
+        localVisitor.TraverseStmt(const_cast<clang::Stmt *>(body));
 
         // Also account for parameters passed by value.
         for (const auto *param : FD->parameters()) {
