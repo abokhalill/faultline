@@ -71,6 +71,7 @@ set(LSHAZ_SOURCES
     src/hypothesis/PMUTraceFeedback.cpp
     src/hypothesis/InteractionModel.cpp
     src/pipeline/ScanPipeline.cpp
+    src/pipeline/AbsolutePathCompilationDatabase.cpp
     src/pipeline/CompileDBResolver.cpp
     src/pipeline/RepoProvider.cpp
     src/pipeline/SourceFilter.cpp

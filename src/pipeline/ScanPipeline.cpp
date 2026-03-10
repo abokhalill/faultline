@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/pipeline/ScanPipeline.h"
+#include "lshaz/pipeline/AbsolutePathCompilationDatabase.h"
 #include "lshaz/pipeline/CompileDBResolver.h"
 #include "lshaz/pipeline/SourceFilter.h"
 
@@ -559,24 +560,29 @@ ScanResult ScanPipeline::execute(const ScanRequest &request) {
 
     report("compile_db", "Loading " + dbPath);
     std::string dbError;
-    auto compDB = clang::tooling::JSONCompilationDatabase::loadFromFile(
+    auto jsonDB = clang::tooling::JSONCompilationDatabase::loadFromFile(
         dbPath, dbError,
         clang::tooling::JSONCommandLineSyntax::AutoDetect);
-    if (!compDB) {
+    if (!jsonDB) {
         llvm::errs() << "lshaz: error: " << dbError << "\n";
         ScanResult result;
         result.status = ScanStatus::ToolError;
         return result;
     }
 
+    // Wrap in AbsolutePathCompilationDatabase to resolve all relative
+    // paths at load time. This eliminates ClangTool's process-global
+    // chdir() calls, which race between threads in parallel scans.
+    AbsolutePathCompilationDatabase compDB(std::move(jsonDB));
+
     std::vector<std::string> sources = request.sourceFiles;
     if (sources.empty()) {
-        sources = compDB->getAllFiles();
+        sources = compDB.getAllFiles();
         std::sort(sources.begin(), sources.end());
     }
 
     sources = filterSources(sources, request.filter);
-    return run(request, *compDB, sources);
+    return run(request, compDB, sources);
 }
 
 ScanResult ScanPipeline::executeWithDB(
