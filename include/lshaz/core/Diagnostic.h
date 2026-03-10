@@ -9,6 +9,11 @@
 #include <map>
 #include <vector>
 
+namespace clang {
+class SourceLocation;
+class SourceManager;
+} // namespace clang
+
 namespace lshaz {
 
 enum class EvidenceTier : uint8_t {
@@ -44,6 +49,9 @@ struct SourceLocation {
     unsigned line   = 0;
     unsigned column = 0;
 };
+
+SourceLocation resolveSourceLocation(clang::SourceLocation loc,
+                                     const clang::SourceManager &SM);
 
 struct Diagnostic {
     std::string    ruleID;

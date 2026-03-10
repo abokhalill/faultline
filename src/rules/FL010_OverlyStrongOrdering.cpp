@@ -329,11 +329,7 @@ public:
             diag.evidenceTier = (isStore || isARM) ? EvidenceTier::Likely : EvidenceTier::Speculative;
             diag.functionName = FD->getQualifiedNameAsString();
 
-            if (site.loc.isValid()) {
-                diag.location.file   = SM.getFilename(SM.getSpellingLoc(site.loc)).str();
-                diag.location.line   = SM.getSpellingLineNumber(site.loc);
-                diag.location.column = SM.getSpellingColumnNumber(site.loc);
-            }
+            diag.location = resolveSourceLocation(site.loc, SM);
 
             std::ostringstream hw;
             if (isARM) {

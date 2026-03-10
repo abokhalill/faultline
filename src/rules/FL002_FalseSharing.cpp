@@ -96,11 +96,7 @@ public:
         diag.confidence = confidence;
         diag.evidenceTier = hasAtomicPairs ? EvidenceTier::Proven : EvidenceTier::Likely;
 
-        if (loc.isValid()) {
-            diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
-            diag.location.line   = SM.getSpellingLineNumber(loc);
-            diag.location.column = SM.getSpellingColumnNumber(loc);
-        }
+        diag.location = resolveSourceLocation(loc, SM);
 
         std::ostringstream hw;
         hw << "Struct '" << RD->getNameAsString() << "' ("

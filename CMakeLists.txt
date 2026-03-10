@@ -24,6 +24,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 set(LSHAZ_SOURCES
     src/main.cpp
     src/core/Diagnostic.cpp
+    src/core/SourceLocationResolver.cpp
     src/core/Rule.cpp
     src/core/RuleRegistry.cpp
     src/core/Severity.cpp

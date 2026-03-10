@@ -88,11 +88,7 @@ public:
         diag.evidenceTier = writeOnce ? EvidenceTier::Speculative
                           : (hasAtomics ? EvidenceTier::Likely : EvidenceTier::Speculative);
 
-        if (loc.isValid()) {
-            diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
-            diag.location.line   = SM.getSpellingLineNumber(loc);
-            diag.location.column = SM.getSpellingColumnNumber(loc);
-        }
+        diag.location = resolveSourceLocation(loc, SM);
 
         std::ostringstream hw;
         hw << "Global mutable variable '" << VD->getNameAsString()

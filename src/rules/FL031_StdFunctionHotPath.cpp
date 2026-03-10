@@ -201,11 +201,7 @@ public:
             diag.evidenceTier = EvidenceTier::Likely;
             diag.functionName = FD->getQualifiedNameAsString();
 
-            if (site.loc.isValid()) {
-                diag.location.file   = SM.getFilename(SM.getSpellingLoc(site.loc)).str();
-                diag.location.line   = SM.getSpellingLineNumber(site.loc);
-                diag.location.column = SM.getSpellingColumnNumber(site.loc);
-            }
+            diag.location = resolveSourceLocation(site.loc, SM);
 
             std::ostringstream hw;
             hw << "std::function " << kindStr << " in hot function '"
@@ -246,11 +242,7 @@ public:
             diag.evidenceTier = EvidenceTier::Likely;
             diag.functionName = FD->getQualifiedNameAsString();
 
-            if (loc.isValid()) {
-                diag.location.file   = SM.getFilename(SM.getSpellingLoc(loc)).str();
-                diag.location.line   = SM.getSpellingLineNumber(loc);
-                diag.location.column = SM.getSpellingColumnNumber(loc);
-            }
+            diag.location = resolveSourceLocation(loc, SM);
 
             std::ostringstream hw;
             hw << "Hot function '" << FD->getQualifiedNameAsString()
