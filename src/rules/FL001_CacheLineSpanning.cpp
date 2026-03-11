@@ -4,6 +4,7 @@
 #include "lshaz/core/HotPathOracle.h"
 #include "lshaz/core/Config.h"
 #include "lshaz/analysis/CacheLineMap.h"
+#include "lshaz/analysis/EscapeAnalysis.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -48,6 +49,9 @@ public:
         uint64_t sizeBytes = map.recordSizeBytes();
         uint64_t lines = map.maxLinesSpanned();
 
+        EscapeAnalysis escape(Ctx);
+        bool escapes = escape.mayEscapeThread(RD);
+
         Severity sev = Severity::High;
         std::vector<std::string> escalations;
 
@@ -80,6 +84,13 @@ public:
                 " line(s): RFO traffic on each distinct line");
         }
 
+        // Demote structs with no thread-escape evidence and no atomics.
+        // The struct genuinely spans multiple lines, but without concurrency
+        // signals the coherence hazard is speculative.
+        if (!escapes && map.totalAtomicFields() == 0) {
+            sev = Severity::Medium;
+        }
+
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
 
@@ -87,9 +98,14 @@ public:
         diag.ruleID    = "FL001";
         diag.title     = "Cache Line Spanning Struct";
         diag.severity  = sev;
-        diag.confidence = (map.totalAtomicFields() > 0) ? 0.90 :
-                          (!straddlers.empty() ? 0.82 : 0.72);
-        diag.evidenceTier = EvidenceTier::Proven;
+        if (!escapes && map.totalAtomicFields() == 0) {
+            diag.confidence = !straddlers.empty() ? 0.52 : 0.42;
+            diag.evidenceTier = EvidenceTier::Likely;
+        } else {
+            diag.confidence = (map.totalAtomicFields() > 0) ? 0.90 :
+                              (!straddlers.empty() ? 0.82 : 0.72);
+            diag.evidenceTier = EvidenceTier::Proven;
+        }
 
         diag.location = resolveSourceLocation(loc, SM);
 
@@ -110,6 +126,7 @@ public:
             {"straddling_fields", std::to_string(straddlers.size())},
             {"atomic_fields", std::to_string(map.totalAtomicFields())},
             {"mutable_fields", std::to_string(map.totalMutableFields())},
+            {"thread_escape", escapes ? "true" : "false"},
         };
 
         diag.mitigation =
