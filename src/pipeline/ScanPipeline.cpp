@@ -599,6 +599,7 @@ ScanResult ScanPipeline::executeWithDB(
 // against.  ClangTool normally derives it from the compiler path listed in
 // compile_commands.json, which breaks when the project was built with gcc.
 static std::string detectResourceDir() {
+#ifdef LLVM_LIBRARY_DIR
     // LLVM_LIBRARY_DIR is injected via CMake (e.g. /opt/llvm/lib).
     // CLANG_VERSION_MAJOR comes from <clang/Basic/Version.inc>.
     // The resource dir lives at <lib-dir>/clang/<major-version>.
@@ -606,16 +607,32 @@ static std::string detectResourceDir() {
         "/clang/" + std::to_string(CLANG_VERSION_MAJOR);
     if (llvm::sys::fs::is_directory(candidate))
         return candidate;
+#endif
     return {};
 }
 
-static void addResourceDirAdjuster(clang::tooling::ClangTool &tool) {
+// Returns true if the compiler path looks like clang/clang++.
+static bool compilerIsClang(const std::string &compiler) {
+    llvm::StringRef stem = llvm::sys::path::stem(compiler);
+    return stem.starts_with("clang");
+}
+
+// Only inject -resource-dir when the compile_commands.json compiler is not
+// clang/clang++ (which already knows its own resource dir).
+static void addResourceDirAdjuster(
+        clang::tooling::ClangTool &tool,
+        const clang::tooling::CompilationDatabase &compDB,
+        const std::string &sourceFile) {
     static const std::string resDir = detectResourceDir();
     if (resDir.empty())
         return;
+    auto cmds = compDB.getCompileCommands(sourceFile);
+    if (!cmds.empty() && compilerIsClang(cmds.front().CommandLine.front()))
+        return;
+    static const std::string arg = "-resource-dir=" + resDir;
     tool.appendArgumentsAdjuster(
         clang::tooling::getInsertArgumentAdjuster(
-            ("-resource-dir=" + resDir).c_str(),
+            arg.c_str(),
             clang::tooling::ArgumentInsertPosition::BEGIN));
 }
 
@@ -662,7 +679,7 @@ ScanResult ScanPipeline::run(
             llvm::CrashRecoveryContext CRC;
             bool crashed = !CRC.RunSafely([&]() {
                 clang::tooling::ClangTool tool(compDB, singleTU);
-                addResourceDirAdjuster(tool);
+                addResourceDirAdjuster(tool, compDB, src);
                 int ret = tool.run(&factory);
                 if (ret != 0) toolRet = ret;
             });
@@ -714,7 +731,7 @@ ScanResult ScanPipeline::run(
                     llvm::CrashRecoveryContext CRC;
                     bool ok = CRC.RunSafely([&]() {
                         clang::tooling::ClangTool tool(compDB, singleTU);
-                        addResourceDirAdjuster(tool);
+                        addResourceDirAdjuster(tool, compDB, src);
                         int ret = tool.run(&factory);
                         if (ret != 0) shardRet[j] = ret;
                     });

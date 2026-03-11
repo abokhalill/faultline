@@ -93,8 +93,10 @@ set(LSHAZ_SOURCES
 )
 
 add_executable(lshaz ${LSHAZ_SOURCES})
-target_compile_definitions(lshaz PRIVATE
-    LLVM_LIBRARY_DIR="${LLVM_LIBRARY_DIR}")
+if(LLVM_LIBRARY_DIR)
+    target_compile_definitions(lshaz PRIVATE
+        LLVM_LIBRARY_DIR="${LLVM_LIBRARY_DIR}")
+endif()
 
 # --- Link Clang/LLVM libraries ---
 target_link_libraries(lshaz
