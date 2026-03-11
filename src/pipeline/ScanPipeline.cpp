@@ -16,6 +16,8 @@
 #include "lshaz/ir/DiagnosticRefiner.h"
 #include "lshaz/ir/IRAnalyzer.h"
 
+#include <clang/Basic/Version.inc>
+#include <clang/Tooling/ArgumentsAdjusters.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/JSONCompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
@@ -593,6 +595,30 @@ ScanResult ScanPipeline::executeWithDB(
     return run(request, compDB, filtered);
 }
 
+// Compute the Clang resource directory for the LLVM this binary was linked
+// against.  ClangTool normally derives it from the compiler path listed in
+// compile_commands.json, which breaks when the project was built with gcc.
+static std::string detectResourceDir() {
+    // LLVM_LIBRARY_DIR is injected via CMake (e.g. /opt/llvm/lib).
+    // CLANG_VERSION_MAJOR comes from <clang/Basic/Version.inc>.
+    // The resource dir lives at <lib-dir>/clang/<major-version>.
+    std::string candidate = std::string(LLVM_LIBRARY_DIR) +
+        "/clang/" + std::to_string(CLANG_VERSION_MAJOR);
+    if (llvm::sys::fs::is_directory(candidate))
+        return candidate;
+    return {};
+}
+
+static void addResourceDirAdjuster(clang::tooling::ClangTool &tool) {
+    static const std::string resDir = detectResourceDir();
+    if (resDir.empty())
+        return;
+    tool.appendArgumentsAdjuster(
+        clang::tooling::getInsertArgumentAdjuster(
+            ("-resource-dir=" + resDir).c_str(),
+            clang::tooling::ArgumentInsertPosition::BEGIN));
+}
+
 // --- Shared pipeline implementation ---
 
 ScanResult ScanPipeline::run(
@@ -636,6 +662,7 @@ ScanResult ScanPipeline::run(
             llvm::CrashRecoveryContext CRC;
             bool crashed = !CRC.RunSafely([&]() {
                 clang::tooling::ClangTool tool(compDB, singleTU);
+                addResourceDirAdjuster(tool);
                 int ret = tool.run(&factory);
                 if (ret != 0) toolRet = ret;
             });
@@ -687,6 +714,7 @@ ScanResult ScanPipeline::run(
                     llvm::CrashRecoveryContext CRC;
                     bool ok = CRC.RunSafely([&]() {
                         clang::tooling::ClangTool tool(compDB, singleTU);
+                        addResourceDirAdjuster(tool);
                         int ret = tool.run(&factory);
                         if (ret != 0) shardRet[j] = ret;
                     });
