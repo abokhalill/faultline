@@ -93,12 +93,12 @@ The tool models line-level structural exposure. It does not simulate cache sets,
 ## Parallel Execution
 
 AST analysis supports parallel execution via `--jobs N`:
-- Sources are sharded round-robin across worker threads.
-- Each shard gets its own `LshazActionFactory`, `HotPathOracle`, and diagnostic vector.
-- `compDB` is wrapped in `AbsolutePathCompilationDatabase` at load time, which resolves all relative paths (source files, `-I` flags, `-isystem` flags) to absolute. This eliminates the Clang tooling `chdir()` race that otherwise causes non-deterministic path resolution when multiple threads share a `CompilationDatabase`.
-- Results are merged after all shards complete.
-- After merging, diagnostics are sorted by a stable canonical key `(ruleID, file, line, column, functionName)` before any order-dependent pass (cross-TU suppression, deduplication, precision budget). This guarantees byte-identical output regardless of thread count or scheduling order.
-- Per-shard crash isolation via `CrashRecoveryContext`.
+- Sources are sharded round-robin across N worker processes.
+- Each shard runs in a **forked child process** with its own address space. This provides hardware-level isolation from Clang's thread-unsafe global state (`llvm::cl` option tables, `CrashRecoveryContext` signal handlers, `FileManager` stat caches).
+- `compDB` is wrapped in `AbsolutePathCompilationDatabase` at load time, which resolves all relative paths (source files, `-I` flags, `-isystem` flags) to absolute.
+- Children serialize diagnostics + failed TU lists to temp files via a minimal JSON IPC protocol. The parent reads them back after `waitpid()`.
+- After merging, diagnostics are sorted by a stable canonical key `(ruleID, file, line, column, functionName)` before any order-dependent pass (cross-TU suppression, deduplication, precision budget). This guarantees byte-identical output regardless of process count or scheduling order.
+- Per-TU crash isolation via `CrashRecoveryContext` within each child. If a child is killed by a signal, all its TUs are recorded as failed.
 
 ## Severity Escalation
 
