@@ -21,6 +21,7 @@
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/JSONCompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
+#include <llvm/ADT/StringSet.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/FileSystem.h>
@@ -59,6 +60,134 @@ void ScanPipeline::report(const std::string &stage,
 // --- IR emission helpers (internal) ---
 
 namespace {
+
+// GCC-only flags that Clang doesn't understand. These cause IR emission
+// failures on GCC-compiled codebases (postgres, Linux kernel, nginx, etc.).
+// We strip them before invoking clang for IR generation.
+bool isGCCOnlyFlag(llvm::StringRef arg) {
+    // Exact matches
+    static const llvm::StringSet<> exactFlags = {
+        "-fno-strict-overflow",
+        "-fno-delete-null-pointer-checks",
+        "-fno-allow-store-data-races",
+        "-fno-reorder-blocks",
+        "-fno-ipa-cp-clone",
+        "-fno-partial-inlining",
+        "-fno-tree-loop-distribute-patterns",
+        "-fconserve-stack",
+        "-fno-stack-clash-protection",
+        "-mno-fp-ret-in-387",
+        "-mpreferred-stack-boundary=3",
+        "-mskip-rax-setup",
+        "-mrecord-mcount",
+        "-mfentry",
+        "-mindirect-branch=thunk-extern",
+        "-mindirect-branch-register",
+        "-mindirect-branch-cs-prefix",
+        "-mfunction-return=thunk-extern",
+        "-fno-jump-tables",
+        "-fno-gcse",
+        "-fno-tree-scev-cprop",
+        "-fno-PIE",
+        "-fno-asynchronous-unwind-tables",
+        "-fzero-call-used-regs=used-gpr",
+        "-fstrict-flex-arrays=3",
+        "-fno-strict-flex-arrays",
+    };
+    if (exactFlags.contains(arg))
+        return true;
+
+    // Prefix matches for parameterized flags
+    if (arg.starts_with("-Wshadow="))           // -Wshadow=compatible-local
+        return true;
+    if (arg.starts_with("-Wcast-function-type"))  // -Wcast-function-type
+        return true;
+    if (arg.starts_with("-Wimplicit-fallthrough="))  // -Wimplicit-fallthrough=3
+        return true;
+    if (arg.starts_with("-Wno-stringop-"))      // -Wno-stringop-truncation, etc.
+        return true;
+    if (arg.starts_with("-Wstringop-"))
+        return true;
+    if (arg.starts_with("-Wno-format-truncation"))
+        return true;
+    if (arg.starts_with("-Wformat-truncation"))
+        return true;
+    if (arg.starts_with("-Wno-maybe-uninitialized"))
+        return true;
+    if (arg.starts_with("-Wmaybe-uninitialized"))
+        return true;
+    if (arg.starts_with("-Wno-alloc-size-larger-than"))
+        return true;
+    if (arg.starts_with("-Walloc-size-larger-than"))
+        return true;
+    if (arg.starts_with("-Wno-restrict"))
+        return true;
+    if (arg.starts_with("-Wduplicated-"))       // -Wduplicated-cond, -Wduplicated-branches
+        return true;
+    if (arg.starts_with("-Wlogical-op"))
+        return true;
+    if (arg.starts_with("-Wno-aggressive-loop-optimizations"))
+        return true;
+    if (arg.starts_with("-mabi="))              // -mabi=lp64
+        return true;
+    if (arg.starts_with("-mcmodel="))           // -mcmodel=kernel
+        return true;
+    if (arg.starts_with("-mstack-protector-guard"))
+        return true;
+    if (arg.starts_with("-fplugin"))            // GCC plugins
+        return true;
+    if (arg.starts_with("-fdiagnostics-color="))  // GCC-specific color syntax
+        return true;
+
+    return false;
+}
+
+// Sanitize compile command for Clang IR emission.
+// Strips GCC-only flags and adds suppressions for GCC attribute dialects.
+std::vector<std::string> sanitizeForClangIR(
+        const std::vector<std::string> &args,
+        const std::string &srcPath) {
+    std::vector<std::string> result;
+    result.reserve(args.size() + 2);
+
+    // Suppress warnings about unknown attributes (gnu_printf, etc.)
+    // This is cleaner than AST rewriting and achieves the same goal.
+    result.push_back("-Wno-unknown-attributes");
+    result.push_back("-Wno-ignored-attributes");
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        const std::string &arg = args[i];
+
+        // Skip -c and -o <file> (we replace these)
+        if (arg == "-c")
+            continue;
+        if (arg == "-o" && i + 1 < args.size()) {
+            ++i;
+            continue;
+        }
+        // Skip the source file (we append it at the end)
+        if (arg == srcPath)
+            continue;
+
+        // Strip GCC-only flags
+        if (isGCCOnlyFlag(arg))
+            continue;
+
+        // Strip GCC-only flags that take a separate argument
+        if (arg == "-mpreferred-stack-boundary" ||
+            arg == "-mstack-protector-guard" ||
+            arg == "-mstack-protector-guard-reg" ||
+            arg == "-mstack-protector-guard-offset") {
+            if (i + 1 < args.size())
+                ++i;  // skip the argument too
+            continue;
+        }
+
+        result.push_back(arg);
+    }
+
+    return result;
+}
 
 struct IRJob {
     std::string srcPath;
@@ -101,16 +230,34 @@ IRResult emitOneIR(const IRJob &job) {
 }
 
 std::string resolveCompiler(const std::string &dbCompiler) {
-    auto resolvedOrErr = llvm::sys::findProgramByName(dbCompiler);
-    if (resolvedOrErr && llvm::sys::fs::can_execute(*resolvedOrErr))
-        return *resolvedOrErr;
+    // For IR emission, we MUST use clang (GCC doesn't support -emit-llvm).
+    // The dbCompiler from compile_commands.json is only used to check if
+    // we should use clang vs clang++ (C vs C++ mode).
+    llvm::StringRef stem = llvm::sys::path::stem(dbCompiler);
+    bool isCxx = stem.contains("++") || stem.contains("clang++") ||
+                 stem.contains("g++") || stem.contains("c++");
 
-    for (const char *fallback : {"clang++", "clang++-18",
-                                  "clang++-17", "clang++-16"}) {
-        auto fb = llvm::sys::findProgramByName(fallback);
+    // Try clang/clang++ in order of preference.
+    const char *cxxFallbacks[] = {"clang++", "clang++-18", "clang++-17", "clang++-16"};
+    const char *cFallbacks[] = {"clang", "clang-18", "clang-17", "clang-16"};
+    const char **fallbacks = isCxx ? cxxFallbacks : cFallbacks;
+    size_t count = isCxx ? std::size(cxxFallbacks) : std::size(cFallbacks);
+
+    for (size_t i = 0; i < count; ++i) {
+        auto fb = llvm::sys::findProgramByName(fallbacks[i]);
         if (fb && llvm::sys::fs::can_execute(*fb))
             return *fb;
     }
+
+    // Last resort: try the other variant
+    const char **altFallbacks = isCxx ? cFallbacks : cxxFallbacks;
+    size_t altCount = isCxx ? std::size(cFallbacks) : std::size(cxxFallbacks);
+    for (size_t i = 0; i < altCount; ++i) {
+        auto fb = llvm::sys::findProgramByName(altFallbacks[i]);
+        if (fb && llvm::sys::fs::can_execute(*fb))
+            return *fb;
+    }
+
     return {};
 }
 
@@ -439,22 +586,15 @@ static void runIRPass(
         argv.push_back("-g");
         argv.push_back(optLevel);
 
+        // Sanitize compile commands: strip GCC-only flags, suppress
+        // unknown attribute warnings (gnu_printf, etc.)
         for (const auto &cmd : cmds) {
-            const auto &args = cmd.CommandLine;
-            for (size_t i = 1; i < args.size(); ++i) {
-                if (args[i] == "-c")
-                    continue;
-                if (args[i] == "-o" && i + 1 < args.size()) {
-                    ++i;
-                    continue;
-                }
-                if (args[i] == srcPath)
-                    continue;
-                argv.push_back(args[i]);
-            }
+            auto sanitized = sanitizeForClangIR(cmd.CommandLine, srcPath);
+            argv.insert(argv.end(), sanitized.begin(), sanitized.end());
         }
 
         // Cache key.
+
         llvm::MD5 hasher;
         auto srcBuf = llvm::MemoryBuffer::getFile(srcPath);
         if (srcBuf)
