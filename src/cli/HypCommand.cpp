@@ -5,6 +5,7 @@
 #include "lshaz/hypothesis/HypothesisConstructor.h"
 #include "lshaz/hypothesis/LatencyHypothesis.h"
 
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <cstring>
@@ -44,18 +45,23 @@ int runHypCommand(int argc, const char **argv) {
             << "Usage: lshaz hyp <scan-result.json> [options]\n\n"
             << "Construct latency hypotheses from scan diagnostics.\n\n"
             << "Options:\n"
-            << "  --rule <id>    Only hypothesize for a specific rule ID\n"
-            << "  --min-conf <f> Minimum confidence threshold (default: 0.0)\n"
-            << "  --help         Show this help\n";
+            << "  -o, --output <file>  Write output to file (default: stdout)\n"
+            << "  --rule <id>          Only hypothesize for a specific rule ID\n"
+            << "  --min-conf <f>       Minimum confidence threshold (default: 0.0)\n"
+            << "  --help               Show this help\n";
         return 0;
     }
 
     const char *inputPath = argv[0];
     std::string filterRule;
+    std::string outputPath;
     double minConf = 0.0;
 
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--rule") == 0 && i + 1 < argc)
+        if ((std::strcmp(argv[i], "-o") == 0 ||
+             std::strcmp(argv[i], "--output") == 0) && i + 1 < argc)
+            outputPath = argv[++i];
+        else if (std::strcmp(argv[i], "--rule") == 0 && i + 1 < argc)
             filterRule = argv[++i];
         else if (std::strcmp(argv[i], "--min-conf") == 0 && i + 1 < argc)
             minConf = std::stod(argv[++i]);
@@ -78,18 +84,36 @@ int runHypCommand(int argc, const char **argv) {
             hypotheses.push_back(std::move(*h));
     }
 
-    // Output as JSON array.
-    llvm::outs() << "{\n"
-                 << "  \"hypotheses\": [\n";
-    for (size_t i = 0; i < hypotheses.size(); ++i) {
-        llvm::outs() << hypothesisToJson(hypotheses[i]);
-        if (i + 1 < hypotheses.size()) llvm::outs() << ",";
-        llvm::outs() << "\n";
+    // Select output stream.
+    std::error_code ec;
+    std::unique_ptr<llvm::raw_fd_ostream> fileStream;
+    llvm::raw_ostream *out = &llvm::outs();
+    if (!outputPath.empty()) {
+        fileStream = std::make_unique<llvm::raw_fd_ostream>(
+            outputPath, ec, llvm::sys::fs::OF_Text);
+        if (ec) {
+            llvm::errs() << "lshaz hyp: cannot open '" << outputPath
+                         << "': " << ec.message() << "\n";
+            return 1;
+        }
+        out = fileStream.get();
     }
-    llvm::outs() << "  ],\n"
-                 << "  \"totalDiagnostics\": " << diagnostics.size() << ",\n"
-                 << "  \"hypothesesGenerated\": " << hypotheses.size() << "\n"
-                 << "}\n";
+
+    *out << "{\n"
+         << "  \"hypotheses\": [\n";
+    for (size_t i = 0; i < hypotheses.size(); ++i) {
+        *out << hypothesisToJson(hypotheses[i]);
+        if (i + 1 < hypotheses.size()) *out << ",";
+        *out << "\n";
+    }
+    *out << "  ],\n"
+         << "  \"totalDiagnostics\": " << diagnostics.size() << ",\n"
+         << "  \"hypothesesGenerated\": " << hypotheses.size() << "\n"
+         << "}\n";
+
+    if (fileStream)
+        llvm::errs() << "lshaz hyp: wrote " << hypotheses.size()
+                     << " hypothesis(es) to " << outputPath << "\n";
 
     return 0;
 }
