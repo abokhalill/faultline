@@ -8,6 +8,12 @@
 
 #include <cstring>
 #include <string>
+#include <chrono>
+#include <thread>
+
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace lshaz {
 
@@ -69,16 +75,15 @@ std::string shellQuote(const std::string &s) {
 
 int runExternal(const std::string &program,
                 const std::vector<std::string> &args,
-                const std::string &cwd, unsigned timeout = 120) {
+                const std::string &cwd,
+                const std::string &label = "",
+                unsigned timeout = 120) {
     auto found = llvm::sys::findProgramByName(program);
     if (!found) {
         llvm::errs() << "lshaz init: '" << program << "' not found in PATH\n";
         return -1;
     }
 
-    // llvm::sys::ExecuteAndWait has no cwd parameter.
-    // Route through sh -c 'cd <dir> && exec <cmd> <args>' to
-    // guarantee the child process runs in the target directory.
     auto sh = llvm::sys::findProgramByName("sh");
     if (!sh) {
         llvm::errs() << "lshaz init: 'sh' not found\n";
@@ -90,37 +95,73 @@ int runExternal(const std::string &program,
     for (const auto &a : args)
         cmdline += " " + shellQuote(a);
 
-    std::vector<llvm::StringRef> argv;
-    argv.push_back(*sh);
-    argv.push_back("-c");
-    argv.push_back(cmdline);
+    bool isTTY = llvm::errs().is_displayed();
+    std::string spinLabel = label.empty() ? program : label;
 
-    llvm::SmallString<256> outFile, errFile;
-    llvm::sys::path::system_temp_directory(true, outFile);
-    errFile = outFile;
-    llvm::sys::path::append(outFile, "lshaz-init.out");
-    llvm::sys::path::append(errFile, "lshaz-init.err");
+    // Fork so we can animate a spinner while the child runs.
+    pid_t pid = fork();
+    if (pid < 0) {
+        llvm::errs() << "lshaz init: fork() failed: " << strerror(errno) << "\n";
+        return -1;
+    }
 
-    std::optional<llvm::StringRef> redirects[] = {
-        std::nullopt,
-        llvm::StringRef(outFile),
-        llvm::StringRef(errFile),
+    if (pid == 0) {
+        // Child: redirect stdout/stderr to /dev/null, exec via sh -c.
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+        execl(sh->c_str(), "sh", "-c", cmdline.c_str(), nullptr);
+        _exit(127);
+    }
+
+    // Parent: animate spinner while waiting for child.
+    static const char *spinFrames[] = {
+        "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8",
+        "\xe2\xa0\xbc", "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7",
+        "\xe2\xa0\x87", "\xe2\xa0\x8f"
     };
+    constexpr unsigned numFrames = 10;
+    unsigned frame = 0;
+    auto startTime = std::chrono::steady_clock::now();
 
-    std::string execErr;
-    bool failed = false;
-    int rc = llvm::sys::ExecuteAndWait(
-        *sh, argv,
-        /*Env=*/std::nullopt, redirects,
-        timeout, /*MemoryLimit=*/0,
-        &execErr, &failed);
+    if (!isTTY)
+        llvm::errs() << "lshaz init: running " << spinLabel << "...\n";
 
-    llvm::sys::fs::remove(outFile);
-    llvm::sys::fs::remove(errFile);
+    int status = 0;
+    while (true) {
+        pid_t w = waitpid(pid, &status, WNOHANG);
+        if (w == pid) break;
+        if (w < 0) break;
 
-    if (failed && !execErr.empty())
-        llvm::errs() << "lshaz init: " << execErr << "\n";
+        // Check timeout.
+        auto elapsed = std::chrono::steady_clock::now() - startTime;
+        auto secs = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+        if (static_cast<unsigned>(secs) >= timeout) {
+            kill(pid, SIGTERM);
+            waitpid(pid, &status, 0);
+            if (isTTY) llvm::errs() << "\r\033[K";
+            llvm::errs() << "lshaz init: " << spinLabel
+                         << " timed out after " << timeout << "s\n";
+            return -1;
+        }
 
+        if (isTTY) {
+            llvm::errs() << "\r  " << spinFrames[frame % numFrames]
+                         << "  " << spinLabel << "... ("
+                         << secs << "s)";
+            llvm::errs().flush();
+            ++frame;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    }
+
+    if (isTTY) llvm::errs() << "\r\033[K";
+
+    int rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     return rc;
 }
 
@@ -134,7 +175,7 @@ bool generateCMake(const std::string &dir) {
         "-S", dir,
         "-B", std::string(buildDir),
         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
-    }, dir);
+    }, dir, "configuring CMake");
 
     if (rc != 0) {
         llvm::errs() << "lshaz init: cmake configure failed\n";
@@ -157,7 +198,7 @@ bool generateMeson(const std::string &dir) {
     llvm::sys::path::append(buildDir, "build");
 
     if (!llvm::sys::fs::is_directory(buildDir)) {
-        int rc = runExternal("meson", {"setup", std::string(buildDir)}, dir);
+        int rc = runExternal("meson", {"setup", std::string(buildDir)}, dir, "configuring Meson");
         if (rc != 0) {
             llvm::errs() << "lshaz init: meson setup failed\n";
             return false;
@@ -186,8 +227,7 @@ bool generateBear(const std::string &dir) {
         return false;
     }
 
-    llvm::errs() << "lshaz init: running bear -- make ...\n";
-    int rc = runExternal("bear", {"--", "make", "-j"}, dir, 300);
+    int rc = runExternal("bear", {"--", "make", "-j"}, dir, "building with bear", 300);
     if (rc != 0) {
         llvm::errs() << "lshaz init: bear failed (exit " << rc << ")\n";
         return false;

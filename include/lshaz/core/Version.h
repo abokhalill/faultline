@@ -3,7 +3,7 @@
 
 namespace lshaz {
 
-constexpr const char *kToolVersion  = "0.2.0";
+constexpr const char *kToolVersion  = "0.4.0";
 constexpr const char *kToolName     = "lshaz";
 
 // Output schema version. Bump on any structural change to JSON/SARIF output.
