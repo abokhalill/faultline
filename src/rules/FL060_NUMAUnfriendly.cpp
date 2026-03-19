@@ -33,6 +33,7 @@ public:
                  clang::ASTContext &Ctx,
                  const HotPathOracle & /*Oracle*/,
                  const Config &Cfg,
+                 EscapeAnalysis &escape,
                  std::vector<Diagnostic> &out) override {
 
         const auto *RD = llvm::dyn_cast_or_null<clang::RecordDecl>(D);
@@ -56,7 +57,6 @@ public:
         if (sizeBytes < 256)
             return;
 
-        EscapeAnalysis escape(Ctx);
         EscapeVerdict ev = escape.escapeVerdict(RD);
         if (!ev)
             return;

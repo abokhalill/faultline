@@ -32,13 +32,12 @@ public:
                  clang::ASTContext &Ctx,
                  const HotPathOracle & /*Oracle*/,
                  const Config & /*Cfg*/,
+                 EscapeAnalysis &escape,
                  std::vector<Diagnostic> &out) override {
 
         const auto *VD = llvm::dyn_cast_or_null<clang::VarDecl>(D);
         if (!VD)
             return;
-
-        auto &escape = getOrCreateEscape(Ctx);
 
         if (!escape.isGlobalSharedMutable(VD))
             return;
@@ -116,18 +115,6 @@ public:
         out.push_back(std::move(diag));
     }
 
-private:
-    EscapeAnalysis &getOrCreateEscape(clang::ASTContext &Ctx) {
-        if (!cachedEscape_ || &Ctx != cachedCtx_) {
-            cachedCtx_ = &Ctx;
-            cachedEscape_ = std::make_unique<EscapeAnalysis>(Ctx);
-            cachedEscape_->scanTranslationUnit(Ctx.getTranslationUnitDecl());
-        }
-        return *cachedEscape_;
-    }
-
-    clang::ASTContext *cachedCtx_ = nullptr;
-    std::unique_ptr<EscapeAnalysis> cachedEscape_;
 };
 
 LSHAZ_REGISTER_RULE(FL040_CentralizedGlobalState)

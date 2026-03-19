@@ -158,6 +158,7 @@ public:
                  clang::ASTContext &Ctx,
                  const HotPathOracle &Oracle,
                  const Config & /*Cfg*/,
+                 EscapeAnalysis & /*Escape*/,
                  std::vector<Diagnostic> &out) override {
 
         const auto *FD = llvm::dyn_cast_or_null<clang::FunctionDecl>(D);

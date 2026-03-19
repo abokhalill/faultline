@@ -11,10 +11,15 @@ SourceLocation resolveSourceLocation(clang::SourceLocation loc,
     if (loc.isInvalid())
         return result;
 
-    // getPresumedLoc resolves #line directives and macro expansions,
-    // producing a usable filename even for generated/catalog headers
-    // where SM.getFilename(getSpellingLoc()) returns empty.
-    auto presumed = SM.getPresumedLoc(SM.getSpellingLoc(loc));
+    // For macro-expanded tokens (especially token-pasting via ##),
+    // getSpellingLoc() points into <scratch space> — a per-TU virtual
+    // buffer whose offsets are non-deterministic across shards.
+    // getFileLoc() walks up the entire macro instantiation stack to
+    // the physical file where the macro was invoked. For non-macro
+    // locations it's a no-op.
+    clang::SourceLocation physical = SM.getFileLoc(loc);
+
+    auto presumed = SM.getPresumedLoc(physical);
     if (presumed.isValid()) {
         const char *fn = presumed.getFilename();
         if (fn && fn[0] != '\0') {
@@ -25,11 +30,10 @@ SourceLocation resolveSourceLocation(clang::SourceLocation loc,
         }
     }
 
-    // Fallback: direct spelling loc (may produce empty file).
-    auto spelling = SM.getSpellingLoc(loc);
-    result.file   = SM.getFilename(spelling).str();
-    result.line   = SM.getSpellingLineNumber(loc);
-    result.column = SM.getSpellingColumnNumber(loc);
+    // Fallback: direct file loc (may produce empty file for synthetics).
+    result.file   = SM.getFilename(physical).str();
+    result.line   = SM.getSpellingLineNumber(physical);
+    result.column = SM.getSpellingColumnNumber(physical);
     return result;
 }
 

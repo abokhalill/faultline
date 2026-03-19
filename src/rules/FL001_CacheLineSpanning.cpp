@@ -30,6 +30,7 @@ public:
                  clang::ASTContext &Ctx,
                  const HotPathOracle & /*Oracle*/,
                  const Config &Cfg,
+                 EscapeAnalysis &escape,
                  std::vector<Diagnostic> &out) override {
 
         const auto *RD = llvm::dyn_cast_or_null<clang::RecordDecl>(D);
@@ -49,7 +50,6 @@ public:
         uint64_t sizeBytes = map.recordSizeBytes();
         uint64_t lines = map.maxLinesSpanned();
 
-        EscapeAnalysis escape(Ctx);
         EscapeVerdict ev = escape.escapeVerdict(RD);
 
         Severity sev = Severity::High;

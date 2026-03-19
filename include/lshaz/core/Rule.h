@@ -16,6 +16,7 @@ class Decl;
 
 namespace lshaz {
 
+class EscapeAnalysis;
 class HotPathOracle;
 
 class Rule {
@@ -31,6 +32,7 @@ public:
                          clang::ASTContext &Ctx,
                          const HotPathOracle &Oracle,
                          const Config &Cfg,
+                         EscapeAnalysis &Escape,
                          std::vector<Diagnostic> &out) = 0;
 };
 

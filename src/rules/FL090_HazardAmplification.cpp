@@ -31,6 +31,7 @@ public:
                  clang::ASTContext &Ctx,
                  const HotPathOracle & /*Oracle*/,
                  const Config &Cfg,
+                 EscapeAnalysis &escape,
                  std::vector<Diagnostic> &out) override {
 
         const auto *RD = llvm::dyn_cast_or_null<clang::RecordDecl>(D);
@@ -43,7 +44,6 @@ public:
                 return;
 
         CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes);
-        EscapeAnalysis escape(Ctx);
         EscapeVerdict ev = escape.escapeVerdict(RD);
 
         bool multiLine    = map.maxLinesSpanned() >= 3;

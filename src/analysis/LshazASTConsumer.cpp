@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/LshazASTConsumer.h"
 #include "lshaz/analysis/CallGraph.h"
+#include "lshaz/analysis/EscapeAnalysis.h"
 #include "lshaz/analysis/StructLayoutVisitor.h"
 #include "lshaz/core/RuleRegistry.h"
 
@@ -109,14 +110,21 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     cg.buildFromTU(TU);
     oracle_.propagateViaCallGraph(cg);
 
+    // Per-TU EscapeAnalysis — owned here, injected into rules.
+    // This eliminates the ASTContext pointer-reuse cache invalidation
+    // bug that caused FL040 non-determinism across forked children.
+    EscapeAnalysis escape(Ctx);
+    escape.scanTranslationUnit(TU);
+
     // Second pass: run enabled rules.
     size_t diagsBefore = diagnostics_.size();
     const auto &rules = RuleRegistry::instance().rules();
+
     for (auto *D : decls) {
         for (const auto &rule : rules) {
             if (disabled.count(std::string(rule->getID())))
                 continue;
-            rule->analyze(D, Ctx, oracle_, config_, diagnostics_);
+            rule->analyze(D, Ctx, oracle_, config_, escape, diagnostics_);
         }
     }
 
