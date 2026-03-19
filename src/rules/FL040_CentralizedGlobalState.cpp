@@ -56,20 +56,17 @@ public:
         if (escape.isAtomicType(QT))
             hasAtomics = true;
 
-        bool writeOnce = escape.isWriteOnceGlobal(VD);
+        // Map phase: emit raw facts, defer write-once verdict to reduce.
+        unsigned tuWriteCount = escape.getGlobalWriteCount(VD);
+        bool hasInit = VD->hasInit() &&
+                       !llvm::isa<clang::ImplicitValueInitExpr>(
+                           VD->getInit()->IgnoreImplicit());
 
-        Severity sev = Severity::High;
+        // Tentative severity — reduce phase may reclassify.
+        Severity sev = hasAtomics ? Severity::Critical : Severity::High;
         std::vector<std::string> escalations;
 
-        if (writeOnce) {
-            // Write-once globals are initialized and never mutated at runtime.
-            // Contention risk is negligible. Demote to Informational.
-            sev = Severity::Informational;
-            escalations.push_back(
-                "write-once: initialized at declaration or assigned at most "
-                "once in function bodies — negligible runtime contention");
-        } else if (hasAtomics) {
-            sev = Severity::Critical;
+        if (hasAtomics) {
             escalations.push_back(
                 "Contains atomic fields: confirmed multi-writer intent, "
                 "guaranteed cross-core cache line contention");
@@ -82,9 +79,9 @@ public:
         diag.ruleID    = "FL040";
         diag.title     = "Centralized Mutable Global State";
         diag.severity  = sev;
-        diag.confidence = writeOnce ? 0.30 : (hasAtomics ? 0.85 : 0.60);
-        diag.evidenceTier = writeOnce ? EvidenceTier::Speculative
-                          : (hasAtomics ? EvidenceTier::Likely : EvidenceTier::Speculative);
+        diag.confidence = hasAtomics ? 0.85 : 0.60;
+        diag.evidenceTier = hasAtomics ? EvidenceTier::Likely
+                                       : EvidenceTier::Speculative;
 
         diag.location = resolveSourceLocation(loc, SM);
 
@@ -105,7 +102,8 @@ public:
             {"const", "no"},
             {"thread_local", "no"},
             {"atomics", hasAtomics ? "yes" : "no"},
-            {"write_once", writeOnce ? "yes" : "no"},
+            {"has_init", hasInit ? "yes" : "no"},
+            {"tu_write_count", std::to_string(tuWriteCount)},
         };
 
         diag.mitigation =
