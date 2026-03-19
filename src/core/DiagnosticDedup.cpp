@@ -85,9 +85,16 @@ void deduplicateDiagnostics(std::vector<Diagnostic> &diagnostics) {
                     else if (cur.location.file.size() == prv.location.file.size()) {
                         if (cur.location.file < prv.location.file)
                             better = true;
-                        else if (cur.location.file == prv.location.file &&
-                                 cur.location.line < prv.location.line)
-                            better = true;
+                        else if (cur.location.file == prv.location.file) {
+                            if (cur.location.line < prv.location.line)
+                                better = true;
+                            else if (cur.location.line == prv.location.line) {
+                                if (cur.location.column < prv.location.column)
+                                    better = true;
+                                else if (cur.location.column == prv.location.column)
+                                    better = cur.functionName < prv.functionName;
+                            }
+                        }
                     }
                 }
             }
@@ -128,6 +135,10 @@ void deduplicateDiagnostics(std::vector<Diagnostic> &diagnostics) {
                 "cross-TU: deduplicated from " +
                 std::to_string(group.size()) + " translation unit(s)");
         }
+
+        // Sort escalations for deterministic output regardless of
+        // shard arrival order during the merge above.
+        std::sort(merged.escalations.begin(), merged.escalations.end());
 
         deduped.push_back(std::move(merged));
     }
