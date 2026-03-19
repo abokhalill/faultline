@@ -152,6 +152,7 @@ test/fixtures/hft_core/        # Test fixture files
        std::string_view getHardwareMechanism() const override { return "..."; }
        void analyze(const clang::Decl *D, clang::ASTContext &Ctx,
                     const HotPathOracle &Oracle, const Config &Cfg,
+                    EscapeAnalysis &Escape,
                     std::vector<Diagnostic> &out) override;
    };
    ```

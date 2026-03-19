@@ -159,7 +159,7 @@ See `tools/github-actions-example.yml` for a ready-to-use GitHub Actions workflo
 
 Diagnostic output is **fully deterministic** across identical runs on the same input. Diagnostics are sorted by `(severity desc, file, line, column, ruleID)` — this order is stable and reproducible.
 
-> **Note:** FL040 (Centralized Global State) uses a two-pass MapReduce architecture to guarantee determinism. Per-TU shards emit raw write counts; the pipeline aggregates them globally before applying the write-once threshold. Dedup uses a stable key (`var` + `type`) with a deterministic tiebreaker for canonical location. All diagnostic locations are resolved via `getSpellingLoc()` to strip Clang `<scratch space>` artifacts from macro expansions. See [architecture.md](architecture.md#parallel-execution) for details.
+> **Note:** FL040 (Centralized Global State) uses a two-pass MapReduce architecture to guarantee determinism. Per-TU shards emit raw write counts; the pipeline aggregates them globally before applying the write-once threshold. Dedup uses a stable key (`var` + `type`) with a deterministic tiebreaker for canonical location. All diagnostic locations are resolved via `getFileLoc()` to map Clang `<scratch space>` token-paste artifacts back to their physical file locations. `EscapeAnalysis` is instantiated per-TU by the `ASTConsumer` and injected into rules — rules hold no per-TU cached state. See [architecture.md](architecture.md#parallel-execution) for details.
 
 The only field that varies between runs is `metadata.timestamp` (epoch seconds at scan start). For byte-identical JSON comparison in CI, normalize or strip this field:
 
