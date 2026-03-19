@@ -20,8 +20,12 @@ bool isIncludePrefixFlag(llvm::StringRef arg) {
 /// Flags whose *next* argument is a path (separated form).
 bool isSeparatedPathFlag(llvm::StringRef arg) {
     return arg == "-I" || arg == "-isystem" || arg == "-iquote" ||
-           arg == "-include" || arg == "-isysroot" || arg == "--sysroot" ||
+           arg == "-isysroot" || arg == "--sysroot" ||
            arg == "-o";
+    // Note: -include is intentionally excluded.  Its argument is resolved
+    // via the compiler's include search path (-I paths), not relative to
+    // the working directory.  Resolving it as a path breaks codebases
+    // like DPDK where "-include rte_config.h" is found via -I../config.
 }
 
 } // anonymous namespace
@@ -71,7 +75,7 @@ AbsolutePathCompilationDatabase::resolveCommand(
         // Handle -I, -isystem, -iquote, -include prefixes.
         bool handled = false;
         for (const char *prefix :
-             {"-I", "-isystem", "-iquote", "-include", "-isysroot",
+             {"-I", "-isystem", "-iquote", "-isysroot",
               "--sysroot="}) {
             llvm::StringRef sr(arg);
             llvm::StringRef pfx(prefix);
