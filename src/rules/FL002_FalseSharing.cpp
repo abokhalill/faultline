@@ -59,6 +59,11 @@ public:
         if (!hasAtomicPairs && map.totalAtomicFields() == 0)
             return;
 
+        // Refcount-only structs: single atomic refcount field sharing a line
+        // with immutable data.  No real false sharing — downgrade to Info.
+        if (map.isRefcountOnly() && !hasAtomicPairs)
+            return;
+
         Severity sev = hasAtomicPairs ? Severity::Critical : Severity::High;
         std::vector<std::string> escalations;
 

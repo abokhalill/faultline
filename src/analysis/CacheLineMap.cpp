@@ -264,4 +264,38 @@ std::vector<uint64_t> CacheLineMap::falseSharingCandidateLines() const {
     return result;
 }
 
+bool CacheLineMap::isRefcountOnly() const {
+    if (totalAtomics_ != 1)
+        return false;
+
+    // Find the single atomic field and check its name.
+    for (const auto &f : fields_) {
+        if (!f.isAtomic)
+            continue;
+        // Normalize to lowercase for comparison.
+        std::string lower;
+        lower.reserve(f.name.size());
+        for (char c : f.name)
+            lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+
+        // Match common refcount field names.  Accept with or without
+        // leading underscores / trailing underscores.
+        // Strip leading/trailing underscores for matching.
+        std::string_view sv(lower);
+        while (!sv.empty() && sv.front() == '_') sv.remove_prefix(1);
+        while (!sv.empty() && sv.back() == '_') sv.remove_suffix(1);
+
+        if (sv == "ref" || sv == "refs" ||
+            sv == "refcount" || sv == "refcnt" ||
+            sv == "count" || sv == "cnt" ||
+            sv == "nref" || sv == "nrefs" ||
+            sv == "rc" || sv == "usecount" ||
+            sv == "refcountandflags")
+            return true;
+
+        return false;
+    }
+    return false;
+}
+
 } // namespace lshaz

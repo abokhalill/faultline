@@ -72,6 +72,13 @@ public:
     unsigned totalAtomicFields() const { return totalAtomics_; }
     unsigned totalMutableFields() const { return totalMutables_; }
 
+    // Returns true if the struct has exactly one atomic field whose name
+    // matches a reference-counting pattern (ref, refcount, count, etc.).
+    // Such structs are typically COW/shared_ptr objects where the refcount
+    // is the only mutable field and co-located immutable fields never cause
+    // real false sharing.
+    bool isRefcountOnly() const;
+
 private:
     void collectFields(const clang::RecordDecl *RD,
                        clang::ASTContext &Ctx,

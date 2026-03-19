@@ -82,6 +82,12 @@ public:
                 std::to_string(map.totalAtomicFields()) +
                 " atomic field(s) across " + std::to_string(atomicLines) +
                 " line(s): RFO traffic on each distinct line");
+
+            // Refcount-only structs: single atomic refcount with immutable
+            // co-located data.  Demote — cache line spanning is real but
+            // the coherence traffic is limited to refcount ops only.
+            if (map.isRefcountOnly())
+                sev = Severity::Medium;
         }
 
         // No escape evidence and no atomics → speculative.
