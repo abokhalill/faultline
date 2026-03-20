@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
@@ -97,7 +98,18 @@ std::vector<std::string> splitDiagnostics(const std::string &json) {
     return result;
 }
 
-std::vector<DiagEntry> parseDiagFile(const std::string &path) {
+struct ScanMeta {
+    unsigned totalTUs = 0;
+    unsigned failedTUs = 0;
+    bool parsed = false;
+};
+
+struct ParsedScan {
+    std::vector<DiagEntry> diags;
+    ScanMeta meta;
+};
+
+ParsedScan parseDiagFile(const std::string &path) {
     auto bufOrErr = llvm::MemoryBuffer::getFile(path);
     if (!bufOrErr) {
         llvm::errs() << "lshaz diff: cannot read '" << path << "': "
@@ -106,10 +118,30 @@ std::vector<DiagEntry> parseDiagFile(const std::string &path) {
     }
 
     std::string json = (*bufOrErr)->getBuffer().str();
-    auto objects = splitDiagnostics(json);
 
-    std::vector<DiagEntry> entries;
-    entries.reserve(objects.size());
+    ParsedScan result;
+
+    // Extract metadata from top-level JSON.
+    auto metaPos = json.find("\"metadata\"");
+    if (metaPos != std::string::npos) {
+        // Find the metadata object boundaries.
+        auto braceStart = json.find('{', metaPos);
+        if (braceStart != std::string::npos) {
+            int depth = 1;
+            size_t braceEnd = braceStart + 1;
+            for (; braceEnd < json.size() && depth > 0; ++braceEnd) {
+                if (json[braceEnd] == '{') ++depth;
+                else if (json[braceEnd] == '}') --depth;
+            }
+            std::string metaObj = json.substr(braceStart, braceEnd - braceStart);
+            result.meta.totalTUs = extractUnsigned(metaObj, "totalTUs");
+            result.meta.failedTUs = extractUnsigned(metaObj, "failedTUCount");
+            result.meta.parsed = true;
+        }
+    }
+
+    auto objects = splitDiagnostics(json);
+    result.diags.reserve(objects.size());
     for (const auto &obj : objects) {
         DiagEntry e;
         e.key.ruleID = extractString(obj, "ruleID");
@@ -118,9 +150,99 @@ std::vector<DiagEntry> parseDiagFile(const std::string &path) {
         e.severity = extractString(obj, "severity");
         e.title = extractString(obj, "title");
         e.confidence = extractDouble(obj, "confidence");
-        entries.push_back(std::move(e));
+        result.diags.push_back(std::move(e));
     }
-    return entries;
+    return result;
+}
+
+void printMetaDiff(const ScanMeta &a, const ScanMeta &b) {
+    if (!a.parsed && !b.parsed) return;
+
+    llvm::outs() << "Metadata:\n";
+    if (a.parsed && b.parsed) {
+        int tuDelta = static_cast<int>(b.totalTUs) - static_cast<int>(a.totalTUs);
+        int failDelta = static_cast<int>(b.failedTUs) - static_cast<int>(a.failedTUs);
+
+        llvm::outs() << "  TUs analyzed: " << a.totalTUs << " → " << b.totalTUs;
+        if (tuDelta != 0)
+            llvm::outs() << " (" << (tuDelta > 0 ? "+" : "") << tuDelta << ")";
+        llvm::outs() << "\n";
+
+        llvm::outs() << "  TUs failed:   " << a.failedTUs << " → " << b.failedTUs;
+        if (failDelta != 0)
+            llvm::outs() << " (" << (failDelta > 0 ? "+" : "") << failDelta << ")";
+        if (failDelta > 0)
+            llvm::outs() << "  ⚠ regression";
+        llvm::outs() << "\n";
+    } else {
+        if (a.parsed)
+            llvm::outs() << "  before: " << a.totalTUs << " TUs, "
+                         << a.failedTUs << " failed\n";
+        if (b.parsed)
+            llvm::outs() << "  after:  " << b.totalTUs << " TUs, "
+                         << b.failedTUs << " failed\n";
+    }
+    llvm::outs() << "\n";
+}
+
+void printRuleDistribution(const std::vector<DiagEntry> &before,
+                           const std::vector<DiagEntry> &after) {
+    std::map<std::string, int> beforeRules, afterRules;
+    for (const auto &e : before) ++beforeRules[e.key.ruleID];
+    for (const auto &e : after) ++afterRules[e.key.ruleID];
+
+    std::set<std::string> allRules;
+    for (const auto &[r, _] : beforeRules) allRules.insert(r);
+    for (const auto &[r, _] : afterRules) allRules.insert(r);
+
+    bool anyDelta = false;
+    for (const auto &r : allRules) {
+        int bv = beforeRules.count(r) ? beforeRules[r] : 0;
+        int av = afterRules.count(r) ? afterRules[r] : 0;
+        if (bv != av) { anyDelta = true; break; }
+    }
+    if (!anyDelta) return;
+
+    llvm::outs() << "Rule distribution:\n";
+    for (const auto &r : allRules) {
+        int bv = beforeRules.count(r) ? beforeRules[r] : 0;
+        int av = afterRules.count(r) ? afterRules[r] : 0;
+        if (bv == av) continue;
+        int delta = av - bv;
+        llvm::outs() << "  " << r << ": " << bv << " → " << av
+                     << " (" << (delta > 0 ? "+" : "") << delta << ")\n";
+    }
+    llvm::outs() << "\n";
+}
+
+void printSeverityDistribution(const std::vector<DiagEntry> &before,
+                               const std::vector<DiagEntry> &after) {
+    std::map<std::string, int> beforeSev, afterSev;
+    for (const auto &e : before) ++beforeSev[e.severity];
+    for (const auto &e : after) ++afterSev[e.severity];
+
+    std::set<std::string> allSev;
+    for (const auto &[s, _] : beforeSev) allSev.insert(s);
+    for (const auto &[s, _] : afterSev) allSev.insert(s);
+
+    bool anyDelta = false;
+    for (const auto &s : allSev) {
+        int bv = beforeSev.count(s) ? beforeSev[s] : 0;
+        int av = afterSev.count(s) ? afterSev[s] : 0;
+        if (bv != av) { anyDelta = true; break; }
+    }
+    if (!anyDelta) return;
+
+    llvm::outs() << "Severity distribution:\n";
+    for (const auto &s : allSev) {
+        int bv = beforeSev.count(s) ? beforeSev[s] : 0;
+        int av = afterSev.count(s) ? afterSev[s] : 0;
+        if (bv == av) continue;
+        int delta = av - bv;
+        llvm::outs() << "  " << s << ": " << bv << " → " << av
+                     << " (" << (delta > 0 ? "+" : "") << delta << ")\n";
+    }
+    llvm::outs() << "\n";
 }
 
 void printDiffUsage() {
@@ -128,6 +250,8 @@ void printDiffUsage() {
         << "Usage: lshaz diff <before.json> <after.json>\n"
         << "\n"
         << "Compare two lshaz JSON scan results and report:\n"
+        << "  - Metadata delta (TU counts, failures)\n"
+        << "  - Rule and severity distribution shifts\n"
         << "  - New findings (in after but not before)\n"
         << "  - Resolved findings (in before but not after)\n"
         << "  - Summary counts\n"
@@ -158,13 +282,22 @@ int runDiffCommand(int argc, const char **argv) {
     std::string beforePath = argv[0];
     std::string afterPath = argv[1];
 
-    auto before = parseDiagFile(beforePath);
-    auto after = parseDiagFile(afterPath);
+    auto beforeScan = parseDiagFile(beforePath);
+    auto afterScan = parseDiagFile(afterPath);
+    auto &before = beforeScan.diags;
+    auto &after = afterScan.diags;
+
+    // Metadata comparison.
+    printMetaDiff(beforeScan.meta, afterScan.meta);
 
     if (before.empty() && after.empty()) {
         llvm::outs() << "lshaz diff: both files have 0 diagnostics\n";
         return 0;
     }
+
+    // Distribution shifts.
+    printRuleDistribution(before, after);
+    printSeverityDistribution(before, after);
 
     // Build multisets to handle duplicate keys correctly.
     std::multiset<DiagKey> beforeKeys, afterKeys;
