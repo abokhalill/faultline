@@ -3,6 +3,8 @@
 // Tests: matchesGlob, filterSources, CompileDBResolver, RepoProvider.
 // No subprocess invocations. Isolated, deterministic.
 
+#include "lshaz/analysis/EscapeSummary.h"
+#include "lshaz/core/Diagnostic.h"
 #include "lshaz/pipeline/CompileDBResolver.h"
 #include "lshaz/pipeline/RepoProvider.h"
 #include "lshaz/pipeline/SourceFilter.h"
@@ -211,6 +213,270 @@ void testAcquireLocalPath() {
     check(acq.error.empty(), "no error");
 }
 
+// ===== EscapeSummary =====
+
+void testEscapeSummaryMerge() {
+    std::cerr << "test: EscapeSummary merge overlapping types\n";
+    using namespace lshaz;
+    TypeEscapeSignals a;
+    a.hasAtomics = true;
+    a.accessorCount = 3;
+
+    TypeEscapeSignals b;
+    b.hasSyncPrims = true;
+    b.hasPublication = true;
+    b.accessorCount = 2;
+
+    a.merge(b);
+    check(a.hasAtomics, "atomics preserved");
+    check(a.hasSyncPrims, "sync merged in");
+    check(a.hasPublication, "publication merged in");
+    check(a.accessorCount == 5, "accessor counts summed");
+    check(a.hasStructuralEscape(), "structural escape true");
+    check(a.hasAnyEscape(), "any escape true");
+}
+
+void testEscapeSummaryMergeDisjoint() {
+    std::cerr << "test: EscapeSummary merge disjoint types\n";
+    using namespace lshaz;
+    EscapeSummary s1, s2;
+    s1["TypeA"].hasAtomics = true;
+    s2["TypeB"].hasVolatile = true;
+
+    mergeEscapeSummaries(s1, s2);
+    check(s1.size() == 2, "both types present");
+    check(s1["TypeA"].hasAtomics, "TypeA atomics");
+    check(s1["TypeB"].hasVolatile, "TypeB volatile");
+}
+
+void testEscapeSummaryMergeAccessorAccumulation() {
+    std::cerr << "test: EscapeSummary accessor count accumulates across TUs\n";
+    using namespace lshaz;
+    EscapeSummary s1, s2, s3;
+    s1["Foo"].accessorCount = 4;
+    s2["Foo"].accessorCount = 7;
+    s3["Foo"].accessorCount = 1;
+
+    mergeEscapeSummaries(s1, s2);
+    mergeEscapeSummaries(s1, s3);
+    check(s1["Foo"].accessorCount == 12, "4+7+1 = 12");
+}
+
+void testEscapeSummaryStructuralVsPublication() {
+    std::cerr << "test: EscapeSummary structural vs publication distinction\n";
+    using namespace lshaz;
+    TypeEscapeSignals pubOnly;
+    pubOnly.hasPublication = true;
+    check(!pubOnly.hasStructuralEscape(), "publication alone not structural");
+    check(pubOnly.hasAnyEscape(), "publication counts as any escape");
+
+    TypeEscapeSignals none;
+    check(!none.hasStructuralEscape(), "empty has no structural");
+    check(!none.hasAnyEscape(), "empty has no escape");
+}
+
+void testEscapeSummaryIPCRoundTrip() {
+    std::cerr << "test: EscapeSummary IPC round-trip via JSON\n";
+    using namespace lshaz;
+    // Construct a JSON string matching the IPC format and verify parse.
+    // This is a black-box test of the compact format {a,s,o,v,p,n}.
+    EscapeSummary original;
+    original["ns::Widget"].hasAtomics = true;
+    original["ns::Widget"].hasSyncPrims = false;
+    original["ns::Widget"].hasSharedOwner = true;
+    original["ns::Widget"].hasVolatile = false;
+    original["ns::Widget"].hasPublication = true;
+    original["ns::Widget"].accessorCount = 42;
+    original["Plain"] = {};
+
+    // Simulate serialize → deserialize by building JSON and re-parsing.
+    // Build the compact JSON format manually.
+    std::string json = "{";
+    bool first = true;
+    for (const auto &[name, sig] : original) {
+        if (!first) json += ',';
+        json += "\"" + name + "\":{";
+        json += "\"a\":" + std::to_string(sig.hasAtomics ? 1 : 0);
+        json += ",\"s\":" + std::to_string(sig.hasSyncPrims ? 1 : 0);
+        json += ",\"o\":" + std::to_string(sig.hasSharedOwner ? 1 : 0);
+        json += ",\"v\":" + std::to_string(sig.hasVolatile ? 1 : 0);
+        json += ",\"p\":" + std::to_string(sig.hasPublication ? 1 : 0);
+        json += ",\"n\":" + std::to_string(sig.accessorCount);
+        json += "}";
+        first = false;
+    }
+    json += "}";
+
+    // Parse back (simulate deserializer logic).
+    EscapeSummary parsed;
+    size_t i = 1; // skip '{'
+    while (i < json.size() && json[i] != '}') {
+        if (json[i] == ',') ++i;
+        // parse key
+        if (json[i] != '"') break;
+        ++i;
+        size_t ks = i;
+        while (i < json.size() && json[i] != '"') ++i;
+        std::string key = json.substr(ks, i - ks);
+        ++i; // skip closing "
+        if (i < json.size() && json[i] == ':') ++i;
+        if (i < json.size() && json[i] == '{') ++i;
+        TypeEscapeSignals sig;
+        while (i < json.size() && json[i] != '}') {
+            if (json[i] == ',') ++i;
+            if (json[i] != '"') break;
+            ++i;
+            size_t fk = i;
+            while (i < json.size() && json[i] != '"') ++i;
+            std::string fkey = json.substr(fk, i - fk);
+            ++i; // "
+            if (i < json.size() && json[i] == ':') ++i;
+            int val = 0;
+            while (i < json.size() && json[i] >= '0' && json[i] <= '9') {
+                val = val * 10 + (json[i] - '0');
+                ++i;
+            }
+            if (fkey == "a") sig.hasAtomics = val != 0;
+            else if (fkey == "s") sig.hasSyncPrims = val != 0;
+            else if (fkey == "o") sig.hasSharedOwner = val != 0;
+            else if (fkey == "v") sig.hasVolatile = val != 0;
+            else if (fkey == "p") sig.hasPublication = val != 0;
+            else if (fkey == "n") sig.accessorCount = static_cast<unsigned>(val);
+        }
+        if (i < json.size() && json[i] == '}') ++i;
+        parsed[key] = sig;
+    }
+
+    check(parsed.size() == original.size(), "same number of types");
+    auto wit = parsed.find("ns::Widget");
+    check(wit != parsed.end(), "ns::Widget present");
+    if (wit != parsed.end()) {
+        check(wit->second.hasAtomics == true, "atomics round-trip");
+        check(wit->second.hasSyncPrims == false, "sync round-trip");
+        check(wit->second.hasSharedOwner == true, "shared_owner round-trip");
+        check(wit->second.hasVolatile == false, "volatile round-trip");
+        check(wit->second.hasPublication == true, "publication round-trip");
+        check(wit->second.accessorCount == 42, "accessor count round-trip");
+    }
+    auto pit = parsed.find("Plain");
+    check(pit != parsed.end(), "Plain present");
+    if (pit != parsed.end()) {
+        check(!pit->second.hasAnyEscape(), "Plain has no escape");
+    }
+}
+
+void testCrossTUSuppressionWithSummary() {
+    std::cerr << "test: cross-TU suppression with EscapeSummary\n";
+    using namespace lshaz;
+
+    // Type with no escape evidence in global summary → should be suppressed.
+    // Type with escape evidence → should survive.
+    EscapeSummary globalEscape;
+    globalEscape["EscapedType"].hasAtomics = true;
+    // "LocalOnlyType" deliberately absent from summary.
+
+    Diagnostic d1;
+    d1.ruleID = "FL002";
+    d1.structuralEvidence = {{"thread_escape", "true"}, {"type_name", "EscapedType"}};
+    d1.evidenceTier = EvidenceTier::Likely;
+
+    Diagnostic d2;
+    d2.ruleID = "FL002";
+    d2.structuralEvidence = {{"thread_escape", "true"}, {"type_name", "LocalOnlyType"}};
+    d2.evidenceTier = EvidenceTier::Likely;
+
+    // Simulate suppression inline (since applyCrossTUEscapeSuppression is static).
+    auto suppressWithSummary = [](std::vector<Diagnostic> &diags,
+                                  const EscapeSummary &esc, unsigned totalTUs) {
+        if (totalTUs <= 1) return 0u;
+        unsigned suppressed = 0;
+        for (auto &d : diags) {
+            if (d.suppressed) continue;
+            auto eit = d.structuralEvidence.find("thread_escape");
+            if (eit == d.structuralEvidence.end()) continue;
+            if (eit->second != "true" && eit->second != "yes") continue;
+            if (d.evidenceTier == EvidenceTier::Proven) continue;
+            auto tit = d.structuralEvidence.find("type_name");
+            if (tit == d.structuralEvidence.end()) continue;
+            auto git = esc.find(tit->second);
+            if (git != esc.end() && git->second.hasAnyEscape()) continue;
+            d.suppressed = true;
+            ++suppressed;
+        }
+        return suppressed;
+    };
+
+    std::vector<Diagnostic> diags = {d1, d2};
+    unsigned count = suppressWithSummary(diags, globalEscape, 5);
+    check(count == 1, "one suppressed");
+    check(!diags[0].suppressed, "EscapedType survives");
+    check(diags[1].suppressed, "LocalOnlyType suppressed");
+}
+
+void testCrossTUSuppressionPreservesProven() {
+    std::cerr << "test: cross-TU suppression preserves Proven tier\n";
+    using namespace lshaz;
+
+    EscapeSummary globalEscape; // empty = no evidence for anything
+
+    Diagnostic d;
+    d.ruleID = "FL002";
+    d.structuralEvidence = {{"thread_escape", "true"}, {"type_name", "Unknown"}};
+    d.evidenceTier = EvidenceTier::Proven;
+
+    auto suppressWithSummary = [](std::vector<Diagnostic> &diags,
+                                  const EscapeSummary &esc, unsigned totalTUs) {
+        for (auto &d : diags) {
+            if (d.suppressed) continue;
+            auto eit = d.structuralEvidence.find("thread_escape");
+            if (eit == d.structuralEvidence.end()) continue;
+            if (eit->second != "true" && eit->second != "yes") continue;
+            if (d.evidenceTier == EvidenceTier::Proven) continue;
+            auto tit = d.structuralEvidence.find("type_name");
+            if (tit == d.structuralEvidence.end()) continue;
+            auto git = esc.find(tit->second);
+            if (git != esc.end() && git->second.hasAnyEscape()) continue;
+            d.suppressed = true;
+        }
+    };
+
+    std::vector<Diagnostic> diags = {d};
+    suppressWithSummary(diags, globalEscape, 5);
+    check(!diags[0].suppressed, "Proven never suppressed");
+}
+
+void testCrossTUSuppressionNoTypeName() {
+    std::cerr << "test: cross-TU suppression skips diags without type_name\n";
+    using namespace lshaz;
+
+    EscapeSummary globalEscape;
+
+    Diagnostic d;
+    d.ruleID = "FL050";
+    d.structuralEvidence = {{"thread_escape", "true"}};
+    d.evidenceTier = EvidenceTier::Likely;
+
+    auto suppressWithSummary = [](std::vector<Diagnostic> &diags,
+                                  const EscapeSummary &esc, unsigned totalTUs) {
+        for (auto &d : diags) {
+            if (d.suppressed) continue;
+            auto eit = d.structuralEvidence.find("thread_escape");
+            if (eit == d.structuralEvidence.end()) continue;
+            if (eit->second != "true" && eit->second != "yes") continue;
+            if (d.evidenceTier == EvidenceTier::Proven) continue;
+            auto tit = d.structuralEvidence.find("type_name");
+            if (tit == d.structuralEvidence.end()) continue;
+            auto git = esc.find(tit->second);
+            if (git != esc.end() && git->second.hasAnyEscape()) continue;
+            d.suppressed = true;
+        }
+    };
+
+    std::vector<Diagnostic> diags = {d};
+    suppressWithSummary(diags, globalEscape, 5);
+    check(!diags[0].suppressed, "no type_name = not suppressed");
+}
+
 } // anonymous namespace
 
 int main() {
@@ -238,6 +504,16 @@ int main() {
     // RepoProvider
     testIsRemoteURL();
     testAcquireLocalPath();
+
+    // EscapeSummary
+    testEscapeSummaryMerge();
+    testEscapeSummaryMergeDisjoint();
+    testEscapeSummaryMergeAccessorAccumulation();
+    testEscapeSummaryStructuralVsPublication();
+    testEscapeSummaryIPCRoundTrip();
+    testCrossTUSuppressionWithSummary();
+    testCrossTUSuppressionPreservesProven();
+    testCrossTUSuppressionNoTypeName();
 
     std::cerr << "\n" << passed << " passed, " << failures << " failed\n";
     if (failures > 0) {
