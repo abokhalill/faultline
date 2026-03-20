@@ -7,6 +7,8 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <cstring>
+#include <fstream>
+#include <random>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -304,6 +306,191 @@ bool writeStarterConfig(const std::string &dir) {
     return true;
 }
 
+// Probe a sample of TUs from the compile_commands.json to detect missing
+// generated headers before the user runs a full scan. Reads the JSON,
+// selects up to `maxProbes` entries at random, and runs the compiler with
+// -fsyntax-only. Reports failures with the specific error.
+void validateCompileDB(const std::string &dbPath, unsigned maxProbes = 5) {
+    std::ifstream ifs(dbPath);
+    if (!ifs) return;
+
+    // Minimal extraction: collect (directory, file, arguments[0], full command).
+    // We reconstruct the compiler invocation with -fsyntax-only.
+    struct Entry {
+        std::string directory;
+        std::string file;
+        std::string command; // raw "command" or reconstructed from "arguments"
+    };
+
+    std::vector<Entry> entries;
+    std::string json((std::istreambuf_iterator<char>(ifs)),
+                      std::istreambuf_iterator<char>());
+
+    // Walk through top-level array objects by brace-counting.
+    size_t pos = json.find('[');
+    if (pos == std::string::npos) return;
+    ++pos;
+
+    auto extractStr = [&](const std::string &obj, const std::string &key) -> std::string {
+        std::string needle = "\"" + key + "\": \"";
+        auto p = obj.find(needle);
+        if (p == std::string::npos) return {};
+        p += needle.size();
+        for (size_t i = p; i < obj.size(); ++i) {
+            if (obj[i] == '\\') { ++i; continue; }
+            if (obj[i] == '"') return obj.substr(p, i - p);
+        }
+        return {};
+    };
+
+    // Extract "arguments": [...] as a single joined command string.
+    auto extractArgs = [&](const std::string &obj) -> std::string {
+        std::string needle = "\"arguments\": [";
+        auto p = obj.find(needle);
+        if (p == std::string::npos) return {};
+        p += needle.size();
+        std::string result;
+        while (p < obj.size() && obj[p] != ']') {
+            if (obj[p] == '"') {
+                ++p;
+                std::string arg;
+                for (; p < obj.size() && obj[p] != '"'; ++p) {
+                    if (obj[p] == '\\' && p + 1 < obj.size()) { arg += obj[++p]; continue; }
+                    arg += obj[p];
+                }
+                if (p < obj.size()) ++p; // skip closing "
+                if (!result.empty()) result += ' ';
+                result += arg;
+            } else {
+                ++p;
+            }
+        }
+        return result;
+    };
+
+    // Extract entries.
+    int depth = 0;
+    size_t objStart = std::string::npos;
+    for (size_t i = pos; i < json.size(); ++i) {
+        if (json[i] == '{') {
+            if (depth == 0) objStart = i;
+            ++depth;
+        } else if (json[i] == '}') {
+            --depth;
+            if (depth == 0 && objStart != std::string::npos) {
+                std::string obj = json.substr(objStart, i - objStart + 1);
+                Entry e;
+                e.directory = extractStr(obj, "directory");
+                e.file = extractStr(obj, "file");
+                e.command = extractStr(obj, "command");
+                if (e.command.empty())
+                    e.command = extractArgs(obj);
+                if (!e.file.empty())
+                    entries.push_back(std::move(e));
+                objStart = std::string::npos;
+            }
+        } else if (json[i] == ']' && depth == 0) {
+            break;
+        }
+    }
+
+    if (entries.empty()) return;
+
+    // Sample up to maxProbes entries.
+    std::mt19937 rng(std::random_device{}());
+    if (entries.size() > maxProbes) {
+        std::shuffle(entries.begin(), entries.end(), rng);
+        entries.resize(maxProbes);
+    }
+
+    // Resolve clang for syntax checking.
+    std::string compiler;
+    for (const char *name : {"clang", "clang-18", "clang-17", "clang-16", "cc"}) {
+        auto found = llvm::sys::findProgramByName(name);
+        if (found) { compiler = *found; break; }
+    }
+    if (compiler.empty()) return; // Can't validate without a compiler.
+
+    unsigned failures = 0;
+    for (const auto &e : entries) {
+        // Build a -fsyntax-only command from the compile_commands.json entry.
+        // Replace the compiler and output flags, keep includes and defines.
+        std::string cmd;
+        if (!e.command.empty()) {
+            // "command" field: replace first token with our compiler, append -fsyntax-only.
+            auto firstSpace = e.command.find(' ');
+            if (firstSpace == std::string::npos) continue;
+            cmd = compiler + " -fsyntax-only -Wno-everything " +
+                  e.command.substr(firstSpace + 1);
+            // Strip -o <file> to avoid writing output.
+            auto oPos = cmd.find(" -o ");
+            if (oPos != std::string::npos) {
+                auto nextSpace = cmd.find(' ', oPos + 4);
+                if (nextSpace != std::string::npos)
+                    cmd.erase(oPos, nextSpace - oPos);
+            }
+        } else {
+            continue;
+        }
+
+        // Run via sh -c in the entry's directory, capture stderr.
+        int pipefd[2];
+        if (pipe(pipefd) < 0) continue;
+
+        pid_t pid = fork();
+        if (pid < 0) { close(pipefd[0]); close(pipefd[1]); continue; }
+
+        if (pid == 0) {
+            close(pipefd[0]);
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) { dup2(devnull, STDOUT_FILENO); close(devnull); }
+            dup2(pipefd[1], STDERR_FILENO);
+            close(pipefd[1]);
+            if (chdir(e.directory.c_str()) != 0) _exit(127);
+            auto sh = llvm::sys::findProgramByName("sh");
+            if (!sh) _exit(127);
+            execl(sh->c_str(), "sh", "-c", cmd.c_str(), nullptr);
+            _exit(127);
+        }
+
+        close(pipefd[1]);
+        // Read child stderr (cap at 2KB).
+        std::string errOutput;
+        char buf[256];
+        ssize_t n;
+        while ((n = read(pipefd[0], buf, sizeof(buf))) > 0) {
+            if (errOutput.size() < 2048)
+                errOutput.append(buf, std::min<size_t>(n, 2048 - errOutput.size()));
+        }
+        close(pipefd[0]);
+
+        int status = 0;
+        waitpid(pid, &status, 0);
+        int rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+
+        if (rc != 0) {
+            ++failures;
+            // Extract the "file not found" line if present.
+            std::string hint;
+            auto fatalPos = errOutput.find("fatal error:");
+            if (fatalPos != std::string::npos) {
+                auto lineEnd = errOutput.find('\n', fatalPos);
+                hint = errOutput.substr(fatalPos,
+                    lineEnd != std::string::npos ? lineEnd - fatalPos : std::string::npos);
+            }
+            llvm::errs() << "lshaz init: WARNING: sample TU failed to parse: "
+                         << e.file << "\n";
+            if (!hint.empty())
+                llvm::errs() << "  " << hint << "\n";
+        }
+    }
+
+    if (failures > 0)
+        llvm::errs() << "lshaz init: " << failures << "/" << entries.size()
+                     << " sample TU(s) failed — the project may need a full "
+                        "build before scanning (generated headers)\n";
+}
+
 void printInitUsage() {
     llvm::errs()
         << "Usage: lshaz init [path] [options]\n"
@@ -376,7 +563,20 @@ int runInitCommand(int argc, const char **argv) {
         }
     }
 
-    // Step 2: starter config
+    // Step 2: validate compile_commands.json by probing sample TUs.
+    {
+        llvm::SmallString<256> dbPath(dir);
+        llvm::sys::path::append(dbPath, "compile_commands.json");
+        if (!llvm::sys::fs::exists(dbPath)) {
+            dbPath = llvm::StringRef(dir);
+            llvm::sys::path::append(dbPath, "build");
+            llvm::sys::path::append(dbPath, "compile_commands.json");
+        }
+        if (llvm::sys::fs::exists(dbPath))
+            validateCompileDB(std::string(dbPath));
+    }
+
+    // Step 3: starter config
     if (!noConfig)
         writeStarterConfig(dir);
 
