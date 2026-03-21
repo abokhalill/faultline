@@ -5,6 +5,7 @@
 #include "lshaz/core/Diagnostic.h"
 #include "lshaz/analysis/EscapeSummary.h"
 
+#include <clang/Basic/Diagnostic.h>
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Tooling/Tooling.h>
 
@@ -28,6 +29,8 @@ public:
                     const std::unordered_set<std::string> &profileHotFuncs,
                     std::vector<FailedTU> &failedTUs);
 
+    bool BeginSourceFileAction(clang::CompilerInstance &CI) override;
+
     std::unique_ptr<clang::ASTConsumer>
     CreateASTConsumer(clang::CompilerInstance &CI,
                       llvm::StringRef file) override;
@@ -41,6 +44,7 @@ private:
     const std::unordered_set<std::string> &profileHotFuncs_;
     std::vector<FailedTU> &failedTUs_;
     std::string currentFile_;
+    std::string firstError_;
 };
 
 class LshazActionFactory : public clang::tooling::FrontendActionFactory {

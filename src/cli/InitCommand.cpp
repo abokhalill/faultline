@@ -343,7 +343,7 @@ void validateCompileDB(const std::string &dbPath, unsigned maxProbes = 5) {
         return {};
     };
 
-    // Extract "arguments": [...] as a single joined command string.
+    // Extract "arguments": [...] as a single shell-safe command string.
     auto extractArgs = [&](const std::string &obj) -> std::string {
         std::string needle = "\"arguments\": [";
         auto p = obj.find(needle);
@@ -358,9 +358,9 @@ void validateCompileDB(const std::string &dbPath, unsigned maxProbes = 5) {
                     if (obj[p] == '\\' && p + 1 < obj.size()) { arg += obj[++p]; continue; }
                     arg += obj[p];
                 }
-                if (p < obj.size()) ++p; // skip closing "
+                if (p < obj.size()) ++p;
                 if (!result.empty()) result += ' ';
-                result += arg;
+                result += shellQuote(arg);
             } else {
                 ++p;
             }
@@ -423,17 +423,22 @@ void validateCompileDB(const std::string &dbPath, unsigned maxProbes = 5) {
             cmd = compiler + " -fsyntax-only -Wno-everything " +
                   e.command.substr(firstSpace + 1);
             // Strip -o <file> to avoid writing output.
-            auto oPos = cmd.find(" -o ");
-            if (oPos != std::string::npos) {
-                auto nextSpace = cmd.find(' ', oPos + 4);
-                if (nextSpace != std::string::npos)
-                    cmd.erase(oPos, nextSpace - oPos);
+            for (;;) {
+                auto oPos = cmd.find(" -o ");
+                if (oPos == std::string::npos) break;
+                auto valStart = oPos + 4;
+                auto nextSpace = cmd.find(' ', valStart);
+                cmd.erase(oPos, (nextSpace != std::string::npos ? nextSpace : cmd.size()) - oPos);
             }
         } else {
             continue;
         }
 
         // Run via sh -c in the entry's directory, capture stderr.
+        auto shPath = llvm::sys::findProgramByName("sh");
+        if (!shPath) continue;
+        std::string shStr = *shPath;
+
         int pipefd[2];
         if (pipe(pipefd) < 0) continue;
 
@@ -447,9 +452,7 @@ void validateCompileDB(const std::string &dbPath, unsigned maxProbes = 5) {
             dup2(pipefd[1], STDERR_FILENO);
             close(pipefd[1]);
             if (chdir(e.directory.c_str()) != 0) _exit(127);
-            auto sh = llvm::sys::findProgramByName("sh");
-            if (!sh) _exit(127);
-            execl(sh->c_str(), "sh", "-c", cmd.c_str(), nullptr);
+            execl(shStr.c_str(), "sh", "-c", cmd.c_str(), nullptr);
             _exit(127);
         }
 

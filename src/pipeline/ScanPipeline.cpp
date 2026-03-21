@@ -40,7 +40,7 @@
 #include <semaphore>
 #include <string>
 #include <thread>
-#include <unordered_map>
+#include <map>
 #include <vector>
 
 #include <sys/types.h>
@@ -1439,7 +1439,7 @@ ScanResult ScanPipeline::run(
     filterAndSort(request.filter, result.diagnostics);
 
     // Header fingerprint detection: identify missing header patterns.
-    std::unordered_map<std::string, unsigned> missingHeaderCounts;
+    std::map<std::string, unsigned> missingHeaderCounts;
     for (const auto &ftu : failedTUsDetailed) {
         // Look for "fatal error: 'header.h' file not found" pattern.
         std::string err = ftu.error;

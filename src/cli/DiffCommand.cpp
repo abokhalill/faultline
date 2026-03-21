@@ -8,7 +8,6 @@
 #include <cstring>
 #include <map>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -185,64 +184,26 @@ void printMetaDiff(const ScanMeta &a, const ScanMeta &b) {
     llvm::outs() << "\n";
 }
 
-void printRuleDistribution(const std::vector<DiagEntry> &before,
-                           const std::vector<DiagEntry> &after) {
-    std::map<std::string, int> beforeRules, afterRules;
-    for (const auto &e : before) ++beforeRules[e.key.ruleID];
-    for (const auto &e : after) ++afterRules[e.key.ruleID];
+void printDistribution(const char *label,
+                       const std::map<std::string, int> &bm,
+                       const std::map<std::string, int> &am) {
+    std::set<std::string> keys;
+    for (const auto &[k, _] : bm) keys.insert(k);
+    for (const auto &[k, _] : am) keys.insert(k);
 
-    std::set<std::string> allRules;
-    for (const auto &[r, _] : beforeRules) allRules.insert(r);
-    for (const auto &[r, _] : afterRules) allRules.insert(r);
-
-    bool anyDelta = false;
-    for (const auto &r : allRules) {
-        int bv = beforeRules.count(r) ? beforeRules[r] : 0;
-        int av = afterRules.count(r) ? afterRules[r] : 0;
-        if (bv != av) { anyDelta = true; break; }
-    }
-    if (!anyDelta) return;
-
-    llvm::outs() << "Rule distribution:\n";
-    for (const auto &r : allRules) {
-        int bv = beforeRules.count(r) ? beforeRules[r] : 0;
-        int av = afterRules.count(r) ? afterRules[r] : 0;
+    bool headerPrinted = false;
+    for (const auto &k : keys) {
+        auto bi = bm.find(k);
+        auto ai = am.find(k);
+        int bv = bi != bm.end() ? bi->second : 0;
+        int av = ai != am.end() ? ai->second : 0;
         if (bv == av) continue;
+        if (!headerPrinted) { llvm::outs() << label << ":\n"; headerPrinted = true; }
         int delta = av - bv;
-        llvm::outs() << "  " << r << ": " << bv << " → " << av
+        llvm::outs() << "  " << k << ": " << bv << " \u2192 " << av
                      << " (" << (delta > 0 ? "+" : "") << delta << ")\n";
     }
-    llvm::outs() << "\n";
-}
-
-void printSeverityDistribution(const std::vector<DiagEntry> &before,
-                               const std::vector<DiagEntry> &after) {
-    std::map<std::string, int> beforeSev, afterSev;
-    for (const auto &e : before) ++beforeSev[e.severity];
-    for (const auto &e : after) ++afterSev[e.severity];
-
-    std::set<std::string> allSev;
-    for (const auto &[s, _] : beforeSev) allSev.insert(s);
-    for (const auto &[s, _] : afterSev) allSev.insert(s);
-
-    bool anyDelta = false;
-    for (const auto &s : allSev) {
-        int bv = beforeSev.count(s) ? beforeSev[s] : 0;
-        int av = afterSev.count(s) ? afterSev[s] : 0;
-        if (bv != av) { anyDelta = true; break; }
-    }
-    if (!anyDelta) return;
-
-    llvm::outs() << "Severity distribution:\n";
-    for (const auto &s : allSev) {
-        int bv = beforeSev.count(s) ? beforeSev[s] : 0;
-        int av = afterSev.count(s) ? afterSev[s] : 0;
-        if (bv == av) continue;
-        int delta = av - bv;
-        llvm::outs() << "  " << s << ": " << bv << " → " << av
-                     << " (" << (delta > 0 ? "+" : "") << delta << ")\n";
-    }
-    llvm::outs() << "\n";
+    if (headerPrinted) llvm::outs() << "\n";
 }
 
 void printDiffUsage() {
@@ -296,8 +257,18 @@ int runDiffCommand(int argc, const char **argv) {
     }
 
     // Distribution shifts.
-    printRuleDistribution(before, after);
-    printSeverityDistribution(before, after);
+    {
+        std::map<std::string, int> br, ar;
+        for (const auto &e : before) ++br[e.key.ruleID];
+        for (const auto &e : after) ++ar[e.key.ruleID];
+        printDistribution("Rule distribution", br, ar);
+    }
+    {
+        std::map<std::string, int> bs, as;
+        for (const auto &e : before) ++bs[e.severity];
+        for (const auto &e : after) ++as[e.severity];
+        printDistribution("Severity distribution", bs, as);
+    }
 
     // Build multisets to handle duplicate keys correctly.
     std::multiset<DiagKey> beforeKeys, afterKeys;
