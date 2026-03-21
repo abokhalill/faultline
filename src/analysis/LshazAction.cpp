@@ -11,11 +11,14 @@ namespace lshaz {
 namespace {
 
 // Forwarding consumer that captures the first error/fatal diagnostic message
-// while delegating everything to the original consumer.
+// while delegating everything to the original consumer. Takes ownership of
+// the original to prevent use-after-free when DiagnosticsEngine::setClient
+// releases the previous Owner.
 class ErrorCapture : public clang::DiagnosticConsumer {
 public:
-    ErrorCapture(clang::DiagnosticConsumer &target, std::string &out)
-        : target_(target), out_(out) {}
+    ErrorCapture(std::unique_ptr<clang::DiagnosticConsumer> target,
+                 std::string &out)
+        : target_(std::move(target)), out_(out) {}
 
     void HandleDiagnostic(clang::DiagnosticsEngine::Level level,
                           const clang::Diagnostic &info) override {
@@ -24,18 +27,18 @@ public:
             info.FormatDiagnostic(buf);
             out_ = std::string(buf.str());
         }
-        target_.HandleDiagnostic(level, info);
+        target_->HandleDiagnostic(level, info);
     }
 
-    void clear() override { target_.clear(); }
+    void clear() override { target_->clear(); }
     void BeginSourceFile(const clang::LangOptions &lo,
                          const clang::Preprocessor *pp) override {
-        target_.BeginSourceFile(lo, pp);
+        target_->BeginSourceFile(lo, pp);
     }
-    void EndSourceFile() override { target_.EndSourceFile(); }
+    void EndSourceFile() override { target_->EndSourceFile(); }
 
 private:
-    clang::DiagnosticConsumer &target_;
+    std::unique_ptr<clang::DiagnosticConsumer> target_;
     std::string &out_;
 };
 
@@ -53,9 +56,12 @@ LshazAction::LshazAction(
 bool LshazAction::BeginSourceFileAction(clang::CompilerInstance &CI) {
     firstError_.clear();
     auto &diags = CI.getDiagnostics();
-    auto *orig = diags.getClient();
-    // Non-owning: the CompilerInstance retains ownership of the original client.
-    diags.setClient(new ErrorCapture(*orig, firstError_), /*ShouldOwnClient=*/true);
+    // takeClient() transfers ownership so setClient() won't destroy it.
+    auto orig = diags.takeClient();
+    if (!orig)
+        return true;
+    diags.setClient(new ErrorCapture(std::move(orig), firstError_),
+                    /*ShouldOwnClient=*/true);
     return true;
 }
 
