@@ -15,13 +15,18 @@
 
 namespace lshaz {
 
+struct FailedTU {
+    std::string file;
+    std::string error; // e.g., "fatal error: 'generated.h' file not found"
+};
+
 class LshazAction : public clang::ASTFrontendAction {
 public:
     LshazAction(const Config &cfg,
                     std::vector<Diagnostic> &diagnostics,
                     EscapeSummary &escapeSummary,
                     const std::unordered_set<std::string> &profileHotFuncs,
-                    std::vector<std::string> &failedTUs);
+                    std::vector<FailedTU> &failedTUs);
 
     std::unique_ptr<clang::ASTConsumer>
     CreateASTConsumer(clang::CompilerInstance &CI,
@@ -34,7 +39,7 @@ private:
     std::vector<Diagnostic> &diagnostics_;
     EscapeSummary &escapeSummary_;
     const std::unordered_set<std::string> &profileHotFuncs_;
-    std::vector<std::string> &failedTUs_;
+    std::vector<FailedTU> &failedTUs_;
     std::string currentFile_;
 };
 
@@ -46,7 +51,7 @@ public:
 
     std::unique_ptr<clang::FrontendAction> create() override;
 
-    const std::vector<std::string> &failedTUs() const { return failedTUs_; }
+    const std::vector<FailedTU> &failedTUs() const { return failedTUs_; }
     const EscapeSummary &escapeSummary() const { return escapeSummary_; }
 
 private:
@@ -54,7 +59,7 @@ private:
     std::vector<Diagnostic> &diagnostics_;
     EscapeSummary escapeSummary_;
     std::unordered_set<std::string> profileHotFuncs_;
-    std::vector<std::string> failedTUs_;
+    std::vector<FailedTU> failedTUs_;
 };
 
 } // namespace lshaz

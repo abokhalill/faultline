@@ -40,6 +40,7 @@
 #include <semaphore>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <sys/types.h>
@@ -264,9 +265,9 @@ std::string resolveCompiler(const std::string &dbCompiler) {
 // --- Fork-based parallel IPC ---
 
 // Minimal JSON serializer for child→parent IPC.
-// Format: {"exitCode":N,"failedTUs":[...],"diagnostics":[...]}
+// Format: {"exitCode":N,"failedTUs":[{"file":"...","error":"..."}],"diagnostics":[...]}
 std::string serializeShardResult(int exitCode,
-                                  const std::vector<std::string> &failedTUs,
+                                  const std::vector<FailedTU> &failedTUs,
                                   const std::vector<Diagnostic> &diagnostics,
                                   const EscapeSummary &escapeSummary) {
     auto esc = [](const std::string &s) -> std::string {
@@ -292,7 +293,8 @@ std::string serializeShardResult(int exitCode,
     buf += ",\"failedTUs\":[";
     for (size_t i = 0; i < failedTUs.size(); ++i) {
         if (i) buf += ',';
-        buf += '"'; buf += esc(failedTUs[i]); buf += '"';
+        buf += "{\"file\":\""; buf += esc(failedTUs[i].file); buf += "\",";
+        buf += "\"error\":\""; buf += esc(failedTUs[i].error); buf += "\"}";
     }
     buf += "],\"diagnostics\":[";
     for (size_t i = 0; i < diagnostics.size(); ++i) {
@@ -353,7 +355,7 @@ std::string serializeShardResult(int exitCode,
 
 struct ShardIPC {
     int exitCode = -1;
-    std::vector<std::string> failedTUs;
+    std::vector<FailedTU> failedTUs;
     std::vector<Diagnostic> diagnostics;
     EscapeSummary escapeSummary;
 };
@@ -363,6 +365,32 @@ namespace ipc {
 static void skipWS(const std::string &s, size_t &i) {
     while (i < s.size() && (s[i]==' '||s[i]=='\n'||s[i]=='\r'||s[i]=='\t'))
         ++i;
+}
+
+static void skipValue(const std::string &s, size_t &i) {
+    skipWS(s, i);
+    if (i >= s.size()) return;
+    if (s[i] == '"') {
+        ++i;
+        while (i < s.size() && s[i] != '"') {
+            if (s[i] == '\\') ++i;
+            ++i;
+        }
+        if (i < s.size()) ++i;
+    } else if (s[i] == '[' || s[i] == '{') {
+        char open = s[i];
+        char close = (open == '[') ? ']' : '}';
+        ++i;
+        int depth = 1;
+        while (i < s.size() && depth > 0) {
+            if (s[i] == open) ++depth;
+            else if (s[i] == close) --depth;
+            ++i;
+        }
+    } else {
+        while (i < s.size() && s[i] != ',' && s[i] != '}' && s[i] != ']')
+            ++i;
+    }
 }
 
 static bool expect(const std::string &s, size_t &i, char c) {
@@ -421,35 +449,6 @@ static bool parseBool(const std::string &s, size_t &i) {
     return false;
 }
 
-static void skipValue(const std::string &s, size_t &i) {
-    skipWS(s, i);
-    if (i >= s.size()) return;
-    if (s[i] == '"') { parseStr(s, i); return; }
-    if (s[i] == '{') {
-        ++i; int d = 1;
-        while (i < s.size() && d > 0) {
-            if (s[i] == '{') ++d;
-            else if (s[i] == '}') --d;
-            else if (s[i] == '"') { --i; parseStr(s, i); continue; }
-            ++i;
-        }
-        return;
-    }
-    if (s[i] == '[') {
-        ++i; int d = 1;
-        while (i < s.size() && d > 0) {
-            if (s[i] == '[') ++d;
-            else if (s[i] == ']') --d;
-            else if (s[i] == '"') { --i; parseStr(s, i); continue; }
-            ++i;
-        }
-        return;
-    }
-    if (s.compare(i, 4, "true") == 0) { i += 4; return; }
-    if (s.compare(i, 5, "false") == 0) { i += 5; return; }
-    if (s.compare(i, 4, "null") == 0) { i += 4; return; }
-    parseNum(s, i);
-}
 
 static Severity toSeverity(const std::string &s) {
     if (s == "Critical") return Severity::Critical;
@@ -536,8 +535,27 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
             while (true) {
                 ipc::skipWS(json, i);
                 if (i >= json.size() || json[i] == ']') { if (i < json.size()) ++i; break; }
-                out.failedTUs.push_back(ipc::parseStr(json, i));
-                ipc::expect(json, i, ',');
+                ipc::expect(json, i, '{');
+                FailedTU ftu;
+                while (true) {
+                    ipc::skipWS(json, i);
+                    if (json[i] == '}') { ++i; break; }
+                    std::string subkey = ipc::parseStr(json, i);
+                    ipc::expect(json, i, ':');
+                    if (subkey == "file") {
+                        ftu.file = ipc::parseStr(json, i);
+                    } else if (subkey == "error") {
+                        ftu.error = ipc::parseStr(json, i);
+                    } else {
+                        ipc::skipValue(json, i);
+                    }
+                    ipc::skipWS(json, i);
+                    if (json[i] == ',') { ++i; continue; }
+                    if (json[i] == '}') { ++i; break; }
+                }
+                out.failedTUs.push_back(std::move(ftu));
+                ipc::skipWS(json, i);
+                if (json[i] == ',') { ++i; }
             }
         } else if (key == "diagnostics") {
             ipc::expect(json, i, '[');
@@ -1077,6 +1095,7 @@ ScanResult ScanPipeline::run(
         const clang::tooling::CompilationDatabase &compDB,
         const std::vector<std::string> &sources) {
     ScanResult result;
+    std::vector<FailedTU> failedTUsDetailed; // For header fingerprint detection
 
     result.metadata.toolVersion = kToolVersion;
     result.metadata.irOptLevel = request.ir.optLevel;
@@ -1122,12 +1141,15 @@ ScanResult ScanPipeline::run(
             });
 
             if (crashed) {
-                result.failedTUs.push_back(src);
+                FailedTU ftu;
+                ftu.file = src;
+                ftu.error = "process crash during analysis";
+                failedTUsDetailed.push_back(ftu);
                 llvm::errs() << "lshaz: [crash] " << src
                              << " (recovered, continuing)\n";
             } else {
                 auto &ff = factory.failedTUs();
-                result.failedTUs.insert(result.failedTUs.end(),
+                failedTUsDetailed.insert(failedTUsDetailed.end(),
                     ff.begin(), ff.end());
             }
             result.diagnostics.insert(result.diagnostics.end(),
@@ -1180,7 +1202,7 @@ ScanResult ScanPipeline::run(
                 // --- Child process ---
                 llvm::CrashRecoveryContext::Enable();
                 std::vector<Diagnostic> childDiags;
-                std::vector<std::string> childFailed;
+                std::vector<FailedTU> childFailed;
                 EscapeSummary childEscape;
                 int childRet = 0;
 
@@ -1198,7 +1220,10 @@ ScanResult ScanPipeline::run(
                         if (ret != 0) childRet = ret;
                     });
                     if (!ok) {
-                        childFailed.push_back(src);
+                        FailedTU ftu;
+                        ftu.file = src;
+                        ftu.error = "process crash during analysis";
+                        childFailed.push_back(ftu);
                     } else {
                         auto &ff = factory.failedTUs();
                         childFailed.insert(childFailed.end(),
@@ -1237,7 +1262,7 @@ ScanResult ScanPipeline::run(
                     result.diagnostics.insert(result.diagnostics.end(),
                         std::make_move_iterator(shard.diagnostics.begin()),
                         std::make_move_iterator(shard.diagnostics.end()));
-                    result.failedTUs.insert(result.failedTUs.end(),
+                    failedTUsDetailed.insert(failedTUsDetailed.end(),
                         shard.failedTUs.begin(), shard.failedTUs.end());
                     mergeEscapeSummaries(result.escapeSummary,
                         shard.escapeSummary);
@@ -1249,8 +1274,12 @@ ScanResult ScanPipeline::run(
                 llvm::errs() << "lshaz: shard " << child.shardIdx
                              << " killed by signal "
                              << WTERMSIG(status) << "\n";
-                for (const auto &src : shards[child.shardIdx])
-                    result.failedTUs.push_back(src);
+                for (const auto &src : shards[child.shardIdx]) {
+                    FailedTU ftu;
+                    ftu.file = src;
+                    ftu.error = "killed by signal " + std::to_string(WTERMSIG(status));
+                    failedTUsDetailed.push_back(ftu);
+                }
             }
             llvm::sys::fs::remove(child.ipcPath);
             completedTUs += static_cast<unsigned>(shards[child.shardIdx].size());
@@ -1408,6 +1437,49 @@ ScanResult ScanPipeline::run(
 
     // Filter and sort.
     filterAndSort(request.filter, result.diagnostics);
+
+    // Header fingerprint detection: identify missing header patterns.
+    std::unordered_map<std::string, unsigned> missingHeaderCounts;
+    for (const auto &ftu : failedTUsDetailed) {
+        // Look for "fatal error: 'header.h' file not found" pattern.
+        std::string err = ftu.error;
+        auto fatalPos = err.find("fatal error:");
+        if (fatalPos != std::string::npos) {
+            auto start = err.find('\'', fatalPos);
+            auto end = err.find('\'', start + 1);
+            if (start != std::string::npos && end != std::string::npos && end > start + 1) {
+                std::string header = err.substr(start + 1, end - start - 1);
+                ++missingHeaderCounts[header];
+            }
+        }
+    }
+
+    // Emit warnings for headers missing from >= 3 TUs.
+    for (const auto &[header, count] : missingHeaderCounts) {
+        if (count >= 3) {
+            Diagnostic diag;
+            diag.ruleID = "B001";
+            diag.severity = Severity::Medium;
+            diag.confidence = 1.0;
+            diag.evidenceTier = EvidenceTier::Speculative;
+            diag.location.file = "<pipeline>";
+            diag.location.line = 0;
+            std::ostringstream msg;
+            msg << "Header '" << header << "' is missing in " << count
+                << " TUs. This usually indicates the project needs a full build "
+                   "before scanning (custom_target, configure_file).";
+            diag.title = msg.str();
+            diag.structuralEvidence["missing_header"] = header;
+            diag.structuralEvidence["tu_count"] = std::to_string(count);
+            result.diagnostics.push_back(std::move(diag));
+        }
+    }
+
+    // Extract file paths for compatibility with existing metadata/failedTUs.
+    result.failedTUs.clear();
+    result.failedTUs.reserve(failedTUsDetailed.size());
+    for (const auto &ftu : failedTUsDetailed)
+        result.failedTUs.push_back(ftu.file);
 
     // Summary counts.
     result.totalTUsFailed = static_cast<unsigned>(result.failedTUs.size());

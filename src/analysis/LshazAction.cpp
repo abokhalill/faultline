@@ -11,7 +11,7 @@ LshazAction::LshazAction(
     std::vector<Diagnostic> &diagnostics,
     EscapeSummary &escapeSummary,
     const std::unordered_set<std::string> &profileHotFuncs,
-    std::vector<std::string> &failedTUs)
+    std::vector<FailedTU> &failedTUs)
     : config_(cfg), diagnostics_(diagnostics), escapeSummary_(escapeSummary),
       profileHotFuncs_(profileHotFuncs), failedTUs_(failedTUs) {}
 
@@ -25,8 +25,19 @@ LshazAction::CreateASTConsumer(clang::CompilerInstance & /*CI*/,
 
 void LshazAction::EndSourceFileAction() {
     auto &diags = getCompilerInstance().getDiagnostics();
-    if (diags.hasFatalErrorOccurred() || diags.hasUncompilableErrorOccurred())
-        failedTUs_.push_back(currentFile_);
+    if (diags.hasFatalErrorOccurred() || diags.hasUncompilableErrorOccurred()) {
+        FailedTU ftu;
+        ftu.file = currentFile_;
+        // Extract the first fatal error diagnostic message.
+        // Note: DiagnosticsEngine doesn't expose iteration; we capture
+        // a representative message via the client.
+        if (diags.hasErrorOccurred()) {
+            ftu.error = "compilation error (see build log for details)";
+        } else if (diags.hasFatalErrorOccurred()) {
+            ftu.error = "fatal compilation error (see build log for details)";
+        }
+        failedTUs_.push_back(std::move(ftu));
+    }
 }
 
 // --- Factory ---
