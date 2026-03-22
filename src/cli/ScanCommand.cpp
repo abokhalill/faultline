@@ -252,6 +252,14 @@ int runScanCommand(int argc, const char **argv) {
         return 3;
     }
 
+    if (!args.format.empty() &&
+        args.format != "cli" && args.format != "json" &&
+        args.format != "sarif" && args.format != "tidy") {
+        llvm::errs() << "lshaz scan: unknown format '" << args.format
+                     << "'. Valid formats: cli, json, sarif, tidy\n";
+        return 3;
+    }
+
     // Single-file mode: lshaz scan <file> -- <compiler-flags>
     if (!args.compilerFlags.empty()) {
         std::string srcPath = args.target;

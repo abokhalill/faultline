@@ -207,12 +207,24 @@ bool parseScanResultFile(const std::string &path,
         return false;
     }
 
+    unsigned rawCount = 0;
     while (true) {
         skipWS(json, i);
         if (i >= json.size() || json[i] == ']') break;
         if (!expect(json, i, '{')) break;
-        out.push_back(parseDiagnostic(json, i));
+        auto d = parseDiagnostic(json, i);
+        ++rawCount;
+        /* Reject entries with no ruleID — indicates malformed input. */
+        if (!d.ruleID.empty())
+            out.push_back(std::move(d));
         expect(json, i, ',');
+    }
+
+    if (rawCount > 0 && out.empty()) {
+        error = "parsed " + std::to_string(rawCount) +
+                " diagnostic(s) but none had a valid ruleID — "
+                "input is likely malformed: " + path;
+        return false;
     }
 
     return true;
