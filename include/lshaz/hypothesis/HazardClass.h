@@ -11,6 +11,7 @@ namespace lshaz {
 enum class HazardClass : uint8_t {
     CacheGeometry,       // FL001
     FalseSharing,        // FL002
+    StripedArray,        // FL003
     AtomicOrdering,      // FL010
     AtomicContention,    // FL011
     LockContention,      // FL012
@@ -31,6 +32,7 @@ constexpr std::string_view hazardClassName(HazardClass hc) {
     switch (hc) {
         case HazardClass::CacheGeometry:       return "CacheGeometry";
         case HazardClass::FalseSharing:        return "FalseSharing";
+        case HazardClass::StripedArray:        return "StripedArray";
         case HazardClass::AtomicOrdering:      return "AtomicOrdering";
         case HazardClass::AtomicContention:    return "AtomicContention";
         case HazardClass::LockContention:      return "LockContention";

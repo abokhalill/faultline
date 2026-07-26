@@ -12,6 +12,7 @@ namespace lshaz {
 std::optional<HazardClass> ruleToHazardClass(const std::string &ruleID) {
     if (ruleID == "FL001") return HazardClass::CacheGeometry;
     if (ruleID == "FL002") return HazardClass::FalseSharing;
+    if (ruleID == "FL003") return HazardClass::StripedArray;
     if (ruleID == "FL010") return HazardClass::AtomicOrdering;
     if (ruleID == "FL011") return HazardClass::AtomicContention;
     if (ruleID == "FL012") return HazardClass::LockContention;
