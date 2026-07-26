@@ -81,12 +81,14 @@ public:
     clang::ASTContext &ctx;
     StripedArraySummary &out;
     const std::map<std::string, std::string> &aliases;
+    const HotPathOracle &oracle;
     const clang::FunctionDecl *currentFn = nullptr;
     llvm::SmallPtrSet<const clang::ValueDecl *, 8> inductionVars;
 
     UseVisitor(clang::ASTContext &C, StripedArraySummary &o,
-               const std::map<std::string, std::string> &al)
-        : ctx(C), out(o), aliases(al) {}
+               const std::map<std::string, std::string> &al,
+               const HotPathOracle &orc)
+        : ctx(C), out(o), aliases(al), oracle(orc) {}
 
     bool TraverseFunctionDecl(clang::FunctionDecl *FD) {
         if (!FD->doesThisDeclarationHaveABody())
@@ -194,7 +196,9 @@ private:
         auto *s = siteFor(E);
         if (!s) return;
         if (classify(E->getIdx()) != IndexProvenance::ThreadIdent) return;
-        s->stripedWriters.insert(threadRoleNodeName(currentFn, ctx));
+        std::string wn = threadRoleNodeName(currentFn, ctx);
+        s->stripedWriters.insert(wn);
+        if (oracle.isFunctionHot(currentFn)) s->hotWriters.insert(wn);
         if (isTLSDerived(E->getIdx())) s->tlsIndexed = true;
     }
 
@@ -358,7 +362,7 @@ void StripedArrayAnalysis::collectAliases(
 
 void StripedArrayAnalysis::collectUses(const clang::TranslationUnitDecl *TU) {
     if (summary_.empty() || !TU) return;
-    UseVisitor v(ctx_, summary_, aliases_);
+    UseVisitor v(ctx_, summary_, aliases_, oracle_);
     v.TraverseDecl(const_cast<clang::TranslationUnitDecl *>(TU));
 }
 

@@ -159,6 +159,8 @@ add_executable(analysis_ground_truth_test
     src/analysis/ThreadRoleSummary.cpp
     src/analysis/StripedArraySummary.cpp
     src/analysis/StripedArrayAnalysis.cpp
+    src/core/HotPathOracle.cpp
+    src/core/Config.cpp
 )
 target_link_libraries(analysis_ground_truth_test PRIVATE
     clangTooling

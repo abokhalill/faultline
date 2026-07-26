@@ -211,7 +211,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     cg.snapshotForThreadRoles(threadRoles_);
     escape.appendFieldWriterNames(threadRoles_);
 
-    StripedArrayAnalysis striped(Ctx, config_);
+    StripedArrayAnalysis striped(Ctx, config_, oracle_);
     striped.catalogue(decls);
     striped.collectAliases(decls);
     striped.collectUses(TU);

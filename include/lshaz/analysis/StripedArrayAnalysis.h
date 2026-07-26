@@ -3,6 +3,7 @@
 
 #include "lshaz/analysis/StripedArraySummary.h"
 #include "lshaz/core/Config.h"
+#include "lshaz/core/HotPathOracle.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -23,8 +24,9 @@ std::string stripedKeyForDecl(const clang::ValueDecl *D,
 // bodies once.
 class StripedArrayAnalysis {
 public:
-    StripedArrayAnalysis(clang::ASTContext &Ctx, const Config &cfg)
-        : ctx_(Ctx), cfg_(cfg) {}
+    StripedArrayAnalysis(clang::ASTContext &Ctx, const Config &cfg,
+                         const HotPathOracle &oracle)
+        : ctx_(Ctx), cfg_(cfg), oracle_(oracle) {}
 
     void catalogue(const std::vector<clang::Decl *> &decls);
     void collectAliases(const std::vector<clang::Decl *> &decls);
@@ -35,6 +37,7 @@ public:
 private:
     clang::ASTContext &ctx_;
     const Config &cfg_;
+    const HotPathOracle &oracle_;
     StripedArraySummary summary_;
     // `T *p = &arr[K]` retargets subscripts through p onto arr; K>0 with a
     // line-aligned base is the only head padding that actually offsets
