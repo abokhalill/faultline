@@ -192,10 +192,18 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "        int node = numa_node_of(measured);\n"
        << "        long n = sysconf(_SC_NPROCESSORS_ONLN);\n"
        << "        std::vector<int> out;\n"
+       /* one thread per PHYSICAL core: two peers on one core share l1d,
+          never ping-pong each other, and contend for issue ports —
+          execution-resource noise dressed up as coherence cost. claim
+          the whole physical core when a peer is chosen. */
+       << "        std::set<int> claimed = sib;\n"
+       << "        claimed.insert(measured);\n"
        << "        for (int c = 0; c < n && (int)out.size() < want - 1; ++c) {\n"
-       << "            if (c == measured || sib.count(c)) continue;\n"
+       << "            if (claimed.count(c)) continue;\n"
        << "            if (node >= 0 && numa_node_of(c) != node) continue;\n"
        << "            out.push_back(c);\n"
+       << "            for (int sc : lshaz_sibling_set(c)) claimed.insert(sc);\n"
+       << "            claimed.insert(c);\n"
        << "        }\n"
        << "        if (out.empty()) {\n"
        << "            std::fprintf(stderr, \"[lshaz] FATAL: no physical core on \"\n"
@@ -204,7 +212,7 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "            std::abort();\n"
        << "        }\n"
        << "        if ((int)out.size() < want - 1)\n"
-       << "            std::fprintf(stderr, \"[lshaz] WARN: %d same-node peer core(s) \"\n"
+       << "            std::fprintf(stderr, \"[lshaz] WARN: %d same-node PHYSICAL peer core(s) \"\n"
        << "                \"available, %d requested — contention understated.\\n\",\n"
        << "                (int)out.size(), want - 1);\n"
        << "        return out;\n"
