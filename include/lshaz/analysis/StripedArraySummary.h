@@ -24,6 +24,25 @@ enum class IndexProvenance : uint8_t {
     ThreadIdent   = 3,  // arr[thread_index], arr[c->running_tid]
 };
 
+// How often the striped write executes. Decides whether a real hazard is
+// worth a real fix: padding that costs L1D footprint pays only against
+// frequency.
+enum class WriteFrequencyTier : uint8_t {
+    Unknown  = 0,
+    Tick     = 1,   // periodic / background
+    Dispatch = 2,   // per-connection, per-assignment
+    Hot      = 3,   // per-command, per-IO
+};
+
+constexpr const char *writeFrequencyName(WriteFrequencyTier t) {
+    switch (t) {
+        case WriteFrequencyTier::Hot:      return "hot";
+        case WriteFrequencyTier::Dispatch: return "dispatch";
+        case WriteFrequencyTier::Tick:     return "tick";
+        default:                           return "unknown";
+    }
+}
+
 struct StripedArraySite {
     std::string key;            // "<file>::<var>" (static) | "<Type>::<field>"
     std::string displayName;
@@ -44,6 +63,11 @@ struct StripedArraySite {
     bool hasHeadPaddingOffset = false;
 
     std::set<std::string> stripedWriters;  // thread-ident-indexed writers
+    // writers the hot-path oracle classified hot, recorded at collection
+    // time; the oracle already fuses attribute, glob, profile and
+    // call-graph propagation, so a second frequency mechanism would only
+    // disagree with it.
+    std::set<std::string> hotWriters;
     std::set<std::string> aggregators;     // loop-swept readers/resetters
 
     void merge(const StripedArraySite &o) {
@@ -58,6 +82,7 @@ struct StripedArraySite {
                             displayName = o.displayName; typeName = o.typeName;
                             isFileStatic = o.isFileStatic; }
         stripedWriters.insert(o.stripedWriters.begin(), o.stripedWriters.end());
+        hotWriters.insert(o.hotWriters.begin(), o.hotWriters.end());
         aggregators.insert(o.aggregators.begin(), o.aggregators.end());
     }
 };
@@ -92,6 +117,26 @@ inline StripeMitigation classifyStripeMitigation(const StripedArraySite &s,
     return StripeMitigation::None;
 }
 
+// What to actually do about it. Full padding buys isolation with L1D
+// footprint; relocating into an existing line-aligned per-thread struct
+// buys the same isolation for free. Recommending a fix the maintainer
+// will reject is a finding with negative expected value.
+enum class StripeFixShape : uint8_t {
+    None = 0,           // true positive, no worthwhile fix
+    RelocateToOwner,    // move into an existing aligned per-thread struct
+    HeadPad,            // isolate slot 0 only; negligible footprint
+    FullPad,            // one slot per line
+};
+
+constexpr const char *stripeFixName(StripeFixShape f) {
+    switch (f) {
+        case StripeFixShape::RelocateToOwner: return "relocate-to-aligned-owner";
+        case StripeFixShape::HeadPad:         return "head-pad";
+        case StripeFixShape::FullPad:         return "full-pad";
+        default:                              return "none";
+    }
+}
+
 struct StripeVerdict {
     uint8_t  writerRoles = ROLE_NONE;
     unsigned writerCount = 0;
@@ -99,10 +144,25 @@ struct StripeVerdict {
     uint64_t slotsPerLine = 0;
     uint64_t contendedLines = 0;
     StripeMitigation mitigation = StripeMitigation::None;
+
+    WriteFrequencyTier frequency = WriteFrequencyTier::Unknown;
+    uint64_t currentFootprint = 0;
+    uint64_t paddedFootprint  = 0;
+    double   l1dCostFraction  = 0.0;   // added bytes / L1D
+    StripeFixShape fixShape   = StripeFixShape::None;
+    std::string fixRationale;
 };
 
 StripeVerdict gradeStripedArray(const StripedArraySite &s,
                                 const ThreadRoleVerdicts &roles,
                                 uint64_t lineBytes);
+
+// Full padding pays only against frequency. Above this share of L1D it
+// evicts the working set it was meant to protect.
+inline constexpr double kFullPadL1DBudget = 0.10;
+
+void applyStripeROI(StripeVerdict &v, const StripedArraySite &s,
+                    uint64_t lineBytes, uint64_t l1dSizeBytes,
+                    bool alignedOwnerAvailable);
 
 } // namespace lshaz

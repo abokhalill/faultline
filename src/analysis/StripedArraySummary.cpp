@@ -26,7 +26,55 @@ StripeVerdict gradeStripedArray(const StripedArraySite &s,
     }
     v.writerRoles = mask;
     v.multiRole = (mask == (ROLE_MAIN | ROLE_WORKER));
+
+    if (!s.hotWriters.empty())
+        v.frequency = WriteFrequencyTier::Hot;
     return v;
+}
+
+void applyStripeROI(StripeVerdict &v, const StripedArraySite &s,
+                    uint64_t lineBytes, uint64_t l1dSizeBytes,
+                    bool alignedOwnerAvailable) {
+    v.currentFootprint = s.elemCount * s.elemSizeBytes;
+    v.paddedFootprint  = s.elemCount * lineBytes;
+    v.l1dCostFraction =
+        l1dSizeBytes ? static_cast<double>(v.paddedFootprint -
+                                           v.currentFootprint) /
+                           static_cast<double>(l1dSizeBytes)
+                     : 0.0;
+
+    const bool hot = v.frequency == WriteFrequencyTier::Hot;
+    const bool expensive = v.l1dCostFraction > kFullPadL1DBudget;
+
+    if (hot && !expensive) {
+        v.fixShape = StripeFixShape::FullPad;
+        v.fixRationale = "hot-path writes and full padding costs a small "
+                         "share of L1D";
+        return;
+    }
+    if (alignedOwnerAvailable) {
+        // same isolation, zero added footprint — strictly dominates
+        // padding wherever an aligned per-thread owner already exists.
+        v.fixShape = StripeFixShape::RelocateToOwner;
+        v.fixRationale = "an already line-aligned per-thread structure "
+                         "exists; relocating costs no extra footprint";
+        return;
+    }
+    if (hot) {
+        v.fixShape = StripeFixShape::HeadPad;
+        v.fixRationale = "hot-path writes but full padding would consume a "
+                         "large share of L1D; isolate the hottest slot only";
+        return;
+    }
+    if (expensive) {
+        v.fixShape = StripeFixShape::None;
+        v.fixRationale = "coherence traffic is real but padding cost exceeds "
+                         "the benefit at this write frequency";
+        return;
+    }
+    v.fixShape = StripeFixShape::HeadPad;
+    v.fixRationale = "cheap partial isolation; full padding is not justified "
+                     "at this write frequency";
 }
 
 } // namespace lshaz
