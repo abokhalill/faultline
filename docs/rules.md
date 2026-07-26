@@ -14,6 +14,7 @@ mechanism and mitigation text the diagnostics carry.
 |---|---|---|---|---|
 | FL001 | Cache geometry | Struct spanning multiple cache lines; wide fields straddling line boundaries | Struct | No |
 | FL002 | False sharing | Independently writable fields co-resident on one cache line, in a thread-escaping type | Struct | No |
+| FL003 | Per-thread array false sharing | Array slots written under a thread-identity index, packed multiple per cache line | Array | No |
 | FL010 | Atomic ordering | `seq_cst` where a weaker ordering is sufficient on the target architecture | Function | Yes |
 | FL011 | Atomic contention | Atomic write sites generating cross-core RFO traffic | Function | Yes |
 | FL012 | Lock contention | Mutex/spinlock acquisition in a hot function | Function | Yes |
@@ -176,6 +177,50 @@ struct Counters {
     alignas(64) std::atomic<uint64_t> tail;
 };
 ```
+
+### FL003 — Per-Thread Array False Sharing
+
+**Base severity:** High &nbsp;|&nbsp; **Scope:** array (struct member or file-static) &nbsp;|&nbsp; **Gate:** none
+
+**Hardware mechanism:** an array of `N` slots with element size `S < 64`
+packs `⌊64/S⌋` slots per cache line. When slot `i` is written by one core
+and slot `j` on the same line by another, each write takes the line in
+Modified state and invalidates the other core's copy — a full RFO per
+update, on a line neither core needs the rest of.
+
+**Detection gate is index provenance, not element atomicity.** Striping
+makes each slot single-writer, so per-thread arrays are routinely plain
+scalars; requiring atomic elements would miss the cleanest instances of
+the pattern. A slot write counts as *striped* only when its subscript is
+thread-derived:
+
+- `thread_local` storage class on the index variable — the value *is* the
+  thread's identity; no heuristic involved
+- a narrow identifier set (`tid`, `thread_index`, `*_tid`, `sched_getcpu`, …)
+
+Loop-induction subscripts classify as **aggregation sweeps** — bulk resets
+and total-summing loops are single-threaded traversals and never count as
+multi-thread evidence.
+
+Detection covers C11/GNU atomic builtins (which Clang models as
+`AtomicExpr`, a distinct node from `CallExpr`), C++ atomic member calls,
+compound assignment, and increment/decrement. Pointer aliases
+(`T *p = &arr[K]`) retarget subscripts onto the underlying array.
+
+**Severity ladder:**
+
+| Evidence | Severity |
+|---|---|
+| writers provably span two thread roles (call-graph joined) | Critical |
+| thread-identity subscript, `thread_local`-derived or atomic elements or ≥2 writer functions | High |
+| thread-identity subscript from the identifier set alone | Medium |
+
+**Mitigation respect:** an element stride that is a multiple of the line
+size is full isolation and never fires. A line-aligned base **plus a
+padded index origin** isolates slot 0 only — slots 1.. still pack — and
+caps at Medium with the residual stated. Base alignment *alone* is not
+mitigation: it separates slot 0 from the preceding symbol and does
+nothing for slot 0 versus slot 1.
 
 ---
 
