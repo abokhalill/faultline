@@ -56,6 +56,8 @@ set(LSHAZ_SOURCES
     src/analysis/CacheLineMap.cpp
     src/analysis/CallGraph.cpp
     src/analysis/ThreadRoleSummary.cpp
+    src/analysis/StripedArraySummary.cpp
+    src/analysis/StripedArrayAnalysis.cpp
     src/analysis/DataFlowAnalyzer.cpp
     src/analysis/AllocatorTopology.cpp
     src/analysis/NUMATopology.cpp
@@ -144,6 +146,7 @@ add_executable(pipeline_unit_test
     src/pipeline/CompileDBResolver.cpp
     src/pipeline/RepoProvider.cpp
     src/analysis/ThreadRoleSummary.cpp
+    src/analysis/StripedArraySummary.cpp
 )
 target_link_libraries(pipeline_unit_test PRIVATE ${LSHAZ_LLVM_LIBS})
 
@@ -154,6 +157,8 @@ add_executable(analysis_ground_truth_test
     src/analysis/CallGraph.cpp
     src/analysis/EscapeAnalysis.cpp
     src/analysis/ThreadRoleSummary.cpp
+    src/analysis/StripedArraySummary.cpp
+    src/analysis/StripedArrayAnalysis.cpp
 )
 target_link_libraries(analysis_ground_truth_test PRIVATE
     clangTooling
