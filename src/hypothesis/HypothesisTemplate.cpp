@@ -60,6 +60,31 @@ PMUCounterSet falseSharingCounters() {
     };
 }
 
+PMUCounterSet stripedArrayCounters() {
+    return {
+        .required = {
+            {"MEM_LOAD_L3_HIT_RETIRED.XSNP_HITM", CounterTier::Extended,
+             "Load hit L3, snoop found the line Modified in another core. "
+             "This is the false-sharing event itself", ""},
+            {"L2_RQSTS.ALL_RFO", CounterTier::Extended,
+             "RFO volume; denominator separating 'more RFOs' from "
+             "'same RFOs, more expensive'", ""},
+            {"L1-dcache-store-misses", CounterTier::Standard,
+             "Store missing L1 after remote invalidation", ""},
+            {"cycles", CounterTier::Universal, "Total cycle cost", ""},
+        },
+        .optional = {
+            {"offcore_response.demand_rfo.l3_hit.snoop_hitm",
+             CounterTier::Extended,
+             "Store-side view: RFO finding the line dirty in a peer core", ""},
+            {"MEM_LOAD_L3_HIT_RETIRED.XSNP_FWD", CounterTier::Extended,
+             "ICL+ spelling; libpfm4 resolves the model-specific encoding", ""},
+            {"CYCLE_ACTIVITY.STALLS_MEM_ANY", CounterTier::Extended,
+             "Coherence events converted to stall cycles", ""},
+        },
+    };
+}
+
 PMUCounterSet atomicOrderingCounters() {
     return {
         .required = {
@@ -228,6 +253,20 @@ HypothesisTemplateRegistry::HypothesisTemplateRegistry() {
             "64B-padded control.",
             {"p99.9_operation_latency_ns", "nanoseconds", "p99.9"},
             falseSharingCounters(),
+            0.05,
+            confounds,
+            true,
+        },
+        {
+            HazardClass::StripedArray,
+            "Per-thread array slots packed multiple-per-cache-line do not "
+            "cause measurable coherence traffic when distinct cores update "
+            "distinct slots.",
+            "Packed per-thread slots cause >= {mde}% increase in HITM events "
+            "and >= {mde}% increase in {percentile} latency compared to a "
+            "line-strided control with identical instruction count.",
+            {"p99.9_operation_latency_ns", "nanoseconds", "p99.9"},
+            stripedArrayCounters(),
             0.05,
             confounds,
             true,

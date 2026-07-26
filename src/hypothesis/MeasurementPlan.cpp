@@ -7,6 +7,7 @@ namespace lshaz {
 
 bool MeasurementPlanGenerator::needsC2C(HazardClass hc) {
     return hc == HazardClass::FalseSharing ||
+           hc == HazardClass::StripedArray ||
            hc == HazardClass::AtomicContention ||
            hc == HazardClass::ContendedQueue ||
            hc == HazardClass::HazardAmplification;
