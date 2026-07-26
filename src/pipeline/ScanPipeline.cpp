@@ -286,7 +286,8 @@ std::string serializeShardResult(int exitCode,
                                   const std::vector<FailedTU> &failedTUs,
                                   const std::vector<Diagnostic> &diagnostics,
                                   const EscapeSummary &escapeSummary,
-                                  const ThreadRoleSummary &threadRoles) {
+                                  const ThreadRoleSummary &threadRoles,
+                                  const StripedArraySummary &striped) {
     auto esc = [](const std::string &s) -> std::string {
         std::string out;
         out.reserve(s.size() + 4);
@@ -401,6 +402,42 @@ std::string serializeShardResult(int exitCode,
     emitNameSets(threadRoles.fieldWriters);
     buf += "}}";
 
+    buf += ",\"striped\":{";
+    {
+        bool first = true;
+        for (const auto &[k, a] : striped) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(k); buf += "\":{";
+            buf += "\"n\":\"" + esc(a.displayName) + "\"";
+            buf += ",\"t\":\"" + esc(a.typeName) + "\"";
+            buf += ",\"f\":\"" + esc(a.file) + "\"";
+            buf += ",\"l\":" + std::to_string(a.line);
+            buf += ",\"es\":" + std::to_string(a.elemSizeBytes);
+            buf += ",\"ec\":" + std::to_string(a.elemCount);
+            buf += ",\"al\":" + std::to_string(a.declAlignBytes);
+            buf += ",\"at\":" + std::to_string(a.elementIsAtomic ? 1 : 0);
+            buf += ",\"vo\":" + std::to_string(a.elementIsVolatile ? 1 : 0);
+            buf += ",\"st\":" + std::to_string(a.isFileStatic ? 1 : 0);
+            buf += ",\"tls\":" + std::to_string(a.tlsIndexed ? 1 : 0);
+            buf += ",\"hp\":" + std::to_string(a.hasHeadPaddingOffset ? 1 : 0);
+            buf += ",\"w\":[";
+            bool fw = true;
+            for (const auto &w : a.stripedWriters) {
+                if (!fw) buf += ',';
+                buf += '"'; buf += esc(w); buf += '"'; fw = false;
+            }
+            buf += "],\"ag\":[";
+            bool fa = true;
+            for (const auto &g : a.aggregators) {
+                if (!fa) buf += ',';
+                buf += '"'; buf += esc(g); buf += '"'; fa = false;
+            }
+            buf += "]}";
+            first = false;
+        }
+    }
+    buf += "}";
+
     buf += "}";
     return buf;
 }
@@ -411,6 +448,7 @@ struct ShardIPC {
     std::vector<Diagnostic> diagnostics;
     EscapeSummary escapeSummary;
     ThreadRoleSummary threadRoles;
+    StripedArraySummary striped;
 };
 
 namespace ipc {
@@ -691,6 +729,63 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.fieldWriters);
                 else
                     ipc::skipValue(json, i);
+                ipc::expect(json, i, ',');
+            }
+        } else if (key == "striped") {
+            ipc::expect(json, i, '{');
+            while (true) {
+                ipc::skipWS(json, i);
+                if (i >= json.size() || json[i] == '}') {
+                    if (i < json.size()) ++i;
+                    break;
+                }
+                std::string k = ipc::parseStr(json, i);
+                ipc::expect(json, i, ':');
+                ipc::expect(json, i, '{');
+                StripedArraySite a;
+                a.key = k;
+                while (true) {
+                    ipc::skipWS(json, i);
+                    if (i >= json.size() || json[i] == '}') {
+                        if (i < json.size()) ++i;
+                        break;
+                    }
+                    std::string f = ipc::parseStr(json, i);
+                    ipc::expect(json, i, ':');
+                    auto strArray = [&](std::set<std::string> &dst) {
+                        ipc::expect(json, i, '[');
+                        while (true) {
+                            ipc::skipWS(json, i);
+                            if (i >= json.size() || json[i] == ']') {
+                                if (i < json.size()) ++i;
+                                break;
+                            }
+                            dst.insert(ipc::parseStr(json, i));
+                            ipc::expect(json, i, ',');
+                        }
+                    };
+                    if (f == "n") a.displayName = ipc::parseStr(json, i);
+                    else if (f == "t") a.typeName = ipc::parseStr(json, i);
+                    else if (f == "f") a.file = ipc::parseStr(json, i);
+                    else if (f == "w") strArray(a.stripedWriters);
+                    else if (f == "ag") strArray(a.aggregators);
+                    else {
+                        auto v = static_cast<uint64_t>(ipc::parseNum(json, i));
+                        if (f == "l") a.line = static_cast<unsigned>(v);
+                        else if (f == "es") a.elemSizeBytes = v;
+                        else if (f == "ec") a.elemCount = v;
+                        else if (f == "al") a.declAlignBytes = v;
+                        else if (f == "at") a.elementIsAtomic = v != 0;
+                        else if (f == "vo") a.elementIsVolatile = v != 0;
+                        else if (f == "st") a.isFileStatic = v != 0;
+                        else if (f == "tls") a.tlsIndexed = v != 0;
+                        else if (f == "hp") a.hasHeadPaddingOffset = v != 0;
+                    }
+                    ipc::expect(json, i, ',');
+                }
+                auto it = out.striped.find(k);
+                if (it == out.striped.end()) out.striped.emplace(k, std::move(a));
+                else it->second.merge(a);
                 ipc::expect(json, i, ',');
             }
         } else {
@@ -1177,6 +1272,107 @@ static unsigned applyAffinityRespect(std::vector<Diagnostic> &diagnostics,
     return demoted;
 }
 
+// FL003: per-thread striped arrays. slots pack floor(line/elemSize) per
+// line; slots i and j written by different cores trade the line in
+// Modified state every update. emitted in reduce because the writer-role
+// join only exists post-merge.
+static unsigned emitStripedArrayFindings(
+        std::vector<Diagnostic> &diagnostics,
+        const StripedArraySummary &striped,
+        const ThreadRoleVerdicts &roles,
+        uint64_t lineBytes) {
+    unsigned emitted = 0;
+    for (const auto &[key, s] : striped) {
+        if (s.stripedWriters.empty())
+            continue;  // no thread-indexed write observed: not striping
+        StripeVerdict v = gradeStripedArray(s, roles, lineBytes);
+        if (v.mitigation == StripeMitigation::FullyPadded)
+            continue;
+        if (v.slotsPerLine < 2)
+            continue;
+
+        Diagnostic d;
+        d.ruleID = "FL003";
+        d.title = "Per-Thread Array False Sharing";
+        if (v.multiRole) {
+            d.severity = Severity::Critical;
+            d.confidence = 0.88;
+            d.evidenceTier = EvidenceTier::Proven;
+        } else if (s.tlsIndexed || v.writerCount >= 2 || s.elementIsAtomic) {
+            // a thread-identity subscript is itself evidence the writer
+            // executes on several threads; the role join only adds
+            // independent confirmation, and event-loop dispatch hides it.
+            d.severity = Severity::High;
+            d.confidence = s.tlsIndexed ? 0.78 : 0.72;
+            d.evidenceTier = EvidenceTier::Likely;
+        } else {
+            d.severity = Severity::Medium;
+            d.confidence = 0.55;
+            d.evidenceTier = EvidenceTier::Likely;
+        }
+        // aligned base + padded index origin is deliberate line-aware
+        // layout: cap like the other mitigation-respect contracts. the
+        // residual (slots 1.. still pack) is stated, not escalated.
+        if (v.mitigation == StripeMitigation::HeadPadded &&
+            d.severity > Severity::Medium)
+            d.severity = Severity::Medium;
+
+        d.location.file = s.file;
+        d.location.line = s.line;
+        d.location.column = 1;
+
+        std::ostringstream hw;
+        hw << (s.isFileStatic ? "Static array '" : "Array '")
+           << s.displayName << "' packs " << v.slotsPerLine
+           << " slots per " << lineBytes << "B line across "
+           << v.contendedLines << " line(s) (" << s.elemCount
+           << " x " << s.elemSizeBytes << "B). Slots are written under a "
+           << "thread-identity index, so distinct cores update distinct "
+           << "slots on the same line: every write takes the line in "
+           << "Modified state and invalidates it in the other core.";
+        if (!s.elementIsAtomic)
+            hw << " Elements are non-atomic — striping makes each slot "
+                  "single-writer, so this is coherence traffic without a "
+                  "data race.";
+        d.hardwareReasoning = hw.str();
+
+        d.structuralEvidence = {
+            {"symbol", s.displayName},
+            {"elem_size", std::to_string(s.elemSizeBytes)},
+            {"elem_count", std::to_string(s.elemCount)},
+            {"slots_per_line", std::to_string(v.slotsPerLine)},
+            {"contended_lines", std::to_string(v.contendedLines)},
+            {"striped_writers", std::to_string(v.writerCount)},
+            {"tls_indexed", s.tlsIndexed ? "yes" : "no"},
+            {"atomic_elem", s.elementIsAtomic ? "yes" : "no"},
+            {"scope", s.isFileStatic ? "file-static" : "member"},
+        };
+        if (!s.typeName.empty())
+            d.structuralEvidence["type_name"] = s.typeName;
+
+        for (const auto &w : s.stripedWriters)
+            d.escalations.push_back("thread-indexed write from '" + w + "'");
+        for (const auto &g : s.aggregators)
+            d.escalations.push_back("loop-swept aggregation in '" + g +
+                                    "' (read side, not a striped write)");
+        if (v.mitigation == StripeMitigation::HeadPadded)
+            d.escalations.push_back(
+                "base is line-aligned with a padded index origin: slot 0 is "
+                "isolated, slots 1.. still share lines");
+
+        d.mitigation =
+            "Give each slot its own line (alignas(" +
+            std::to_string(lineBytes) +
+            ") element wrapper), or move the counter into the per-thread "
+            "structure if one is already line-aligned. Where the "
+            "aggregation sweep is hot, padding the index origin isolates "
+            "slot 0 only — state which trade is intended.";
+        diagnostics.push_back(std::move(d));
+        ++emitted;
+    }
+    return emitted;
+}
+
 // FL092: unapplied in-tree mitigation. Synthesized when an FL002 with
 // cross-thread writer attribution sits in a codebase that demonstrably
 // applies cache-line isolation to other types. The precedent join is the
@@ -1521,6 +1717,7 @@ ScanResult ScanPipeline::run(
                 std::make_move_iterator(tuDiags.end()));
             mergeEscapeSummaries(result.escapeSummary, factory.escapeSummary());
             result.threadRoleFacts.merge(factory.threadRoles());
+            mergeStripedArrays(result.stripedArrays, factory.stripedArrays());
             ++completedTUs;
             report("progress", std::to_string(completedTUs) + "/" +
                    std::to_string(totalTUs));
@@ -1570,6 +1767,7 @@ ScanResult ScanPipeline::run(
                 std::vector<FailedTU> childFailed;
                 EscapeSummary childEscape;
                 ThreadRoleSummary childThreadRoles;
+                StripedArraySummary childStriped;
                 int childRet = 0;
 
                 for (const auto &src : shards[j]) {
@@ -1600,11 +1798,12 @@ ScanResult ScanPipeline::run(
                         std::make_move_iterator(tuDiags.end()));
                     mergeEscapeSummaries(childEscape, factory.escapeSummary());
                     childThreadRoles.merge(factory.threadRoles());
+                    mergeStripedArrays(childStriped, factory.stripedArrays());
                 }
 
                 std::string json = serializeShardResult(
                     childRet, childFailed, childDiags, childEscape,
-                    childThreadRoles);
+                    childThreadRoles, childStriped);
                 std::error_code ec;
                 llvm::raw_fd_ostream out(std::string(ipcPath), ec);
                 if (!ec)
@@ -1635,6 +1834,7 @@ ScanResult ScanPipeline::run(
                     mergeEscapeSummaries(result.escapeSummary,
                         shard.escapeSummary);
                     result.threadRoleFacts.merge(shard.threadRoles);
+                    mergeStripedArrays(result.stripedArrays, shard.striped);
                 } else {
                     llvm::errs() << "lshaz: failed to parse IPC from shard "
                                  << child.shardIdx << "\n";
@@ -1833,6 +2033,13 @@ ScanResult ScanPipeline::run(
             report("thread_roles", std::to_string(roleEscalated) +
                    " finding(s) escalated (disjoint writer roles)");
     }
+
+    unsigned stripedEmitted = emitStripedArrayFindings(
+        result.diagnostics, result.stripedArrays, result.threadRoles,
+        request.config.cacheLineBytes);
+    if (stripedEmitted > 0)
+        report("striped_arrays", std::to_string(stripedEmitted) +
+               " per-thread striped array finding(s)");
 
     // Affinity respect runs before dedup so all duplicates demote alike.
     std::string affinityAPI =

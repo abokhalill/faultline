@@ -5,6 +5,7 @@
 #include "lshaz/core/ExecutionMetadata.h"
 #include "lshaz/analysis/EscapeSummary.h"
 #include "lshaz/analysis/ThreadRoleSummary.h"
+#include "lshaz/analysis/StripedArraySummary.h"
 
 #include <cstdint>
 #include <string>
@@ -33,6 +34,9 @@ struct ScanResult {
     // Cross-TU thread-attribution facts and the roles reduced from them.
     ThreadRoleSummary threadRoleFacts;
     ThreadRoleVerdicts threadRoles;
+
+    // Per-thread striped arrays, merged across TUs.
+    StripedArraySummary stripedArrays;
 
     // Counts for summary reporting.
     unsigned suppressedByCalibration = 0;
