@@ -74,8 +74,8 @@ struct Config {
     std::vector<std::string> mainFunctionPatterns;
 
     // Bespoke backoff/wait vocabularies (fnmatch on plain or qualified
-    // names) granted FL013 relax immunity — folly::Sleeper, in-house
-    // Backoff::pause. The standard universe is built in.
+    // names) granted FL013 relax immunity. The standard universe is
+    // built in.
     std::vector<std::string> relaxFunctionPatterns;
 
     static Config loadFromFile(const std::string &path);
