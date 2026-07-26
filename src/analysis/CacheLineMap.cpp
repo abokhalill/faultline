@@ -8,6 +8,7 @@
 #include <clang/AST/Type.h>
 
 #include <algorithm>
+#include <numeric>
 
 namespace lshaz {
 
@@ -236,6 +237,28 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
                 granule = Ctx.getTypeSizeInChars(elemQT).getQuantity();
         }
 
+        // split-access risk is an ELEMENT property. offsets mod line repeat
+        // with period line/gcd(granule,line) elements, so the sweep is
+        // bounded regardless of extent; never walk a 1MB array.
+        bool splits = false;
+        if (granule > 1 && granule <= cacheLineBytes_) {
+            const uint64_t count = fieldSize / granule;
+            const uint64_t period =
+                cacheLineBytes_ / std::gcd(granule, cacheLineBytes_);
+            const uint64_t kMax = std::max<uint64_t>(1, std::min(count, period));
+            const uint64_t shiftStep =
+                (recordAlign_ == 0 || recordAlign_ >= cacheLineBytes_)
+                    ? cacheLineBytes_
+                    : recordAlign_;
+            for (uint64_t shift = 0; shift < cacheLineBytes_ && !splits;
+                 shift += shiftStep)
+                for (uint64_t k = 0; k < kMax; ++k) {
+                    uint64_t off =
+                        (absOffset + shift + k * granule) % cacheLineBytes_;
+                    if (off + granule > cacheLineBytes_) { splits = true; break; }
+                }
+        }
+
         bool atomic = isAtomicType(field->getType());
         bool mutable_ = isFieldMutable(field);
 
@@ -253,6 +276,7 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
         entry.worstEndLine    = wEnd;
         entry.straddles       = straddles;
         entry.accessGranuleBytes = granule;
+        entry.splitsAccess    = splits;
         entry.isAtomic        = atomic;
         entry.isMutable       = mutable_;
 
@@ -293,9 +317,7 @@ void CacheLineMap::buildBuckets() {
 std::vector<const FieldLineEntry *> CacheLineMap::straddlingFields() const {
     std::vector<const FieldLineEntry *> result;
     for (const auto &f : fields_) {
-        // split load/store needs an access wider than one byte: byte
-        // arrays (pads, buffers) span lines but never split an access.
-        if (f.straddles && f.accessGranuleBytes > 1)
+        if (f.splitsAccess)
             result.push_back(&f);
     }
     return result;

@@ -24,6 +24,10 @@ struct FieldLineEntry {
     uint64_t worstEndLine   = 0; // worst case: inclusive
     bool straddles       = false; // field spans a line boundary under any valid base alignment
     uint64_t accessGranuleBytes = 0; // widest single access (element size for arrays)
+    // an aggregate CONTAINS line boundaries; it does not straddle one. a
+    // split access requires one granule-wide access to cross; for a
+    // naturally aligned power of 2 granule that is never.
+    bool splitsAccess    = false;
     bool isAtomic        = false;
     bool isMutable       = false;
 };
