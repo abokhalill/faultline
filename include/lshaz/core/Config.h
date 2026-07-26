@@ -66,6 +66,9 @@ struct Config {
     // Opaque atomic wrapper type names (e.g. atomic_t, spinlock_t).
     std::vector<std::string> atomicTypeNames;
 
+    // L1 data cache size; FL003 weighs padding footprint against it.
+    size_t l1dSizeBytes = 32768;
+
     // Thread-role attribution roots (fnmatch-style). Entry patterns name
     // worker-thread roots that thread-creation detection cannot see
     // (function-pointer dispatch); main patterns extend the ROLE_MAIN
