@@ -1280,7 +1280,8 @@ static unsigned emitStripedArrayFindings(
         std::vector<Diagnostic> &diagnostics,
         const StripedArraySummary &striped,
         const ThreadRoleVerdicts &roles,
-        uint64_t lineBytes) {
+        uint64_t lineBytes, uint64_t l1dSizeBytes,
+        bool alignedOwnerAvailable) {
     unsigned emitted = 0;
     for (const auto &[key, s] : striped) {
         if (s.stripedWriters.empty())
@@ -1290,25 +1291,45 @@ static unsigned emitStripedArrayFindings(
             continue;
         if (v.slotsPerLine < 2)
             continue;
+        applyStripeROI(v, s, lineBytes, l1dSizeBytes, alignedOwnerAvailable);
 
         Diagnostic d;
         d.ruleID = "FL003";
         d.title = "Per-Thread Array False Sharing";
+        // confidence answers "is the hazard real", severity answers "is it
+        // worth acting on". a thread-identity subscript is itself evidence
+        // the writer runs on several threads; the role join only confirms
+        // it, and event-loop dispatch hides that path.
         if (v.multiRole) {
-            d.severity = Severity::Critical;
             d.confidence = 0.88;
             d.evidenceTier = EvidenceTier::Proven;
         } else if (s.tlsIndexed || v.writerCount >= 2 || s.elementIsAtomic) {
-            // a thread-identity subscript is itself evidence the writer
-            // executes on several threads; the role join only adds
-            // independent confirmation, and event-loop dispatch hides it.
-            d.severity = Severity::High;
             d.confidence = s.tlsIndexed ? 0.78 : 0.72;
             d.evidenceTier = EvidenceTier::Likely;
         } else {
-            d.severity = Severity::Medium;
             d.confidence = 0.55;
             d.evidenceTier = EvidenceTier::Likely;
+        }
+
+        // a hazard whose only available fix costs more than it saves is
+        // not an action item, however certain the mechanism is.
+        if (v.fixShape == StripeFixShape::None) {
+            d.severity = Severity::Informational;
+        } else if (v.frequency == WriteFrequencyTier::Hot) {
+            d.severity = v.multiRole ? Severity::Critical : Severity::High;
+        } else if (v.frequency == WriteFrequencyTier::Unknown) {
+            // unestablished is not low: demoting here would be the same
+            // error as reading an unprovable flag as proven-absent.
+            d.severity = v.multiRole ? Severity::Critical
+                       : (s.tlsIndexed || v.writerCount >= 2 ||
+                          s.elementIsAtomic) ? Severity::High
+                                             : Severity::Medium;
+            d.escalations.push_back(
+                "write frequency unestablished: no hot-path signal reaches "
+                "these writers — supply hot_function_patterns or "
+                "--perf-profile to grade the fix against real call rate");
+        } else {
+            d.severity = Severity::Medium;
         }
         // aligned base + padded index origin is deliberate line-aware
         // layout: cap like the other mitigation-respect contracts. the
@@ -1346,6 +1367,12 @@ static unsigned emitStripedArrayFindings(
             {"tls_indexed", s.tlsIndexed ? "yes" : "no"},
             {"atomic_elem", s.elementIsAtomic ? "yes" : "no"},
             {"scope", s.isFileStatic ? "file-static" : "member"},
+            {"write_frequency", writeFrequencyName(v.frequency)},
+            {"fix_shape", stripeFixName(v.fixShape)},
+            {"footprint_current", std::to_string(v.currentFootprint)},
+            {"footprint_padded", std::to_string(v.paddedFootprint)},
+            {"l1d_cost_pct",
+             std::to_string(static_cast<int>(v.l1dCostFraction * 100))},
         };
         if (!s.typeName.empty())
             d.structuralEvidence["type_name"] = s.typeName;
@@ -1360,13 +1387,41 @@ static unsigned emitStripedArrayFindings(
                 "base is line-aligned with a padded index origin: slot 0 is "
                 "isolated, slots 1.. still share lines");
 
-        d.mitigation =
-            "Give each slot its own line (alignas(" +
-            std::to_string(lineBytes) +
-            ") element wrapper), or move the counter into the per-thread "
-            "structure if one is already line-aligned. Where the "
-            "aggregation sweep is hot, padding the index origin isolates "
-            "slot 0 only — state which trade is intended.";
+        {
+            std::ostringstream mit;
+            switch (v.fixShape) {
+            case StripeFixShape::FullPad:
+                mit << "Give each slot its own line (alignas(" << lineBytes
+                    << ") element wrapper): " << v.currentFootprint << "B -> "
+                    << v.paddedFootprint << "B, "
+                    << static_cast<int>(v.l1dCostFraction * 100)
+                    << "% of L1D. " << v.fixRationale << ".";
+                break;
+            case StripeFixShape::RelocateToOwner:
+                mit << "Move the slot into the existing line-aligned "
+                       "per-thread structure rather than padding this array: "
+                    << v.fixRationale << ". Full padding would cost "
+                    << static_cast<int>(v.l1dCostFraction * 100)
+                    << "% of L1D for no additional isolation.";
+                break;
+            case StripeFixShape::HeadPad:
+                mit << "Align the base and start indexing at a padded origin "
+                       "to isolate the hottest slot: " << v.fixRationale
+                    << ". Full padding would cost "
+                    << static_cast<int>(v.l1dCostFraction * 100)
+                    << "% of L1D.";
+                break;
+            case StripeFixShape::None:
+                mit << "No worthwhile fix: " << v.fixRationale
+                    << " (full padding " << v.currentFootprint << "B -> "
+                    << v.paddedFootprint << "B = "
+                    << static_cast<int>(v.l1dCostFraction * 100)
+                    << "% of L1D). Re-evaluate if this write moves onto a "
+                       "per-command path.";
+                break;
+            }
+            d.mitigation = mit.str();
+        }
         diagnostics.push_back(std::move(d));
         ++emitted;
     }
@@ -2034,9 +2089,15 @@ ScanResult ScanPipeline::run(
                    " finding(s) escalated (disjoint writer roles)");
     }
 
+    // an already line-aligned type in-tree makes relocation available at
+    // zero footprint cost; same index FL092 joins against.
+    bool alignedOwnerAvailable = false;
+    for (const auto &[tn, sig] : result.escapeSummary)
+        if (sig.hasDeliberateLayout) { alignedOwnerAvailable = true; break; }
     unsigned stripedEmitted = emitStripedArrayFindings(
         result.diagnostics, result.stripedArrays, result.threadRoles,
-        request.config.cacheLineBytes);
+        request.config.cacheLineBytes, request.config.l1dSizeBytes,
+        alignedOwnerAvailable);
     if (stripedEmitted > 0)
         report("striped_arrays", std::to_string(stripedEmitted) +
                " per-thread striped array finding(s)");
