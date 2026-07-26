@@ -3,6 +3,7 @@
 #include "lshaz/analysis/CacheLineMap.h"
 #include "lshaz/analysis/CallGraph.h"
 #include "lshaz/analysis/EscapeAnalysis.h"
+#include "lshaz/analysis/StripedArrayAnalysis.h"
 #include "lshaz/analysis/StructLayoutVisitor.h"
 #include "lshaz/core/RuleRegistry.h"
 
@@ -32,9 +33,11 @@ LshazASTConsumer::LshazASTConsumer(
     std::vector<Diagnostic> &diagnostics,
     EscapeSummary &escapeSummary,
     ThreadRoleSummary &threadRoles,
+    StripedArraySummary &stripedArrays,
     const std::unordered_set<std::string> &profileHotFuncs)
     : config_(cfg), oracle_(cfg), diagnostics_(diagnostics),
-      escapeSummary_(escapeSummary), threadRoles_(threadRoles) {
+      escapeSummary_(escapeSummary), threadRoles_(threadRoles),
+      stripedArrays_(stripedArrays) {
     if (!profileHotFuncs.empty())
         oracle_.loadProfileHotFunctions(profileHotFuncs);
 }
@@ -207,6 +210,12 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     // escape traversal. No additional TU walks.
     cg.snapshotForThreadRoles(threadRoles_);
     escape.appendFieldWriterNames(threadRoles_);
+
+    StripedArrayAnalysis striped(Ctx, config_);
+    striped.catalogue(decls);
+    striped.collectAliases(decls);
+    striped.collectUses(TU);
+    stripedArrays_ = striped.summary();
 }
 
 } // namespace lshaz

@@ -49,10 +49,11 @@ LshazAction::LshazAction(
     std::vector<Diagnostic> &diagnostics,
     EscapeSummary &escapeSummary,
     ThreadRoleSummary &threadRoles,
+    StripedArraySummary &stripedArrays,
     const std::unordered_set<std::string> &profileHotFuncs,
     std::vector<FailedTU> &failedTUs)
     : config_(cfg), diagnostics_(diagnostics), escapeSummary_(escapeSummary),
-      threadRoles_(threadRoles),
+      threadRoles_(threadRoles), stripedArrays_(stripedArrays),
       profileHotFuncs_(profileHotFuncs), failedTUs_(failedTUs) {}
 
 bool LshazAction::BeginSourceFileAction(clang::CompilerInstance &CI) {
@@ -72,7 +73,8 @@ LshazAction::CreateASTConsumer(clang::CompilerInstance & /*CI*/,
                                    llvm::StringRef file) {
     currentFile_ = file.str();
     return std::make_unique<LshazASTConsumer>(
-        config_, diagnostics_, escapeSummary_, threadRoles_, profileHotFuncs_);
+        config_, diagnostics_, escapeSummary_, threadRoles_, stripedArrays_,
+        profileHotFuncs_);
 }
 
 void LshazAction::EndSourceFileAction() {
@@ -95,8 +97,8 @@ LshazActionFactory::LshazActionFactory(
 
 std::unique_ptr<clang::FrontendAction> LshazActionFactory::create() {
     return std::make_unique<LshazAction>(
-        config_, diagnostics_, escapeSummary_, threadRoles_, profileHotFuncs_,
-        failedTUs_);
+        config_, diagnostics_, escapeSummary_, threadRoles_, stripedArrays_,
+        profileHotFuncs_, failedTUs_);
 }
 
 } // namespace lshaz

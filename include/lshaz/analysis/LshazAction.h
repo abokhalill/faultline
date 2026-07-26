@@ -5,6 +5,7 @@
 #include "lshaz/core/Diagnostic.h"
 #include "lshaz/analysis/EscapeSummary.h"
 #include "lshaz/analysis/ThreadRoleSummary.h"
+#include "lshaz/analysis/StripedArraySummary.h"
 
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Frontend/FrontendAction.h>
@@ -28,6 +29,7 @@ public:
                     std::vector<Diagnostic> &diagnostics,
                     EscapeSummary &escapeSummary,
                     ThreadRoleSummary &threadRoles,
+                    StripedArraySummary &stripedArrays,
                     const std::unordered_set<std::string> &profileHotFuncs,
                     std::vector<FailedTU> &failedTUs);
 
@@ -44,6 +46,7 @@ private:
     std::vector<Diagnostic> &diagnostics_;
     EscapeSummary &escapeSummary_;
     ThreadRoleSummary &threadRoles_;
+    StripedArraySummary &stripedArrays_;
     const std::unordered_set<std::string> &profileHotFuncs_;
     std::vector<FailedTU> &failedTUs_;
     std::string currentFile_;
@@ -61,12 +64,14 @@ public:
     const std::vector<FailedTU> &failedTUs() const { return failedTUs_; }
     const EscapeSummary &escapeSummary() const { return escapeSummary_; }
     const ThreadRoleSummary &threadRoles() const { return threadRoles_; }
+    const StripedArraySummary &stripedArrays() const { return stripedArrays_; }
 
 private:
     const Config &config_;
     std::vector<Diagnostic> &diagnostics_;
     EscapeSummary escapeSummary_;
     ThreadRoleSummary threadRoles_;
+    StripedArraySummary stripedArrays_;
     std::unordered_set<std::string> profileHotFuncs_;
     std::vector<FailedTU> failedTUs_;
 };
