@@ -28,10 +28,32 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "#include <fstream>\n"
        << "#include <set>\n"
        << "#include <string>\n"
+       << "#include <vector>\n"
+       << "#include <cstddef>\n"
        << "#include <thread>\n"
        << "#include <pthread.h>\n"
        << "#include <sched.h>\n"
        << "#include <unistd.h>\n\n"
+       << "/* thread_siblings_list parse: shared by the aggressor and the\n"
+       << "   striper. an smt sibling shares l1d and never ping-pongs. */\n"
+       << "inline std::set<int> lshaz_sibling_set(int cpu) {\n"
+       << "    std::set<int> out;\n"
+       << "    char path[128];\n"
+       << "    std::snprintf(path, sizeof(path),\n"
+       << "        \"/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list\", cpu);\n"
+       << "    std::ifstream f(path);\n"
+       << "    std::string tok;\n"
+       << "    while (std::getline(f, tok, ',')) {\n"
+       << "        auto dash = tok.find('-');\n"
+       << "        if (dash == std::string::npos) out.insert(std::atoi(tok.c_str()));\n"
+       << "        else {\n"
+       << "            int lo = std::atoi(tok.substr(0, dash).c_str());\n"
+       << "            int hi = std::atoi(tok.substr(dash + 1).c_str());\n"
+       << "            for (int i = lo; i <= hi; ++i) out.insert(i);\n"
+       << "        }\n"
+       << "    }\n"
+       << "    return out;\n"
+       << "}\n\n"
        << "/* Anti-elision: prevent dead-code elimination of measured work. */\n"
        << "inline volatile uint64_t lshaz_global_sink;\n\n"
        << "template <typename T>\n"
@@ -124,6 +146,71 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "    std::atomic<uint64_t>* target_;\n"
        << "    std::atomic<bool> stop_{false};\n"
        << "    std::thread worker_;\n"
+       << "};\n\n"
+       /* striped arrays contend N-ways, not 2-ways: one aggressor cannot
+          reproduce a line shared by every worker. each striper owns one
+          slot, mirroring arr[thread_id]. */
+       << "template <typename V>\n"
+       << "class lshaz_striper {\n"
+       << "public:\n"
+       << "    lshaz_striper(void* slots, int n, std::size_t stride_bytes) {\n"
+       << "        int measured = sched_getcpu();\n"
+       << "        auto cores = peer_cores(measured, n);\n"
+       << "        char* base = reinterpret_cast<char*>(slots);\n"
+       << "        for (int i = 0; i < (int)cores.size(); ++i) {\n"
+       << "            V* slot = reinterpret_cast<V*>(\n"
+       << "                base + (std::size_t)(i + 1) * stride_bytes);\n"
+       << "            int core = cores[i];\n"
+       << "            workers_.emplace_back([this, slot, core] {\n"
+       << "                cpu_set_t set; CPU_ZERO(&set); CPU_SET(core, &set);\n"
+       << "                sched_setaffinity(0, sizeof(set), &set);\n"
+       << "                while (!stop_.load(std::memory_order_acquire))\n"
+       << "                    __atomic_add_fetch(slot, 1, __ATOMIC_RELAXED);\n"
+       << "            });\n"
+       << "        }\n"
+       << "    }\n"
+       << "    ~lshaz_striper() {\n"
+       << "        stop_.store(true, std::memory_order_release);\n"
+       << "        for (auto& w : workers_) if (w.joinable()) w.join();\n"
+       << "    }\n"
+       << "private:\n"
+       /* cross-NUMA turns a coherence measurement into an interconnect
+          measurement; smt siblings share l1d and never ping-pong. either
+          contaminant invalidates the HITM ratio, so both are excluded and
+          a short core list is reported rather than silently accepted. */
+       << "    static int numa_node_of(int cpu) {\n"
+       << "        for (int nd = 0; nd < 8; ++nd) {\n"
+       << "            char path[160];\n"
+       << "            std::snprintf(path, sizeof(path),\n"
+       << "                \"/sys/devices/system/node/node%d/cpu%d\", nd, cpu);\n"
+       << "            if (::access(path, F_OK) == 0) return nd;\n"
+       << "        }\n"
+       << "        return -1;\n"
+       << "    }\n"
+       << "    static std::vector<int> peer_cores(int measured, int want) {\n"
+       << "        std::set<int> sib = lshaz_sibling_set(measured);\n"
+       << "        int node = numa_node_of(measured);\n"
+       << "        long n = sysconf(_SC_NPROCESSORS_ONLN);\n"
+       << "        std::vector<int> out;\n"
+       << "        for (int c = 0; c < n && (int)out.size() < want - 1; ++c) {\n"
+       << "            if (c == measured || sib.count(c)) continue;\n"
+       << "            if (node >= 0 && numa_node_of(c) != node) continue;\n"
+       << "            out.push_back(c);\n"
+       << "        }\n"
+       << "        if (out.empty()) {\n"
+       << "            std::fprintf(stderr, \"[lshaz] FATAL: no physical core on \"\n"
+       << "                \"node %d distinct from cpu %d — striped false sharing \"\n"
+       << "                \"is unreproducible here.\\n\", node, measured);\n"
+       << "            std::abort();\n"
+       << "        }\n"
+       << "        if ((int)out.size() < want - 1)\n"
+       << "            std::fprintf(stderr, \"[lshaz] WARN: %d same-node peer core(s) \"\n"
+       << "                \"available, %d requested — contention understated.\\n\",\n"
+       << "                (int)out.size(), want - 1);\n"
+       << "        return out;\n"
+       << "    }\n"
+       << "    std::atomic<bool> stop_{false};\n"
+       << "    std::vector<std::thread> workers_;\n"
        << "};\n";
 
     return {"src/common.h", os.str()};
@@ -692,6 +779,102 @@ static ExperimentFile genControlFalseSharing(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
+/* the treatment must reproduce the finding's slot stride: a 4B element
+   packs 16 per line, an 8B element 8. measuring the wrong density
+   measures a different hazard. */
+static std::string slotTypeFor(unsigned elemSize) {
+    switch (elemSize) {
+        case 1:  return "uint8_t";
+        case 2:  return "uint16_t";
+        case 4:  return "uint32_t";
+        default: return "uint64_t";
+    }
+}
+
+static std::string slotStructFor(unsigned elemSize, bool aligned) {
+    std::string ty = slotTypeFor(elemSize);
+    unsigned base = elemSize <= 8 ? elemSize : 8;
+    unsigned pad = elemSize > base ? elemSize - base : 0;
+    std::ostringstream os;
+    if (aligned) os << "struct alignas(64) Slot { " << ty << " v; char pad[64 - sizeof(" << ty << ")]; };";
+    else {
+        os << "struct Slot { " << ty << " v;";
+        if (pad) os << " char pad[" << pad << "];";
+        os << " };";
+    }
+    return os.str();
+}
+
+/* FL003 — StripedArray: packed per-thread slots vs line-strided. */
+static ExperimentFile genTreatmentStripedArray(const LatencyHypothesis &hyp) {
+    unsigned es  = evidenceUnsigned(hyp, "elem_size", 8);
+    unsigned n   = evidenceUnsigned(hyp, "elem_count", 16);
+    unsigned spl = evidenceUnsigned(hyp, "slots_per_line", 64 / (es ? es : 8));
+    std::string sym = evidenceStr(hyp, "symbol", "(unknown)");
+    /* one worker per slot sharing the measured line, capped at the real
+       slot count. more threads than slots would contend the same slot,
+       which is true sharing and a different mechanism. */
+    unsigned threads = spl < n ? spl : n;
+    if (threads < 2) threads = 2;
+
+    std::ostringstream os;
+    os << "// Treatment kernel: StripedArray (FL003)\n"
+       << "// Source array: " << sym << " (" << n << " x " << es << "B, "
+       << spl << " slots per 64B line)\n"
+       << "#include \"common.h\"\n\n"
+       << slotStructFor(es, false) << "\n"
+       << "static_assert(sizeof(Slot) == " << es
+       << ", \"slot stride must match the finding\");\n"
+       << "static Slot *slots;\n"
+       << "static lshaz_striper<" << slotTypeFor(es) << "> *stripers;\n\n"
+       << "void treatment_setup() {\n"
+       << "    slots = static_cast<Slot *>(std::aligned_alloc(64,\n"
+       << "        ((sizeof(Slot) * " << n << " + 63) / 64) * 64));\n"
+       << "    std::memset(slots, 0, sizeof(Slot) * " << n << ");\n"
+       << "    stripers = new lshaz_striper<" << slotTypeFor(es)
+       << ">(slots, " << threads << ", sizeof(Slot));\n"
+       << "}\n\n"
+       << "void treatment_teardown() { delete stripers; std::free(slots); }\n\n"
+       /* locked RMW, not a plain store: a relaxed store retires into the
+          store buffer and lfence does not drain it, so the rdtsc bracket
+          would close before the RFO stall is visible. */
+       << "void treatment_kernel(uint64_t /*iteration*/) {\n"
+       << "    __atomic_add_fetch(&slots[0].v, 1, __ATOMIC_RELAXED);\n"
+       << "    lshaz_do_not_optimize(slots[0].v);\n"
+       << "}\n";
+    return {"src/treatment.cpp", os.str()};
+}
+
+static ExperimentFile genControlStripedArray(const LatencyHypothesis &hyp) {
+    unsigned es  = evidenceUnsigned(hyp, "elem_size", 8);
+    unsigned n   = evidenceUnsigned(hyp, "elem_count", 16);
+    unsigned spl = evidenceUnsigned(hyp, "slots_per_line", 64 / (es ? es : 8));
+    unsigned threads = spl < n ? spl : n;
+    if (threads < 2) threads = 2;
+
+    std::ostringstream os;
+    os << "// Control kernel: StripedArray (FL003)\n"
+       << "// identical instruction stream and thread count; the only changed\n"
+       << "// variable is slot stride (64B => one slot per line).\n"
+       << "#include \"common.h\"\n\n"
+       << slotStructFor(es, true) << "\n"
+       << "static Slot *slots;\n"
+       << "static lshaz_striper<" << slotTypeFor(es) << "> *stripers;\n\n"
+       << "void control_setup() {\n"
+       << "    slots = static_cast<Slot *>(std::aligned_alloc(64,\n"
+       << "        sizeof(Slot) * " << n << "));\n"
+       << "    std::memset(slots, 0, sizeof(Slot) * " << n << ");\n"
+       << "    stripers = new lshaz_striper<" << slotTypeFor(es)
+       << ">(slots, " << threads << ", sizeof(Slot));\n"
+       << "}\n\n"
+       << "void control_teardown() { delete stripers; std::free(slots); }\n\n"
+       << "void control_kernel(uint64_t /*iteration*/) {\n"
+       << "    __atomic_add_fetch(&slots[0].v, 1, __ATOMIC_RELAXED);\n"
+       << "    lshaz_do_not_optimize(slots[0].v);\n"
+       << "}\n";
+    return {"src/control.cpp", os.str()};
+}
+
 /* FL010 — AtomicOrdering: seq_cst vs release/acquire. */
 static ExperimentFile genTreatmentAtomicOrdering(const LatencyHypothesis &hyp) {
     (void)hyp;
@@ -1136,6 +1319,7 @@ ExperimentFile ExperimentSynthesizer::generateTreatment(
     switch (hyp.hazardClass) {
         case HazardClass::CacheGeometry:       return genTreatmentCacheGeometry(hyp);
         case HazardClass::FalseSharing:        return genTreatmentFalseSharing(hyp);
+        case HazardClass::StripedArray:        return genTreatmentStripedArray(hyp);
         case HazardClass::AtomicOrdering:      return genTreatmentAtomicOrdering(hyp);
         case HazardClass::AtomicContention:    return genTreatmentAtomicContention(hyp);
         case HazardClass::LockContention:      return genTreatmentLockContention(hyp);
@@ -1156,6 +1340,7 @@ ExperimentFile ExperimentSynthesizer::generateControl(
     switch (hyp.hazardClass) {
         case HazardClass::CacheGeometry:       return genControlCacheGeometry(hyp);
         case HazardClass::FalseSharing:        return genControlFalseSharing(hyp);
+        case HazardClass::StripedArray:        return genControlStripedArray(hyp);
         case HazardClass::AtomicOrdering:      return genControlAtomicOrdering(hyp);
         case HazardClass::AtomicContention:    return genControlAtomicContention(hyp);
         case HazardClass::LockContention:      return genControlLockContention(hyp);
