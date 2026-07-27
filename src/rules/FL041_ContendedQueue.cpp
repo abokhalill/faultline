@@ -3,6 +3,7 @@
 #include "lshaz/core/RuleRegistry.h"
 #include "lshaz/core/HotPathOracle.h"
 #include "lshaz/analysis/CacheLineMap.h"
+#include "lshaz/analysis/EscapeAnalysis.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/Decl.h>
@@ -42,7 +43,7 @@ public:
                  clang::ASTContext &Ctx,
                  const HotPathOracle & /*Oracle*/,
                  const Config &Cfg,
-                 EscapeAnalysis & /*Escape*/,
+                 EscapeAnalysis &escape,
                  std::vector<Diagnostic> &out) override {
 
         const auto *RD = llvm::dyn_cast_or_null<clang::RecordDecl>(D);
@@ -56,7 +57,19 @@ public:
 
         CacheLineMap map(RD, Ctx, Cfg.cacheLineBytes, Cfg.atomicTypeNames);
 
+        // A ring whose head and tail are plain indices, one written by the
+        // producer and one by the consumer, is the canonical contended queue.
+        // Requiring atomics missed the exact shape this rule exists for.
+        // Concurrency must still be established, so the plain path demands a
+        // thread-escape verdict where the atomic path takes the atomics as
+        // their own evidence.
         auto atomicPairs = map.atomicPairsOnSameLine();
+        const bool fromAtomics = !atomicPairs.empty();
+        if (!fromAtomics) {
+            if (!escape.escapeVerdict(RD))
+                return;
+            atomicPairs = map.mutablePairsOnSameLine();
+        }
         if (atomicPairs.empty())
             return;
 
@@ -69,6 +82,34 @@ public:
             containsCI(structName, "spsc") ||
             containsCI(structName, "mpmc") ||
             containsCI(structName, "mpsc");
+
+        // Plain indices need a far tighter signal than atomic ones. "read"
+        // and "write" as substrings match bytes_read/bytes_written on every
+        // stats struct in a server; on atomic fields that was rare enough to
+        // carry, on all mutable fields it matches everything. Demand instead
+        // what actually defines a queue: one head-like and one tail-like
+        // index, and demand they be the co-located pair rather than merely
+        // present somewhere in the record.
+        auto endName = [](const std::string &n, bool headSide) {
+            static const char *head[] = {"head", "front", "dequeue", "cons", "pop"};
+            static const char *tail[] = {"tail", "back", "enqueue", "prod", "push"};
+            for (const char *p : headSide ? head : tail)
+                if (containsCI(n, p)) return true;
+            return false;
+        };
+        std::vector<CacheLineMap::SharedLinePair> headTailPairs;
+        for (const auto &p : atomicPairs) {
+            if (p.intraArray) continue;
+            if ((endName(p.a->name, true)  && endName(p.b->name, false)) ||
+                (endName(p.a->name, false) && endName(p.b->name, true)))
+                headTailPairs.push_back(p);
+        }
+        const bool pairIsHeadTail = !headTailPairs.empty();
+        // The plain finding is about the head/tail pair, so it must carry
+        // only that pair. Reporting every co-located pair here would attach
+        // queue-index language to unrelated arrays sharing the same line.
+        if (!fromAtomics && pairIsHeadTail)
+            atomicPairs = headTailPairs;
 
         bool hasHeadTail = false;
         for (const auto &f : map.fields()) {
@@ -92,8 +133,14 @@ public:
 
         // Require at least one queue heuristic signal. Without it, atomic
         // pairs on the same line are already covered by FL002 (false sharing).
-        if (!looksLikeQueue && !hasHeadTail)
+        if (fromAtomics) {
+            if (!looksLikeQueue && !hasHeadTail)
+                return;
+        } else if (!pairIsHeadTail) {
+            // A queue-ish type name alone is not enough without atomics:
+            // "buffer" and "cache" name plenty of non-queues.
             return;
+        }
 
         const auto &firstPair = atomicPairs.front();
         std::string field1 = firstPair.a->name;
@@ -102,16 +149,30 @@ public:
         Severity sev = Severity::Critical;
         std::vector<std::string> escalations;
 
+        const char *kind = fromAtomics ? "atomic" : "plain";
         escalations.push_back(
-            "Structure appears to be a concurrent queue: head/tail "
-            "atomic indices on same cache line guarantee producer-consumer "
+            std::string("Structure appears to be a concurrent queue: head/tail ") +
+            kind + " indices on same cache line guarantee producer-consumer "
             "cache line ping-pong");
+        if (!fromAtomics)
+            escalations.push_back(
+                "indices are not atomic: single-writer-per-index needs no "
+                "atomicity, so the coherence cost is unchanged — what is "
+                "unproven is that producer and consumer run concurrently");
 
         for (const auto &pair : atomicPairs) {
-            escalations.push_back(
-                "atomic fields '" + pair.a->name + "' and '" + pair.b->name +
-                "' share line " + std::to_string(pair.lineIndex) +
-                ": concurrent writes trigger MESI invalidation");
+            if (pair.intraArray)
+                escalations.push_back(
+                    std::string(kind) + " array '" + pair.a->name +
+                    "' packs multiple indices per line " +
+                    std::to_string(pair.lineIndex) +
+                    ": concurrent writes trigger MESI invalidation");
+            else
+                escalations.push_back(
+                    std::string(kind) + " fields '" + pair.a->name + "' and '" +
+                    pair.b->name + "' share line " +
+                    std::to_string(pair.lineIndex) +
+                    ": concurrent writes trigger MESI invalidation");
         }
 
         const auto &SM = Ctx.getSourceManager();
@@ -123,8 +184,12 @@ public:
         diag.severity  = sev;
         bool exactLayout = map.isCacheLineAligned();
         diag.confidence = exactLayout ? 0.82 : 0.76;
-        diag.evidenceTier = exactLayout ? EvidenceTier::Proven
-                                        : EvidenceTier::Likely;
+        // Naming plus co-location is weaker proof of concurrent use than
+        // atomics are: same mechanism, same cost, less certainty.
+        if (!fromAtomics)
+            diag.confidence -= 0.14;
+        diag.evidenceTier = (exactLayout && fromAtomics) ? EvidenceTier::Proven
+                                                         : EvidenceTier::Likely;
 
         diag.location = resolveSourceLocation(loc, SM);
 
