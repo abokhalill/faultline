@@ -420,6 +420,7 @@ std::string serializeShardResult(int exitCode,
             buf += ",\"st\":" + std::to_string(a.isFileStatic ? 1 : 0);
             buf += ",\"tls\":" + std::to_string(a.tlsIndexed ? 1 : 0);
             buf += ",\"hp\":" + std::to_string(a.hasHeadPaddingOffset ? 1 : 0);
+            buf += ",\"wt\":" + std::to_string(a.writerTier);
             buf += ",\"w\":[";
             bool fw = true;
             for (const auto &w : a.stripedWriters) {
@@ -780,6 +781,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                         else if (f == "st") a.isFileStatic = v != 0;
                         else if (f == "tls") a.tlsIndexed = v != 0;
                         else if (f == "hp") a.hasHeadPaddingOffset = v != 0;
+                        else if (f == "wt") a.writerTier =
+                            static_cast<uint8_t>(v);
                     }
                     ipc::expect(json, i, ',');
                 }

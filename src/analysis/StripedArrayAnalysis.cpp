@@ -11,6 +11,9 @@
 
 #include <llvm/ADT/SmallPtrSet.h>
 
+#include <fnmatch.h>
+
+#include <algorithm>
 #include <map>
 
 namespace lshaz {
@@ -82,13 +85,14 @@ public:
     StripedArraySummary &out;
     const std::map<std::string, std::string> &aliases;
     const HotPathOracle &oracle;
+    const Config &cfg;
     const clang::FunctionDecl *currentFn = nullptr;
     llvm::SmallPtrSet<const clang::ValueDecl *, 8> inductionVars;
 
     UseVisitor(clang::ASTContext &C, StripedArraySummary &o,
                const std::map<std::string, std::string> &al,
-               const HotPathOracle &orc)
-        : ctx(C), out(o), aliases(al), oracle(orc) {}
+               const HotPathOracle &orc, const Config &c)
+        : ctx(C), out(o), aliases(al), oracle(orc), cfg(c) {}
 
     bool TraverseFunctionDecl(clang::FunctionDecl *FD) {
         if (!FD->doesThisDeclarationHaveABody())
@@ -198,8 +202,31 @@ private:
         if (classify(E->getIdx()) != IndexProvenance::ThreadIdent) return;
         std::string wn = threadRoleNodeName(currentFn, ctx);
         s->stripedWriters.insert(wn);
-        if (oracle.isFunctionHot(currentFn)) s->hotWriters.insert(wn);
+        s->writerTier = std::max(s->writerTier, tierOf(wn));
         if (isTLSDerived(E->getIdx())) s->tlsIndexed = true;
+    }
+
+    // Named-function tiers outrank oracle hotness: the oracle reaches
+    // most functions through a file glob or transitive propagation,
+    // which cannot distinguish a per-connection setup routine from the
+    // per-command path in the same file. An explicit name is the more
+    // specific statement and wins.
+    uint8_t tierOf(const std::string &qualified) {
+        std::string plain = currentFn->getNameAsString();
+        auto hit = [&](const std::vector<std::string> &pats) {
+            for (const auto &p : pats)
+                if (fnmatch(p.c_str(), plain.c_str(), 0) == 0 ||
+                    fnmatch(p.c_str(), qualified.c_str(), 0) == 0)
+                    return true;
+            return false;
+        };
+        if (hit(cfg.dispatchPathPatterns))
+            return static_cast<uint8_t>(WriteFrequencyTier::Dispatch);
+        if (hit(cfg.tickPathPatterns))
+            return static_cast<uint8_t>(WriteFrequencyTier::Tick);
+        if (oracle.isFunctionHot(currentFn))
+            return static_cast<uint8_t>(WriteFrequencyTier::Hot);
+        return static_cast<uint8_t>(WriteFrequencyTier::Unknown);
     }
 
     bool isTLSDerived(const clang::Expr *idx) {
@@ -362,7 +389,7 @@ void StripedArrayAnalysis::collectAliases(
 
 void StripedArrayAnalysis::collectUses(const clang::TranslationUnitDecl *TU) {
     if (summary_.empty() || !TU) return;
-    UseVisitor v(ctx_, summary_, aliases_, oracle_);
+    UseVisitor v(ctx_, summary_, aliases_, oracle_, cfg_);
     v.TraverseDecl(const_cast<clang::TranslationUnitDecl *>(TU));
 }
 
