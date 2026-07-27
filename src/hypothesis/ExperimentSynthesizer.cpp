@@ -154,7 +154,19 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "class lshaz_striper {\n"
        << "public:\n"
        << "    lshaz_striper(void* slots, int n, std::size_t stride_bytes) {\n"
+       /* pin the measured thread BEFORE selecting peers. sched_getcpu on
+          an unpinned thread is a snapshot that goes stale the moment the
+          scheduler migrates it, and a measured thread that wanders off
+          the core the peer set was built around records the uncontended
+          floor — indistinguishable from a real negative. */
        << "        int measured = sched_getcpu();\n"
+       << "        cpu_set_t self; CPU_ZERO(&self); CPU_SET(measured, &self);\n"
+       << "        if (sched_setaffinity(0, sizeof(self), &self) != 0) {\n"
+       << "            std::fprintf(stderr, \"[lshaz] FATAL: cannot pin measured \"\n"
+       << "                \"thread to cpu %d; contention would be unattributable.\\n\",\n"
+       << "                measured);\n"
+       << "            std::abort();\n"
+       << "        }\n"
        << "        auto cores = peer_cores(measured, n);\n"
        << "        char* base = reinterpret_cast<char*>(slots);\n"
        << "        for (int i = 0; i < (int)cores.size(); ++i) {\n"
@@ -835,12 +847,37 @@ static ExperimentFile genTreatmentStripedArray(const LatencyHypothesis &hyp) {
        << ", \"slot stride must match the finding\");\n"
        << "static Slot *slots;\n"
        << "static lshaz_striper<" << slotTypeFor(es) << "> *stripers;\n\n"
+       /* only the PEERS' stride varies across the sweep; the measured
+          thread always writes slot 0, so its instruction stream is
+          bit-identical in every arm. stride 0 puts every peer on slot 0
+          — true sharing, the coherence ceiling. */
+       << "static std::size_t g_stride = sizeof(Slot);\n\n"
        << "void treatment_setup() {\n"
+       << "    if (const char *e = std::getenv(\"LSHAZ_STRIDE\")) {\n"
+       << "        long v = std::atol(e);\n"
+       << "        if (v < 0) { std::fprintf(stderr,\n"
+       << "            \"[lshaz] FATAL: LSHAZ_STRIDE must be >= 0\\n\");\n"
+       << "            std::abort(); }\n"
+       << "        g_stride = (std::size_t)v;\n"
+       << "    }\n"
+       /* >=4096 puts every slot at the same page offset and the store
+          buffer falsely predicts dependencies; that is 4K aliasing, not
+          coherence. refuse rather than report it as one. */
+       << "    if (g_stride >= 4096) {\n"
+       << "        std::fprintf(stderr, \"[lshaz] FATAL: stride %zu aliases \"\n"
+       << "            \"4K page offsets; measurement would be store-buffer \"\n"
+       << "            \"aliasing, not coherence.\\n\", g_stride);\n"
+       << "        std::abort();\n"
+       << "    }\n"
+       << "    std::size_t span = (g_stride ? g_stride : sizeof(Slot)) * "
+       << n << ";\n"
        << "    slots = static_cast<Slot *>(std::aligned_alloc(64,\n"
-       << "        ((sizeof(Slot) * " << n << " + 63) / 64) * 64));\n"
-       << "    std::memset(slots, 0, sizeof(Slot) * " << n << ");\n"
+       << "        ((span + 63) / 64) * 64));\n"
+       << "    std::memset(slots, 0, ((span + 63) / 64) * 64);\n"
+       << "    std::fprintf(stderr, \"[lshaz] peer stride = %zu B%s\\n\",\n"
+       << "        g_stride, g_stride ? \"\" : \" (same-slot ceiling)\");\n"
        << "    stripers = new lshaz_striper<" << slotTypeFor(es)
-       << ">(slots, " << threads << ", sizeof(Slot));\n"
+       << ">(slots, " << threads << ", g_stride);\n"
        << "}\n\n"
        << "void treatment_teardown() { delete stripers; std::free(slots); }\n\n"
        /* locked RMW, not a plain store: a relaxed store retires into the
@@ -881,6 +918,117 @@ static ExperimentFile genControlStripedArray(const LatencyHypothesis &hyp) {
        << "    lshaz_do_not_optimize(slots[0].v);\n"
        << "}\n";
     return {"src/control.cpp", os.str()};
+}
+
+static ExperimentFile genStripeSweepScript(const LatencyHypothesis &hyp) {
+    (void)hyp;
+    std::ostringstream os;
+    os << "#!/bin/bash\n"
+       << "# Stride sweep: the causal control for FL003.\n"
+       << "#\n"
+       << "# Thread count, instruction stream and memory region are held\n"
+       << "# fixed; only the peers' slot stride moves. Nothing in the machine\n"
+       << "# changes behaviour at exactly the cache-line size except the\n"
+       << "# coherence controller, so a step at 64B is a signature no\n"
+       << "# interconnect, frequency or store-buffer confound can fake —\n"
+       << "# each of those is flat across the sweep.\n"
+       << "#\n"
+       << "# Expect TWO steps on parts with an adjacent-line prefetcher:\n"
+       << "# a large drop at 64B and a residual at 128B. That shape is\n"
+       << "# confirmatory, not contamination.\n"
+       << "#\n"
+       << "# Capped at 256B: >=4096B aliases page offsets (store-buffer\n"
+       << "# false dependencies), and at <=256B the whole array stays\n"
+       << "# inside a handful of pages so dTLB pressure is constant.\n"
+       << "# Needs no root and no PMU.\n"
+       << "set -euo pipefail\n\n"
+       << "STRIDES=\"0 4 8 16 32 64 128 256\"\n"
+       << "rm -rf results/sweep; mkdir -p results/sweep\n\n"
+       << "# isolated reference captured once, up front.\n"
+       << "LSHAZ_STRIDE=256 ./experiment --variant treatment 2>/dev/null\n"
+       << "mv results/treatment_samples.bin results/sweep/ref.bin\n\n"
+       << "# Stability gate. A sweep only means something if the SAME\n"
+       << "# configuration reproduces. Under a hypervisor, without\n"
+       << "# isolcpus/nohz_full or a fixed frequency governor, repeats of\n"
+       << "# one stride land bimodally on either the contended value or the\n"
+       << "# uncontended floor — and a single sample per point then draws a\n"
+       << "# step function out of pure scheduling noise. Refuse rather than\n"
+       << "# emit a plausible table.\n"
+       << "echo '=== stability gate: 5 repeats of one configuration ==='\n"
+       << "for r in 1 2 3 4 5; do\n"
+       << "  LSHAZ_STRIDE=4 ./experiment --variant treatment 2>/dev/null\n"
+       << "  { ./analyze results/treatment_samples.bin results/sweep/ref.bin \\\n"
+       << "    2>/dev/null || true; } | awk '$1==\"p99.9\" {print $3}' \\\n"
+       << "    >> results/sweep/stability.txt\n"
+       << "done\n"
+       << "read -r LO HI < <(sort -n results/sweep/stability.txt \\\n"
+       << "  | awk 'NR==1{l=$1} {h=$1} END{print l, h}')\n"
+       << "echo \"  same-config p99.9 range: ${LO}..${HI} cycles\"\n"
+       /* a gate whose own comparison errors must fail closed: an
+          unreadable stability figure is not evidence of stability. */
+       << "case \"$LO$HI\" in *[!0-9]*|\"\") LO=0; HI=1;; esac\n"
+       << "if [ \"$LO\" -le 0 ] || [ $(( HI * 100 / LO )) -gt 150 ]; then\n"
+       << "  cat >&2 <<'GATE'\n"
+       << "\n"
+       << "FATAL: environment is not measurement-grade.\n"
+       << "Repeats of one configuration differ by more than 50%, so any\n"
+       << "step this sweep appears to show would be scheduling noise, not\n"
+       << "cache geometry. This is a property of the machine, not the\n"
+       << "finding — the finding is neither confirmed nor refuted here.\n"
+       << "\n"
+       << "Required before the numbers mean anything:\n"
+       << "  - bare metal, not a VM or WSL\n"
+       << "  - isolcpus= / nohz_full= on the measured and peer cores\n"
+       << "  - cpupower frequency-set -g performance, turbo fixed\n"
+       << "  - no competing load\n"
+       << "GATE\n"
+       << "  exit 3\n"
+       << "fi\n"
+       << "echo '  stable enough to sweep.'\n\n"
+       << "REPS=${REPS:-5}\n\n"
+       << "# one run per point is not a measurement: scheduling noise is\n"
+       << "# bimodal here, so a single sample can land on the uncontended\n"
+       << "# floor at any stride. median of REPS.\n"
+       << "for s in $STRIDES; do\n"
+       << "  echo \"=== peer stride ${s}B (${REPS} reps) ===\"\n"
+       << "  best=\"\"\n"
+       << "  for r in $(seq 1 $REPS); do\n"
+       << "    LSHAZ_STRIDE=$s ./experiment --variant treatment 2>/dev/null\n"
+       << "    p=$(./analyze results/treatment_samples.bin \\\n"
+       << "        results/sweep/ref.bin 2>/dev/null | awk '$1==\"p99.9\" {print $3}')\n"
+       << "    echo \"$p\" >> results/sweep/raw_s${s}.txt\n"
+       << "    cp results/treatment_samples.bin results/sweep/s${s}_r${r}.bin\n"
+       << "  done\n"
+       << "  med=$(sort -n results/sweep/raw_s${s}.txt | awk '{a[NR]=$1} END{print a[int((NR+1)/2)]}')\n"
+       << "  echo \"$s $med\" >> results/sweep/medians.txt\n"
+       << "done\n\n"
+       << "# 256B is the isolated reference: one slot per line with room\n"
+       << "# above the line-pair the spatial prefetcher works on.\n"
+       << "echo\n"
+       << "echo 'stride_bytes  median_p99.9_cycles'\n"
+       << "cat results/sweep/medians.txt | while read s m; do\n"
+       << "  printf '%-13s %s\\n' \"$s\" \"$m\"\n"
+       << "done\n\n"
+       << "cat <<'EOF'\n\n"
+       << "Reading the result\n"
+       << "  step at 64B, flat above      -> false sharing, confirmed\n"
+       << "  two steps (64B and 128B)     -> false sharing + adjacent-line\n"
+       << "                                  prefetch; still confirmed\n"
+       << "  flat across every stride     -> NOT coherence. the cost is\n"
+       << "                                  interconnect, frequency or\n"
+       << "                                  store-buffer pressure and the\n"
+       << "                                  finding is refuted here\n\n"
+       << "Coherence Penalty Index\n"
+       << "  CPI = (packed - isolated) / (same_slot - isolated)\n"
+       << "  where same_slot is stride 0 (true sharing, the ceiling).\n"
+       << "  CPI ~1.0  packed pays the full true-sharing penalty\n"
+       << "  CPI <0.2  coherence drag is minor; padding buys little\n"
+       << "  If (same_slot - isolated) is not comfortably above run-to-run\n"
+       << "  noise, CPI is UNDEFINED -- the machine is not showing a\n"
+       << "  coherence effect at all, and a ratio against ~0 is a\n"
+       << "  fabricated number, not a large one.\n"
+       << "EOF\n";
+    return {"scripts/run_stride_sweep.sh", os.str()};
 }
 
 /* FL010 — AtomicOrdering: seq_cst vs release/acquire. */
@@ -1385,6 +1533,8 @@ ExperimentBundle ExperimentSynthesizer::synthesize(
     bundle.files.push_back(generateHypothesisJson(hypothesis));
     bundle.files.push_back(generateAnalyze(hypothesis));
     bundle.files.push_back(generateRunAll(hypothesis, plan));
+    if (hypothesis.hazardClass == HazardClass::StripedArray)
+        bundle.files.push_back(genStripeSweepScript(hypothesis));
 
     for (const auto &script : plan.scripts) {
         bundle.files.push_back({"scripts/" + script.name, script.content});
