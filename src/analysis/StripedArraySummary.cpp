@@ -27,8 +27,7 @@ StripeVerdict gradeStripedArray(const StripedArraySite &s,
     v.writerRoles = mask;
     v.multiRole = (mask == (ROLE_MAIN | ROLE_WORKER));
 
-    if (!s.hotWriters.empty())
-        v.frequency = WriteFrequencyTier::Hot;
+    v.frequency = static_cast<WriteFrequencyTier>(s.writerTier);
     return v;
 }
 

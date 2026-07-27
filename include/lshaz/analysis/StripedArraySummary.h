@@ -3,6 +3,7 @@
 
 #include "lshaz/analysis/ThreadRoleSummary.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -63,11 +64,11 @@ struct StripedArraySite {
     bool hasHeadPaddingOffset = false;
 
     std::set<std::string> stripedWriters;  // thread-ident-indexed writers
-    // writers the hot-path oracle classified hot, recorded at collection
-    // time; the oracle already fuses attribute, glob, profile and
-    // call-graph propagation, so a second frequency mechanism would only
-    // disagree with it.
-    std::set<std::string> hotWriters;
+    // Highest tier over all striped writers, resolved at collection time
+    // where the oracle and the decl are both in scope. The fastest writer
+    // is the binding constraint. Stored as the enum's underlying type so
+    // it crosses the shard protocol as one integer.
+    uint8_t writerTier = 0;
     std::set<std::string> aggregators;     // loop-swept readers/resetters
 
     void merge(const StripedArraySite &o) {
@@ -82,7 +83,7 @@ struct StripedArraySite {
                             displayName = o.displayName; typeName = o.typeName;
                             isFileStatic = o.isFileStatic; }
         stripedWriters.insert(o.stripedWriters.begin(), o.stripedWriters.end());
-        hotWriters.insert(o.hotWriters.begin(), o.hotWriters.end());
+        writerTier = std::max(writerTier, o.writerTier);
         aggregators.insert(o.aggregators.begin(), o.aggregators.end());
     }
 };
