@@ -275,11 +275,25 @@ lshaz_pmu_calibrate(uint64_t line_bytes, int peer_cpu, lshaz_pmu_status *st) {
         // those pass stage 1. Requiring the collapse at the line size is what
         // lets calibration REJECT a discriminating non-coherence event; a test
         // that can only confirm is not a test.
+        //
+        // Median of repeats, because one sample per stride lets a single
+        // descheduled window invent or erase a collapse — and the shape test
+        // is the only thing standing between a wrong counter and the verdict,
+        // so it must be sampled at least as carefully as the measurement it
+        // gates.
         std::vector<uint64_t> curve(strides.size(), 0);
         bool ok = true;
-        for (size_t k = 0; k < strides.size(); ++k)
-            if (!lshaz_pmu_arm(c.config, strides[k], peer_cpu, 500000, &curve[k]))
-                { ok = false; break; }
+        for (size_t k = 0; k < strides.size() && ok; ++k) {
+            uint64_t v[3];
+            for (int r = 0; r < 3; ++r)
+                if (!lshaz_pmu_arm(c.config, strides[k], peer_cpu, 500000, &v[r]))
+                    { ok = false; break; }
+            if (!ok) break;
+            for (int a = 0; a < 3; ++a)
+                for (int b = a + 1; b < 3; ++b)
+                    if (v[b] < v[a]) { uint64_t t = v[a]; v[a] = v[b]; v[b] = t; }
+            curve[k] = v[1];
+        }
         if (!ok) continue;
 
         size_t cliff = lshaz_pmu_cliff_index(curve.data(), curve.size());
