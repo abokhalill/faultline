@@ -69,6 +69,12 @@ struct Config {
     // L1 data cache size; FL003 weighs padding footprint against it.
     size_t l1dSizeBytes = 32768;
 
+    // Write-frequency roots for FL003 (fnmatch). Hot comes from the
+    // hot-path oracle; these name the slower tiers so a real hazard on a
+    // per-connection path is not priced as if it were per-command.
+    std::vector<std::string> dispatchPathPatterns;
+    std::vector<std::string> tickPathPatterns;
+
     // Thread-role attribution roots (fnmatch-style). Entry patterns name
     // worker-thread roots that thread-creation detection cannot see
     // (function-pointer dispatch); main patterns extend the ROLE_MAIN

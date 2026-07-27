@@ -49,6 +49,8 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("main_function_patterns", cfg.mainFunctionPatterns);
         io.mapOptional("smt_enabled",            cfg.smtEnabled);
         io.mapOptional("l1d_size_bytes",         cfg.l1dSizeBytes);
+        io.mapOptional("dispatch_path_patterns", cfg.dispatchPathPatterns);
+        io.mapOptional("tick_path_patterns",     cfg.tickPathPatterns);
         io.mapOptional("relax_function_patterns", cfg.relaxFunctionPatterns);
     }
 };
