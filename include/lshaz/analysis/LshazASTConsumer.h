@@ -7,6 +7,7 @@
 #include "lshaz/analysis/EscapeSummary.h"
 #include "lshaz/analysis/ThreadRoleSummary.h"
 #include "lshaz/analysis/StripedArraySummary.h"
+#include "lshaz/analysis/ScanCoverage.h"
 
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/ASTContext.h>
@@ -24,6 +25,7 @@ public:
                          EscapeSummary &escapeSummary,
                          ThreadRoleSummary &threadRoles,
                          StripedArraySummary &stripedArrays,
+                         ScanCoverage &coverage,
                          const std::unordered_set<std::string> &profileHotFuncs = {});
 
     void HandleTranslationUnit(clang::ASTContext &Ctx) override;
@@ -35,6 +37,7 @@ private:
     EscapeSummary &escapeSummary_;
     ThreadRoleSummary &threadRoles_;
     StripedArraySummary &stripedArrays_;
+    ScanCoverage &coverage_;
 };
 
 } // namespace lshaz

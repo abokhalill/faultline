@@ -34,10 +34,11 @@ LshazASTConsumer::LshazASTConsumer(
     EscapeSummary &escapeSummary,
     ThreadRoleSummary &threadRoles,
     StripedArraySummary &stripedArrays,
+    ScanCoverage &coverage,
     const std::unordered_set<std::string> &profileHotFuncs)
     : config_(cfg), oracle_(cfg), diagnostics_(diagnostics),
       escapeSummary_(escapeSummary), threadRoles_(threadRoles),
-      stripedArrays_(stripedArrays) {
+      stripedArrays_(stripedArrays), coverage_(coverage) {
     if (!profileHotFuncs.empty())
         oracle_.loadProfileHotFunctions(profileHotFuncs);
 }
@@ -116,6 +117,21 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     CallGraph cg(Ctx);
     cg.buildFromTU(TU);
     oracle_.propagateViaCallGraph(cg);
+
+    // Counted after propagation, since that is when hotness is final.
+    // Reported so a scan that examined a fraction of a codebase cannot be
+    // mistaken for one that found nothing.
+    for (auto *D : decls) {
+        if (auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D)) {
+            if (!FD->hasBody())
+                continue;
+            ++coverage_.functionsSeen;
+            if (oracle_.isFunctionHot(FD))
+                ++coverage_.functionsHot;
+        } else if (llvm::isa<clang::RecordDecl>(D)) {
+            ++coverage_.recordsSeen;
+        }
+    }
 
     // Per-TU EscapeAnalysis — owned here, injected into rules.
     // This eliminates the ASTContext pointer-reuse cache invalidation

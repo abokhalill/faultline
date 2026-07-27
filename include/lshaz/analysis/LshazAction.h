@@ -6,6 +6,7 @@
 #include "lshaz/analysis/EscapeSummary.h"
 #include "lshaz/analysis/ThreadRoleSummary.h"
 #include "lshaz/analysis/StripedArraySummary.h"
+#include "lshaz/analysis/ScanCoverage.h"
 
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Frontend/FrontendAction.h>
@@ -30,6 +31,7 @@ public:
                     EscapeSummary &escapeSummary,
                     ThreadRoleSummary &threadRoles,
                     StripedArraySummary &stripedArrays,
+                    ScanCoverage &coverage,
                     const std::unordered_set<std::string> &profileHotFuncs,
                     std::vector<FailedTU> &failedTUs);
 
@@ -47,6 +49,7 @@ private:
     EscapeSummary &escapeSummary_;
     ThreadRoleSummary &threadRoles_;
     StripedArraySummary &stripedArrays_;
+    ScanCoverage &coverage_;
     const std::unordered_set<std::string> &profileHotFuncs_;
     std::vector<FailedTU> &failedTUs_;
     std::string currentFile_;
@@ -65,6 +68,7 @@ public:
     const EscapeSummary &escapeSummary() const { return escapeSummary_; }
     const ThreadRoleSummary &threadRoles() const { return threadRoles_; }
     const StripedArraySummary &stripedArrays() const { return stripedArrays_; }
+    const ScanCoverage &coverage() const { return coverage_; }
 
 private:
     const Config &config_;
@@ -72,6 +76,7 @@ private:
     EscapeSummary escapeSummary_;
     ThreadRoleSummary threadRoles_;
     StripedArraySummary stripedArrays_;
+    ScanCoverage coverage_;
     std::unordered_set<std::string> profileHotFuncs_;
     std::vector<FailedTU> failedTUs_;
 };
