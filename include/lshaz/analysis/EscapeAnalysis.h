@@ -36,6 +36,10 @@ struct EscapeVerdict {
     bool hasSharedOwner   = false;
     bool hasVolatile      = false;
     bool hasPublication   = false;
+    // Written from >=2 functions, at least one of them spawned as a thread.
+    // Publication needs an address to cross a thread boundary; a file-scope
+    // object written directly from two thread bodies never does.
+    bool hasThreadWriters = false;
 
     unsigned accessorCount = 0; // distinct functions touching this type in TU
 
@@ -83,6 +87,7 @@ public:
 
     // Mark a type as published to a cross-thread context.
     void markPublished(clang::QualType QT);
+    void markThreadEntry(const clang::Expr *E);
 
     // Build per-type escape summary for cross-TU aggregation.
     // Requires prior scanTranslationUnit() call. Iterates all RecordDecls
@@ -152,6 +157,14 @@ private:
     // FieldDecl*. Populated alongside globalWriteCounts_ (same traversal).
     std::unordered_map<const clang::FieldDecl *, FieldWriteRecord>
         fieldWrites_;
+
+    // Functions spawned as threads in this TU. Publication (passing an
+    // address across a thread boundary) is not the only way an object
+    // becomes shared: a file-scope object written directly from two thread
+    // bodies is shared without any address ever being passed anywhere, and
+    // that is the striped-counter shape.
+    std::unordered_set<const clang::FunctionDecl *> threadEntries_;
+    bool hasThreadEntryWriters(const clang::RecordDecl *RD) const;
 
     void collectGlobalWriteSites(
         const std::vector<const clang::FunctionDecl *> &bodies);

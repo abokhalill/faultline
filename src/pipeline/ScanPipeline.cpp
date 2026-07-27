@@ -360,6 +360,7 @@ std::string serializeShardResult(int exitCode,
             buf += ",\"o\":" + std::to_string(sig.hasSharedOwner ? 1 : 0);
             buf += ",\"v\":" + std::to_string(sig.hasVolatile ? 1 : 0);
             buf += ",\"p\":" + std::to_string(sig.hasPublication ? 1 : 0);
+            buf += ",\"tw\":" + std::to_string(sig.hasThreadWriters ? 1 : 0);
             buf += ",\"l\":" + std::to_string(sig.hasDeliberateLayout ? 1 : 0);
             buf += ",\"n\":" + std::to_string(sig.accessorCount);
             buf += '}';
@@ -678,6 +679,7 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     else if (sk == "o") sig.hasSharedOwner = val != 0;
                     else if (sk == "v") sig.hasVolatile = val != 0;
                     else if (sk == "p") sig.hasPublication = val != 0;
+                    else if (sk == "tw") sig.hasThreadWriters = val != 0;
                     else if (sk == "l") sig.hasDeliberateLayout = val != 0;
                     else if (sk == "n") sig.accessorCount = static_cast<unsigned>(val);
                     ipc::expect(json, i, ',');

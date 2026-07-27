@@ -18,6 +18,11 @@ struct TypeEscapeSignals {
     bool hasSharedOwner  = false;
     bool hasVolatile     = false;
     bool hasPublication  = false;  // TU-local: passed to thread/stored globally
+    // Written from >=2 functions, one of them spawned as a thread.
+    // Publication requires an address to cross a thread boundary; a
+    // file-scope object written directly from two thread bodies never
+    // does, and is invisible without this.
+    bool hasThreadWriters = false;
     // Explicit line alignment or trailing pad-to-line: the author reasons
     // in cache lines. Feeds the FL092 precedent join; a codebase-level
     // "the mitigation idiom is known here" index.
@@ -31,6 +36,7 @@ struct TypeEscapeSignals {
         hasSharedOwner |= other.hasSharedOwner;
         hasVolatile    |= other.hasVolatile;
         hasPublication |= other.hasPublication;
+        hasThreadWriters |= other.hasThreadWriters;
         hasDeliberateLayout |= other.hasDeliberateLayout;
         accessorCount  += other.accessorCount;
     }
@@ -41,7 +47,7 @@ struct TypeEscapeSignals {
     }
 
     bool hasAnyEscape() const {
-        return hasStructuralEscape() || hasPublication;
+        return hasStructuralEscape() || hasPublication || hasThreadWriters;
     }
 };
 

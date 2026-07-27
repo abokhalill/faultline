@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/EscapeAnalysis.h"
+
+#include "lshaz/analysis/TypeUtil.h"
 #include "lshaz/analysis/SymbolNames.h"
 
 #include <clang/AST/Decl.h>
@@ -46,6 +48,8 @@ bool isQualifiedNameOneOf(const clang::CXXRecordDecl *RD,
 } // anonymous namespace
 
 bool EscapeAnalysis::isAtomicType(clang::QualType QT) const {
+    QT = peelArrays(QT);
+
     // C11 _Atomic qualifier.
     if (QT.getCanonicalType()->isAtomicType())
         return true;
@@ -70,6 +74,7 @@ bool EscapeAnalysis::isAtomicType(clang::QualType QT) const {
 }
 
 bool EscapeAnalysis::isSyncType(clang::QualType QT) const {
+    QT = peelArrays(QT);
     const clang::CXXRecordDecl *RD = getUnderlyingRecord(QT);
     if (isQualifiedNameOneOf(RD, {
             "std::mutex", "std::recursive_mutex",
@@ -148,9 +153,10 @@ EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
     const_cast<EscapeAnalysis *>(this)->scanTranslationUnit(
         ctx_.getTranslationUnitDecl());
     v.hasPublication = hasPublicationEvidence(RD);
+    v.hasThreadWriters = hasThreadEntryWriters(RD);
 
     v.escapes = v.hasAtomics || v.hasSyncPrims || v.hasSharedOwner ||
-                v.hasVolatile || v.hasPublication;
+                v.hasVolatile || v.hasPublication || v.hasThreadWriters;
 
     // Accessor count: how many functions in this TU touch the type?
     if (const auto *canon = llvm::dyn_cast<clang::RecordDecl>(RD->getCanonicalDecl())) {
@@ -170,6 +176,7 @@ EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
     if (v.hasSyncPrims)   score += 0.15;
     if (v.hasSharedOwner) score += 0.10;
     if (v.hasPublication) score += 0.10;
+    if (v.hasThreadWriters) score += 0.20;
     if (v.hasAtomics && v.hasSyncPrims)
         score += 0.15; // compound: lock + atomic = contended
 
@@ -208,6 +215,39 @@ bool EscapeAnalysis::hasPublicationEvidence(const clang::RecordDecl *RD) const {
     return publishedTypes_.count(canon->getQualifiedNameAsString()) > 0;
 }
 
+void EscapeAnalysis::markThreadEntry(const clang::Expr *E) {
+    if (!E) return;
+    E = E->IgnoreParenImpCasts();
+    if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E))
+        if (UO->getOpcode() == clang::UO_AddrOf)
+            E = UO->getSubExpr()->IgnoreParenImpCasts();
+    if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E))
+        if (const auto *FD = llvm::dyn_cast<clang::FunctionDecl>(DRE->getDecl()))
+            threadEntries_.insert(FD->getCanonicalDecl());
+}
+
+// Shared because two functions write it and at least one of them runs on a
+// spawned thread. Weaker than publication about *when* the writes overlap,
+// which is why it moves confidence rather than severity downstream.
+bool EscapeAnalysis::hasThreadEntryWriters(const clang::RecordDecl *RD) const {
+    if (!RD || threadEntries_.empty())
+        return false;
+    std::unordered_set<const clang::FunctionDecl *> writers;
+    bool onThread = false;
+    for (const auto *field : RD->fields()) {
+        auto it = fieldWrites_.find(
+            llvm::dyn_cast_or_null<clang::FieldDecl>(field->getCanonicalDecl()));
+        if (it == fieldWrites_.end())
+            continue;
+        for (const auto *w : it->second.writers) {
+            writers.insert(w);
+            if (threadEntries_.count(w->getCanonicalDecl()))
+                onThread = true;
+        }
+    }
+    return onThread && writers.size() >= 2;
+}
+
 void EscapeAnalysis::markPublished(clang::QualType QT) {
     QT = QT.getCanonicalType().getNonReferenceType();
     // Strip pointer/reference layers.
@@ -243,8 +283,10 @@ public:
 
         // std::thread, std::jthread constructor args are published.
         if (parentName == "std::thread" || parentName == "std::jthread") {
-            for (unsigned i = 0; i < E->getNumArgs(); ++i)
+            for (unsigned i = 0; i < E->getNumArgs(); ++i) {
                 ea_.markPublished(E->getArg(i)->getType());
+                ea_.markThreadEntry(E->getArg(i));
+            }
         }
         return true;
     }
@@ -254,9 +296,13 @@ public:
             std::string name = callee->getQualifiedNameAsString();
             // std::async publishes all callable and argument types.
             if (name == "std::async") {
-                for (unsigned i = 0; i < E->getNumArgs(); ++i)
+                for (unsigned i = 0; i < E->getNumArgs(); ++i) {
                     ea_.markPublished(E->getArg(i)->getType());
+                    ea_.markThreadEntry(E->getArg(i));
+                }
             }
+            if (name == "pthread_create" && E->getNumArgs() >= 3)
+                ea_.markThreadEntry(E->getArg(2));
         }
         return true;
     }
@@ -423,7 +469,7 @@ bool EscapeAnalysis::hasVolatileMembers(const clang::RecordDecl *RD) const {
         return false;
 
     for (const auto *field : RD->fields()) {
-        if (field->getType().isVolatileQualified())
+        if (peelArrays(field->getType()).isVolatileQualified())
             return true;
     }
 
@@ -582,6 +628,11 @@ private:
         if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E))
             if (UO->getOpcode() == clang::UO_AddrOf)
                 E = UO->getSubExpr()->IgnoreParenImpCasts();
+        // A write to arr[i] is a write to the field `arr`. Without this the
+        // element writes of every striped counter resolve to nothing, and
+        // the array reads as never written.
+        while (const auto *ASE = llvm::dyn_cast<clang::ArraySubscriptExpr>(E))
+            E = ASE->getBase()->IgnoreParenImpCasts();
         if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E)) {
             if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(DRE->getDecl())) {
                 if (VD->hasGlobalStorage()) {
@@ -758,6 +809,7 @@ EscapeSummary EscapeAnalysis::buildEscapeSummary(
         sig.hasSharedOwner |= hasSharedOwnershipMembers(RD);
         sig.hasVolatile    |= hasVolatileMembers(RD);
         sig.hasPublication |= hasPublicationEvidence(RD);
+        sig.hasThreadWriters |= hasThreadEntryWriters(RD);
 
         auto it = typeAccessorCounts_.find(
             static_cast<const clang::RecordDecl *>(canon));
