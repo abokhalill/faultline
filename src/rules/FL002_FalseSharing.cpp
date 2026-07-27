@@ -10,6 +10,7 @@
 #include <clang/AST/DeclCXX.h>
 #include <clang/Basic/SourceManager.h>
 
+#include <algorithm>
 #include <sstream>
 
 namespace lshaz {
@@ -50,13 +51,74 @@ public:
 
         auto atomicPairs = map.atomicPairsOnSameLine();
         auto mutablePairs = map.mutablePairsOnSameLine();
+
+        // An intra-array pair is co-residency alone, and co-residency is not
+        // contention: padding arrays share lines by construction and are
+        // never written. Require distinct writers actually reaching the
+        // array before treating its elements as a contended pair.
+        auto needsArrayWriters = [&](const CacheLineMap::SharedLinePair &p) {
+            return p.intraArray &&
+                   !escape.pairHasDistinctWriters(p.a->decl, p.a->decl);
+        };
+        mutablePairs.erase(std::remove_if(mutablePairs.begin(),
+                                          mutablePairs.end(), needsArrayWriters),
+                           mutablePairs.end());
+        atomicPairs.erase(std::remove_if(atomicPairs.begin(), atomicPairs.end(),
+                                         needsArrayWriters),
+                          atomicPairs.end());
         if (mutablePairs.empty())
             return;
 
         bool hasAtomicPairs = !atomicPairs.empty();
         auto fsCandidateLines = map.falseSharingCandidateLines();
 
-        if (!hasAtomicPairs && map.totalAtomicFields() == 0)
+        // Write evidence is computed before the gate because it *is* the
+        // gate for non-atomic records.
+        enum { kNoWrites, kPartial, kMultiWriter };
+        int wev = kNoWrites;
+        std::vector<std::string> writeEvidence;
+        const auto &evPairs = hasAtomicPairs ? atomicPairs : mutablePairs;
+        for (const auto &p : evPairs) {
+            auto ea = escape.fieldWriteEvidence(p.a->decl);
+            auto eb = escape.fieldWriteEvidence(p.b->decl);
+            int level = kNoWrites;
+            // For an intra-array pair a == b, this reduces to "this array is
+            // written from >=2 functions", which is the correct question.
+            if (ea.writeSites && eb.writeSites &&
+                escape.pairHasDistinctWriters(p.a->decl, p.b->decl)) {
+                level = kMultiWriter;
+                if (wev < kMultiWriter) {
+                    if (p.intraArray)
+                        writeEvidence.push_back(
+                            "write evidence: array '" + p.a->name + "' written "
+                            "from " + std::to_string(ea.writerFunctions) +
+                            " distinct function(s) across " +
+                            std::to_string(ea.writeSites) +
+                            " site(s) in this TU");
+                    else
+                        writeEvidence.push_back(
+                            "write evidence: '" + p.a->name + "' (" +
+                            std::to_string(ea.writeSites) + " site(s)/" +
+                            std::to_string(ea.writerFunctions) + " fn(s)) and '" +
+                            p.b->name + "' (" + std::to_string(eb.writeSites) +
+                            " site(s)/" + std::to_string(eb.writerFunctions) +
+                            " fn(s)) written from distinct functions in this TU");
+                }
+            } else if (ea.writeSites || eb.writeSites) {
+                level = kPartial;
+            }
+            wev = std::max(wev, level);
+        }
+
+        // Atomicity is not the gate. Striped and role-partitioned fields
+        // guarantee single-writer-per-slot, so the dominant false-sharing
+        // idiom is deliberately non-atomic: no data race, pure coherence
+        // traffic. Gating on atomics scores zero on exactly that shape.
+        // What must be established instead is concurrent independent
+        // writes, which is what the escape verdict plus distinct writers
+        // provide.
+        const bool anyAtomics = hasAtomicPairs || map.totalAtomicFields() > 0;
+        if (!anyAtomics && wev != kMultiWriter)
             return;
 
         // Refcount-only structs: single atomic refcount field sharing a line
@@ -81,6 +143,11 @@ public:
 
         Severity sev = hasAtomicPairs ? Severity::Critical : Severity::High;
         std::vector<std::string> escalations;
+        if (!anyAtomics)
+            escalations.push_back(
+                "no atomic fields: co-located plain fields written by "
+                "distinct functions. The coherence cost is identical — what "
+                "is unproven is that the writers run concurrently");
         if (deliberateLayout) {
             sev = Severity::Medium;
             escalations.push_back(
@@ -88,6 +155,21 @@ public:
                 "or trailing line padding): co-located atomics are often "
                 "single-writer by design — verify write ownership before "
                 "acting");
+        }
+
+        // A mutex co-located with the data it guards is a deliberate and
+        // benign layout: writes under that lock are already serialized, so
+        // co-location adds no coherence cost beyond the lock's own line.
+        // Per-field lock association is not available here, so this can be
+        // proven neither way — mark it rather than either suppressing the
+        // finding or asserting a hazard.
+        if (!anyAtomics && ev.hasSyncPrims) {
+            sev = Severity::Medium;
+            escalations.push_back(
+                "record carries its own sync primitive: if these fields are "
+                "written under that lock the co-location is benign, since "
+                "the writes are already serialized. Lock coverage per field "
+                "is not established here");
         }
 
         constexpr size_t kMaxDetailedPairs = 5;
@@ -101,14 +183,23 @@ public:
                 break;
             }
             const auto &pair = atomicPairs[i];
-            escalations.push_back(
-                "atomic fields '" + pair.a->name + "' and '" + pair.b->name +
-                "' share line " + std::to_string(pair.lineIndex) +
-                (exactLayout
-                     ? ": guaranteed cross-core invalidation on write"
-                     : ": cross-core invalidation on write (co-location "
-                       "depends on allocation alignment; struct align < "
-                       "line size)"));
+            const std::string tail =
+                exactLayout
+                    ? ": guaranteed cross-core invalidation on write"
+                    : ": cross-core invalidation on write (co-location "
+                      "depends on allocation alignment; struct align < "
+                      "line size)";
+            if (pair.intraArray)
+                escalations.push_back(
+                    "atomic array '" + pair.a->name + "' packs " +
+                    std::to_string(map.cacheLineBytes() /
+                                   pair.a->accessGranuleBytes) +
+                    " elements per line; writes to different indices share "
+                    "line " + std::to_string(pair.lineIndex) + tail);
+            else
+                escalations.push_back(
+                    "atomic fields '" + pair.a->name + "' and '" + pair.b->name +
+                    "' share line " + std::to_string(pair.lineIndex) + tail);
         }
 
         for (size_t i = 0; i < fsCandidateLines.size(); ++i) {
@@ -127,36 +218,20 @@ public:
                 " non-atomic mutable field(s) — mixed write surface");
         }
 
+        // The strongest TU wins cross-TU dedup through confidence.
+        // Severity is impact if real; confidence is how likely it is real.
+        // A non-atomic record has the same mechanism and the same cost, and
+        // weaker proof of concurrency — so it moves confidence, not severity.
         double confidence = 0.55;
         if (hasAtomicPairs)
             confidence = exactLayout ? 0.88 : 0.80;
         else if (map.totalAtomicFields() > 0)
             confidence = 0.68;
+        else
+            confidence = 0.60;
 
-        // The strongest TU wins cross-TU dedup through confidence.
-        enum { kNoWrites, kPartial, kMultiWriter };
-        int wev = kNoWrites;
-        const auto &evPairs = hasAtomicPairs ? atomicPairs : mutablePairs;
-        for (const auto &p : evPairs) {
-            auto ea = escape.fieldWriteEvidence(p.a->decl);
-            auto eb = escape.fieldWriteEvidence(p.b->decl);
-            int level = kNoWrites;
-            if (ea.writeSites && eb.writeSites &&
-                escape.pairHasDistinctWriters(p.a->decl, p.b->decl)) {
-                level = kMultiWriter;
-                if (wev < kMultiWriter)
-                    escalations.push_back(
-                        "write evidence: '" + p.a->name + "' (" +
-                        std::to_string(ea.writeSites) + " site(s)/" +
-                        std::to_string(ea.writerFunctions) + " fn(s)) and '" +
-                        p.b->name + "' (" + std::to_string(eb.writeSites) +
-                        " site(s)/" + std::to_string(eb.writerFunctions) +
-                        " fn(s)) written from distinct functions in this TU");
-            } else if (ea.writeSites || eb.writeSites) {
-                level = kPartial;
-            }
-            wev = std::max(wev, level);
-        }
+        escalations.insert(escalations.end(), writeEvidence.begin(),
+                           writeEvidence.end());
         if (wev == kMultiWriter) {
             confidence = std::min(confidence + 0.06, 0.95);
         } else if (wev == kNoWrites) {
