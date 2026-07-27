@@ -69,6 +69,15 @@ disabled_rules: []
 # sibling-starvation clause and one severity notch.
 # smt_enabled: true
 
+# FL003 cost model: L1 data cache size the padding footprint is weighed
+# against, and the write-frequency roots that decide whether padding is
+# worth its footprint. Hot comes from the hot-path oracle; these name the
+# slower tiers and outrank it, since a file glob cannot separate a
+# per-connection routine from the per-command path in the same file.
+# l1d_size_bytes: 32768
+# dispatch_path_patterns: ["createClient", "*AcceptHandler"]
+# tick_path_patterns: ["*Cron", "beforeSleep"]
+
 # Opaque atomic wrapper type names.
 # Struct/typedef names treated as atomic even without _Atomic or std::atomic.
 # Required for codebases that wrap atomics in plain structs; without this,

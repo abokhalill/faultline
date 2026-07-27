@@ -215,6 +215,31 @@ compound assignment, and increment/decrement. Pointer aliases
 | thread-identity subscript, `thread_local`-derived or atomic elements or ≥2 writer functions | High |
 | thread-identity subscript from the identifier set alone | Medium |
 
+**Fix selection is an ROI decision, not a reflex.** Padding buys
+isolation with L1D footprint, so the recommended shape is chosen
+against both write frequency and cost:
+
+| condition | recommended fix |
+|---|---|
+| a line-aligned per-thread structure already exists in-tree | **relocate** — identical isolation, zero added footprint |
+| hot-path writes, padding costs ≤10% of L1D | full padding |
+| hot-path writes, padding costs >10% of L1D | head padding (isolate the hottest slot) |
+| non-hot writes, padding costs >10% of L1D | **none** — reported Informational, the coherence traffic is real but the fix costs more than it saves |
+
+Write frequency comes from the hot-path oracle, refined by
+`dispatch_path_patterns` and `tick_path_patterns` (fnmatch). Named
+tiers outrank oracle hotness: the oracle reaches most functions via a
+file glob or transitive propagation, which cannot separate a
+per-connection setup routine from the per-command path in the same
+file. **Unknown frequency does not demote** — unestablished is not
+proven-low, and such findings keep their evidence severity while
+carrying an escalation naming what would refine them.
+
+Severity answers whether the finding is worth acting on; confidence
+answers whether the hazard is real. They move independently: a
+mechanism at 0.88 confidence whose only available fix would evict a
+quarter of L1D is Informational.
+
 **Mitigation respect:** an element stride that is a multiple of the line
 size is full isolation and never fires. A line-aligned base **plus a
 padded index origin** isolates slot 0 only — slots 1.. still pack — and
