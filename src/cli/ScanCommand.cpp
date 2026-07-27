@@ -501,6 +501,23 @@ int runScanCommand(int argc, const char **argv) {
                 llvm::errs() << "  ... and "
                              << (result.totalTUsFailed - cap) << " more\n";
         }
+
+        // Coverage. Hot-path rules are silent without a hotness signal, and
+        // that silence is indistinguishable from a clean result unless it is
+        // stated.
+        const auto &cov = result.coverage;
+        llvm::errs() << "lshaz: coverage " << cov.functionsSeen
+                     << " function(s), " << cov.recordsSeen << " record(s), "
+                     << cov.functionsHot << " hot\n";
+        if (cov.functionsSeen > 0 && cov.functionsHot == 0)
+            llvm::errs()
+                << "lshaz: WARNING no function was marked hot, so every "
+                   "hot-path rule was inert for this\n"
+                   "  scan. Structural rules still ran. Supply one of: "
+                   "--perf-profile <file>,\n"
+                   "  hot_file_patterns/hot_function_patterns in "
+                   "lshaz.config.yaml, or\n"
+                   "  __attribute__((hot)) on the entry points.\n";
     }
 
     if (result.suppressedByCalibration > 0)
