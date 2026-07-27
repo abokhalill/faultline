@@ -39,7 +39,7 @@ private:
     static ExperimentFile generateBuildScript(const LatencyHypothesis &hyp);
     static ExperimentFile generateRunAll(const LatencyHypothesis &hyp,
                                          const MeasurementPlan &plan);
-    static ExperimentFile generateMakefile();
+    static ExperimentFile generateMakefile(const LatencyHypothesis &hyp);
     static ExperimentFile generateReadme(const LatencyHypothesis &hyp);
     static ExperimentFile generateHypothesisJson(const LatencyHypothesis &hyp);
     static ExperimentFile generateAnalyze(const LatencyHypothesis &hyp);

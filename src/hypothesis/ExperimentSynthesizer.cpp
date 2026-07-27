@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/hypothesis/ExperimentSynthesizer.h"
 
+#include "lshaz/hypothesis/PMUCalibration.h"
+
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/raw_ostream.h>
@@ -176,11 +178,19 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "            workers_.emplace_back([this, slot, core] {\n"
        << "                cpu_set_t set; CPU_ZERO(&set); CPU_SET(core, &set);\n"
        << "                sched_setaffinity(0, sizeof(set), &set);\n"
+       << "                ready_.fetch_add(1, std::memory_order_release);\n"
        << "                while (!stop_.load(std::memory_order_acquire))\n"
        << "                    __atomic_add_fetch(slot, 1, __ATOMIC_RELAXED);\n"
        << "            });\n"
        << "        }\n"
+       /* the constructor must not return until every peer is pinned and
+          writing. thread spawn costs more than a short measured loop, so
+          returning early lets the loop finish against a quiet line and
+          report no contention — a false negative produced by a race, which
+          is indistinguishable from a real negative in the output. */
+       << "        while (ready_.load(std::memory_order_acquire) < (int)cores.size()) ;\n"
        << "    }\n"
+       << "    int peers() const { return (int)workers_.size(); }\n"
        << "    ~lshaz_striper() {\n"
        << "        stop_.store(true, std::memory_order_release);\n"
        << "        for (auto& w : workers_) if (w.joinable()) w.join();\n"
@@ -223,13 +233,19 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "                \"is unreproducible here.\\n\", node, measured);\n"
        << "            std::abort();\n"
        << "        }\n"
-       << "        if ((int)out.size() < want - 1)\n"
+       /* the shortfall is a property of the host, so it is the same on every
+          construction; repeating it once per arm buries the sweep table. */
+       << "        static bool warned = false;\n"
+       << "        if ((int)out.size() < want - 1 && !warned) {\n"
+       << "            warned = true;\n"
        << "            std::fprintf(stderr, \"[lshaz] WARN: %d same-node PHYSICAL peer core(s) \"\n"
        << "                \"available, %d requested — contention understated.\\n\",\n"
        << "                (int)out.size(), want - 1);\n"
+       << "        }\n"
        << "        return out;\n"
        << "    }\n"
        << "    std::atomic<bool> stop_{false};\n"
+       << "    std::atomic<int> ready_{0};\n"
        << "    std::vector<std::thread> workers_;\n"
        << "};\n";
 
@@ -410,11 +426,14 @@ ExperimentFile ExperimentSynthesizer::generateRunAll(
     return {"scripts/run_all.sh", os.str()};
 }
 
-ExperimentFile ExperimentSynthesizer::generateMakefile() {
+ExperimentFile ExperimentSynthesizer::generateMakefile(
+    const LatencyHypothesis &hyp) {
+
+    const bool pmu = hyp.hazardClass == HazardClass::StripedArray;
     std::ostringstream os;
     os << "CXX ?= g++\n"
        << "CXXFLAGS = -O2 -march=native -fno-lto -std=c++20 -pthread\n\n"
-       << "all: experiment analyze\n\n"
+       << "all: experiment analyze" << (pmu ? " pmu_sweep" : "") << "\n\n"
        << "build/treatment.o: src/treatment.cpp src/common.h\n"
        << "\t@mkdir -p build\n"
        << "\t$(CXX) $(CXXFLAGS) -c $< -o $@ -Isrc\n\n"
@@ -424,9 +443,13 @@ ExperimentFile ExperimentSynthesizer::generateMakefile() {
        << "experiment: src/harness.cpp build/treatment.o build/control.o\n"
        << "\t$(CXX) $(CXXFLAGS) $^ -o $@ -Isrc\n\n"
        << "analyze: src/analyze.cpp\n"
-       << "\t$(CXX) $(CXXFLAGS) $< -o $@\n\n"
-       << "clean:\n"
-       << "\trm -rf build experiment analyze results\n\n"
+       << "\t$(CXX) $(CXXFLAGS) $< -o $@\n\n";
+    if (pmu)
+        os << "pmu_sweep: src/pmu_sweep.cpp src/common.h src/pmu_calib.h\n"
+           << "\t$(CXX) $(CXXFLAGS) $< -o $@ -Isrc\n\n";
+    os << "clean:\n"
+       << "\trm -rf build experiment analyze" << (pmu ? " pmu_sweep" : "")
+       << " results\n\n"
        << ".PHONY: all clean\n";
 
     return {"Makefile", os.str()};
@@ -920,28 +943,166 @@ static ExperimentFile genControlStripedArray(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
+/* The primary FL003 endpoint. Counts cache-to-cache fills observed by the
+   measured thread instead of its elapsed time: preemption and P-state
+   changes inflate elapsed time, but neither can manufacture a coherence
+   transaction, so this survives hosts where the timing endpoint is bimodal. */
+static ExperimentFile genStripePMUSweep(const LatencyHypothesis &hyp) {
+    unsigned es  = evidenceUnsigned(hyp, "elem_size", 8);
+    unsigned n   = evidenceUnsigned(hyp, "elem_count", 16);
+    unsigned spl = evidenceUnsigned(hyp, "slots_per_line", 64 / (es ? es : 8));
+    std::string sym = evidenceStr(hyp, "symbol", "(unknown)");
+    unsigned threads = spl < n ? spl : n;
+    if (threads < 2) threads = 2;
+
+    std::ostringstream os;
+    os << "// PMU coherence sweep: primary endpoint for FL003.\n"
+       << "// Source array: " << sym << " (" << n << " x " << es << "B)\n"
+       << "#include \"common.h\"\n"
+       << "#include \"pmu_calib.h\"\n\n"
+       << "#include <algorithm>\n\n"
+       << slotStructFor(es, false) << "\n"
+       << "static_assert(sizeof(Slot) == " << es
+       << ", \"slot stride must match the finding\");\n\n"
+       << "static volatile int g_spin = 0;\n"
+       << "static int g_peers = 0;\n\n"
+       << "static int pick_peer(int measured) {\n"
+       << "    std::set<int> sib = lshaz_sibling_set(measured);\n"
+       << "    long ncpu = sysconf(_SC_NPROCESSORS_ONLN);\n"
+       << "    for (int c = 0; c < ncpu; ++c)\n"
+       << "        if (c != measured && sib.find(c) == sib.end()) return c;\n"
+       << "    return -1;\n"
+       << "}\n\n"
+       << "static uint64_t arm(std::size_t stride, uint64_t cfg, uint64_t ops) {\n"
+       << "    std::size_t span = (stride ? stride : sizeof(Slot)) * " << n << ";\n"
+       << "    std::size_t bytes = ((span + 63) / 64) * 64;\n"
+       << "    void *mem = std::aligned_alloc(64, bytes);\n"
+       << "    std::memset(mem, 0, bytes);\n"
+       << "    Slot *slots = static_cast<Slot *>(mem);\n"
+       << "    auto *peers = new lshaz_striper<" << slotTypeFor(es) << ">(mem, "
+       << threads << ", stride);\n"
+       << "    g_peers = peers->peers();\n"
+       << "    for (int w = 0; w < 400000; ++w) g_spin = g_spin + 1;\n"
+       << "    uint64_t v = 0;\n"
+       << "    {\n"
+       << "        lshaz_pmu_scope sc(cfg);\n"
+       << "        for (uint64_t k = 0; k < ops; ++k)\n"
+       << "            __atomic_add_fetch(&slots[0].v, 1, __ATOMIC_RELAXED);\n"
+       << "        if (!sc.stop(&v)) {\n"
+       << "            std::fprintf(stderr, \"[lshaz] FATAL: counter read failed \"\n"
+       << "                \"mid-sweep; partial results are not a measurement.\\n\");\n"
+       << "            std::abort();\n"
+       << "        }\n"
+       << "    }\n"
+       << "    delete peers;\n"
+       << "    std::free(mem);\n"
+       << "    return v;\n"
+       << "}\n\n"
+       << "int main() {\n"
+       << "    const uint64_t LINE = 64;\n"
+       << "    int measured = sched_getcpu();\n"
+       << "    cpu_set_t self; CPU_ZERO(&self); CPU_SET(measured, &self);\n"
+       << "    if (sched_setaffinity(0, sizeof self, &self) != 0) {\n"
+       << "        std::fprintf(stderr, \"[lshaz] FATAL: cannot pin measured thread.\\n\");\n"
+       << "        return 2;\n"
+       << "    }\n"
+       << "    int peer = pick_peer(measured);\n"
+       << "    if (peer < 0) {\n"
+       << "        std::fprintf(stderr, \"[lshaz] FATAL: no physical core distinct \"\n"
+       << "            \"from cpu %d; false sharing is unreproducible here.\\n\", measured);\n"
+       << "        return 2;\n"
+       << "    }\n\n"
+       /* validate the instrument against a hazard whose answer is known by
+          construction, on this machine, immediately before trusting it on
+          the finding. an uncalibrated counter is not evidence. */
+       << "    lshaz_pmu_status st;\n"
+       << "    lshaz_pmu_instrument in = lshaz_pmu_calibrate(LINE, peer, &st);\n"
+       << "    lshaz_pmu_report(in, st, LINE);\n"
+       << "    if (st != LSHAZ_PMU_OK) return 3;\n\n"
+       << "    if (sizeof(Slot) >= LINE) {\n"
+       << "        std::fprintf(stderr, \"[lshaz] INCONCLUSIVE: element stride %zuB \"\n"
+       << "            \"already isolates each slot; there is no packed arm to \"\n"
+       << "            \"measure.\\n\", sizeof(Slot));\n"
+       << "        return 3;\n"
+       << "    }\n\n"
+       << "    const long strides[] = {4, 8, 16, 32, 64, 128, 256};\n"
+       << "    const int NS = 7, REPS = 5;\n"
+       << "    uint64_t med[NS];\n"
+       << "    std::printf(\"stride_bytes  median_coherence_fills\\n\");\n"
+       << "    for (int i = 0; i < NS; ++i) {\n"
+       << "        uint64_t v[REPS];\n"
+       << "        for (int r = 0; r < REPS; ++r)\n"
+       << "            v[r] = arm((std::size_t)strides[i], in.config, 500000);\n"
+       << "        std::sort(v, v + REPS);\n"
+       << "        med[i] = v[REPS / 2];\n"
+       << "        std::printf(\"%-13ld %llu\\n\", strides[i],\n"
+       << "            (unsigned long long)med[i]);\n"
+       << "    }\n\n"
+       << "    std::printf(\"(median of %d reps, %d peer writer(s) on distinct \"\n"
+       << "        \"physical cores)\\n\", REPS, g_peers);\n\n"
+       << "    size_t cliff = lshaz_pmu_cliff_index(med, NS);\n"
+       << "    if (cliff == 0) {\n"
+       << "        std::printf(\"\\nREFUTED: no stride collapses the fill count. The \"\n"
+       << "            \"cost here is not\\ncoherence -- a line-size boundary is the \"\n"
+       << "            \"only thing that changes at 64B.\\n\");\n"
+       << "        return 1;\n"
+       << "    }\n"
+       << "    if ((uint64_t)strides[cliff] != LINE) {\n"
+       << "        std::printf(\"\\nCONFOUNDED: fills collapse at %ldB, not at the \"\n"
+       << "            \"%lluB line.\\n\", strides[cliff], (unsigned long long)LINE);\n"
+       << "        return 4;\n"
+       << "    }\n"
+       /* the finding's own geometry is the packed arm; the ladder exists to
+          show the collapse sits at the line and nowhere else. */
+       << "    int packed = 0;\n"
+       << "    while (packed < NS && (unsigned)strides[packed] < sizeof(Slot)) ++packed;\n"
+       << "    double lb = lshaz_pmu_ratio_lb(med[packed], med[cliff]);\n"
+       << "    std::printf(\"\\nCONFIRMED: %lluB packed slots draw %llu coherence \"\n"
+       << "        \"fills against %llu\\nwhen isolated at %lluB \"\n"
+       << "        \"(ratio lower bound %.0fx). Collapse is at the line size.\\n\",\n"
+       << "        (unsigned long long)sizeof(Slot), (unsigned long long)med[packed],\n"
+       << "        (unsigned long long)med[cliff], (unsigned long long)LINE, lb);\n"
+       << "    return 0;\n"
+       << "}\n";
+    return {"src/pmu_sweep.cpp", os.str()};
+}
+
 static ExperimentFile genStripeSweepScript(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
     os << "#!/bin/bash\n"
-       << "# Stride sweep: the causal control for FL003.\n"
+       << "# FL003 verification. Two endpoints, in order of authority.\n"
        << "#\n"
-       << "# Thread count, instruction stream and memory region are held\n"
-       << "# fixed; only the peers' slot stride moves. Nothing in the machine\n"
-       << "# changes behaviour at exactly the cache-line size except the\n"
-       << "# coherence controller, so a step at 64B is a signature no\n"
-       << "# interconnect, frequency or store-buffer confound can fake —\n"
-       << "# each of those is flat across the sweep.\n"
+       << "# PRIMARY — coherence fills observed by the measured thread.\n"
+       << "# Preemption and P-state changes inflate elapsed time but cannot\n"
+       << "# manufacture a cache-to-cache transfer, so this endpoint holds on\n"
+       << "# hosts where timing is bimodal. The counter is elected by\n"
+       << "# calibration against a known-shared line before it is trusted.\n"
        << "#\n"
-       << "# Expect TWO steps on parts with an adjacent-line prefetcher:\n"
-       << "# a large drop at 64B and a residual at 128B. That shape is\n"
-       << "# confirmatory, not contamination.\n"
+       << "# CORROBORATING — p99.9 latency across the same stride ladder.\n"
+       << "# Held behind a stability gate: under a hypervisor, without\n"
+       << "# isolcpus/nohz_full or a fixed governor, repeats of one stride\n"
+       << "# land bimodally, and one sample per point then draws a step\n"
+       << "# function out of scheduling noise. When the gate fails this arm\n"
+       << "# is skipped and the coherence verdict stands alone.\n"
        << "#\n"
-       << "# Capped at 256B: >=4096B aliases page offsets (store-buffer\n"
-       << "# false dependencies), and at <=256B the whole array stays\n"
-       << "# inside a handful of pages so dTLB pressure is constant.\n"
-       << "# Needs no root and no PMU.\n"
-       << "set -euo pipefail\n\n"
+       << "# Ladder capped at 256B: >=4096B aliases page offsets (store-buffer\n"
+       << "# false dependencies), and at <=256B the array stays inside a\n"
+       << "# handful of pages so dTLB pressure is constant.\n"
+       /* -e would abort on the PMU sweep's REFUTED exit, which is a result
+          and not a failure. */
+       << "set -uo pipefail\n\n"
+       << "echo '=== primary endpoint: coherence fills ==='\n"
+       << "PMU_STATUS=0\n"
+       << "./pmu_sweep || PMU_STATUS=$?\n"
+       << "if [ \"$PMU_STATUS\" -eq 3 ]; then\n"
+       << "  echo\n"
+       << "  echo 'Coherence endpoint unavailable on this host. The latency arm'\n"
+       << "  echo 'below cannot substitute for it — it is the proxy the counter'\n"
+       << "  echo 'replaced. Treat anything it prints as uncorroborated.'\n"
+       << "fi\n\n"
+       << "echo\n"
+       << "echo '=== corroborating endpoint: latency ==='\n"
        << "STRIDES=\"0 4 8 16 32 64 128 256\"\n"
        << "rm -rf results/sweep; mkdir -p results/sweep\n\n"
        << "# isolated reference captured once, up front.\n"
@@ -970,19 +1131,21 @@ static ExperimentFile genStripeSweepScript(const LatencyHypothesis &hyp) {
        << "if [ \"$LO\" -le 0 ] || [ $(( HI * 100 / LO )) -gt 150 ]; then\n"
        << "  cat >&2 <<'GATE'\n"
        << "\n"
-       << "FATAL: environment is not measurement-grade.\n"
-       << "Repeats of one configuration differ by more than 50%, so any\n"
-       << "step this sweep appears to show would be scheduling noise, not\n"
-       << "cache geometry. This is a property of the machine, not the\n"
-       << "finding — the finding is neither confirmed nor refuted here.\n"
+       << "Latency arm skipped: this host is not measurement-grade.\n"
+       << "Repeats of one configuration differ by more than 50%, so any step\n"
+       << "this arm appears to show would be scheduling noise rather than\n"
+       << "cache geometry. That is a property of the machine, not of the\n"
+       << "finding. The coherence endpoint above is unaffected — it counts\n"
+       << "transactions, which preemption cannot invent — and carries the\n"
+       << "verdict on its own.\n"
        << "\n"
-       << "Required before the numbers mean anything:\n"
+       << "To recover the latency arm:\n"
        << "  - bare metal, not a VM or WSL\n"
        << "  - isolcpus= / nohz_full= on the measured and peer cores\n"
        << "  - cpupower frequency-set -g performance, turbo fixed\n"
        << "  - no competing load\n"
        << "GATE\n"
-       << "  exit 3\n"
+       << "  exit $PMU_STATUS\n"
        << "fi\n"
        << "echo '  stable enough to sweep.'\n\n"
        << "REPS=${REPS:-5}\n\n"
@@ -1027,7 +1190,10 @@ static ExperimentFile genStripeSweepScript(const LatencyHypothesis &hyp) {
        << "  noise, CPI is UNDEFINED -- the machine is not showing a\n"
        << "  coherence effect at all, and a ratio against ~0 is a\n"
        << "  fabricated number, not a large one.\n"
-       << "EOF\n";
+       << "EOF\n"
+       /* the coherence endpoint decides; the latency arm corroborates or is
+          absent, and neither state may overwrite the primary verdict. */
+       << "exit $PMU_STATUS\n";
     return {"scripts/run_stride_sweep.sh", os.str()};
 }
 
@@ -1528,13 +1694,16 @@ ExperimentBundle ExperimentSynthesizer::synthesize(
     bundle.files.push_back(generateTreatment(hypothesis));
     bundle.files.push_back(generateControl(hypothesis));
     bundle.files.push_back(generateBuildScript(hypothesis));
-    bundle.files.push_back(generateMakefile());
+    bundle.files.push_back(generateMakefile(hypothesis));
     bundle.files.push_back(generateReadme(hypothesis));
     bundle.files.push_back(generateHypothesisJson(hypothesis));
     bundle.files.push_back(generateAnalyze(hypothesis));
     bundle.files.push_back(generateRunAll(hypothesis, plan));
-    if (hypothesis.hazardClass == HazardClass::StripedArray)
+    if (hypothesis.hazardClass == HazardClass::StripedArray) {
+        bundle.files.push_back({"src/pmu_calib.h", pmuCalibrationTemplate()});
+        bundle.files.push_back(genStripePMUSweep(hypothesis));
         bundle.files.push_back(genStripeSweepScript(hypothesis));
+    }
 
     for (const auto &script : plan.scripts) {
         bundle.files.push_back({"scripts/" + script.name, script.content});
