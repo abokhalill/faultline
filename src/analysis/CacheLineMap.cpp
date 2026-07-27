@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/CacheLineMap.h"
+
+#include "lshaz/analysis/TypeUtil.h"
 #include "lshaz/analysis/LayoutSafety.h"
 
 #include <clang/AST/Decl.h>
@@ -47,6 +49,7 @@ CacheLineMap::CacheLineMap(const clang::RecordDecl *RD,
 }
 
 bool CacheLineMap::isAtomicType(clang::QualType QT) const {
+    QT = peelArrays(QT);
     if (QT.getCanonicalType().isVolatileQualified()) {
         clang::QualType walk = QT;
         while (const auto *TDT = walk->getAs<clang::TypedefType>()) {
@@ -277,6 +280,8 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
         entry.straddles       = straddles;
         entry.accessGranuleBytes = granule;
         entry.splitsAccess    = splits;
+        entry.elementCount    = (granule > 0 && fieldSize >= granule)
+                                    ? fieldSize / granule : 1;
         entry.isAtomic        = atomic;
         entry.isMutable       = mutable_;
 
@@ -328,6 +333,20 @@ namespace {
 // a pair whose fields co-occupy several buckets (straddlers, or the
 // union of best/worst shift ranges) must count once, not per bucket:
 // the duplicate inflated pair-count evidence and escalation lines.
+// Two elements of one array on one line. Emitted as a self-pair so every
+// consumer of the pair lists inherits array coverage instead of each rule
+// growing a private workaround.
+void addIntraArrayPairs(const std::vector<CacheLineBucket> &buckets,
+                        uint64_t lineBytes, bool atomicOnly,
+                        std::vector<CacheLineMap::SharedLinePair> &out) {
+    for (const auto &bucket : buckets)
+        for (const auto *f : bucket.fields) {
+            if (atomicOnly ? !f->isAtomic : !f->isMutable) continue;
+            if (!f->elementsShareLine(lineBytes)) continue;
+            out.push_back({f, f, bucket.lineIndex, /*intraArray=*/true});
+        }
+}
+
 void dedupePairs(std::vector<CacheLineMap::SharedLinePair> &pairs) {
     std::sort(pairs.begin(), pairs.end(),
               [](const CacheLineMap::SharedLinePair &x,
@@ -375,10 +394,11 @@ CacheLineMap::mutablePairsOnSameLine() const {
                 if (!canCoReside(bucket.fields[i], bucket.fields[j]))
                     continue;
                 result.push_back({bucket.fields[i], bucket.fields[j],
-                                  bucket.lineIndex});
+                                  bucket.lineIndex, /*intraArray=*/false});
             }
         }
     }
+    addIntraArrayPairs(buckets_, cacheLineBytes_, /*atomicOnly=*/false, result);
     dedupePairs(result);
     return result;
 }
@@ -396,10 +416,11 @@ CacheLineMap::atomicPairsOnSameLine() const {
                 if (!canCoReside(bucket.fields[i], bucket.fields[j]))
                     continue;
                 result.push_back({bucket.fields[i], bucket.fields[j],
-                                  bucket.lineIndex});
+                                  bucket.lineIndex, /*intraArray=*/false});
             }
         }
     }
+    addIntraArrayPairs(buckets_, cacheLineBytes_, /*atomicOnly=*/true, result);
     dedupePairs(result);
     return result;
 }

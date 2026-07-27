@@ -28,8 +28,20 @@ struct FieldLineEntry {
     // split access requires one granule-wide access to cross; for a
     // naturally aligned power of 2 granule that is never.
     bool splitsAccess    = false;
+    // >1 for arrays. An array is a single FieldDecl, so any model that pairs
+    // only distinct decls cannot express two of its elements sharing a line;
+    // the dominant false-sharing idiom in threaded servers.
+    uint64_t elementCount = 1;
     bool isAtomic        = false;
     bool isMutable       = false;
+
+    // At least two elements land on one line, so writes to different
+    // indices contend. Contiguous elements narrower than a line always
+    // produce such a line.
+    bool elementsShareLine(uint64_t lineBytes) const {
+        return elementCount > 1 && accessGranuleBytes > 0 &&
+               accessGranuleBytes < lineBytes;
+    }
 };
 
 struct CacheLineBucket {
@@ -69,6 +81,10 @@ public:
         const FieldLineEntry *a;
         const FieldLineEntry *b;
         uint64_t lineIndex;
+        // a == b: two ELEMENTS of one array share the line. Consumers must
+        // gate this on writer evidence for distinct indices — co-residency
+        // alone does not establish that two writers target different slots.
+        bool intraArray = false;
     };
     std::vector<SharedLinePair> mutablePairsOnSameLine() const;
 
