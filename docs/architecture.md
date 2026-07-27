@@ -72,11 +72,21 @@ Key semantics:
 **EscapeAnalysis** (`src/analysis/EscapeAnalysis.cpp`) — decides whether a
 type may be accessed from multiple threads and quantifies expected contention.
 
-- *Escape signals* (seven): atomic members, sync-primitive members
+- *Escape signals* (eight): atomic members, sync-primitive members
   (`std::mutex` family + POSIX types), `shared_ptr`/`weak_ptr` members,
   volatile members, publication to `std::thread`/`std::jthread`/`std::async`,
-  storage in a non-`thread_local` mutable global, and global-scope
-  `shared_ptr` pointees. Conservative: uncertainty means escape.
+  storage in a non-`thread_local` mutable global, global-scope `shared_ptr`
+  pointees, and **direct thread writers** — a record written from ≥2 functions
+  one of which is spawned as a thread. Publication requires an address to
+  cross a thread boundary; a file-scope object written directly from two
+  thread bodies never does, and that is the striped-counter shape.
+  Conservative: uncertainty means escape.
+
+  All member-type predicates peel array extents first. A field declared
+  `_Atomic uint64_t c[N]` or `std::atomic<T> slots[N]` has field type
+  `ArrayType(element)`, so without peeling the atomic, sync and volatile
+  checks all see an array and nothing else — arrays of atomics, the dominant
+  striped-counter shape, were invisible to every rule gated on them.
 - *Write-site collection* (one traversal over all TU function bodies):
   - **Global write counts** per `VarDecl`, across all write forms — plain
     assignment, `++`/`--`, member writes through the global, C11/GNU atomic
@@ -86,7 +96,11 @@ type may be accessed from multiple threads and quantifies expected contention.
     writer functions. Constructor member-init lists are excluded —
     initialization is not contention. Feeds FL002's pair grading
     (`pairHasDistinctWriters`: the union of two fields' writers has ≥2
-    members).
+    members; for an intra-array self-pair this reduces to "this array is
+    written from ≥2 functions", which is the correct question).
+    Array subscripts are peeled: a write to `arr[i]` is a write to the field
+    `arr`, and without that every element write of every striped counter
+    resolves to nothing and the array reads as never written.
 - *Lifecycle.* Instantiated fresh per TU inside `HandleTranslationUnit` and
   passed by reference into every rule. After rule execution,
   `buildEscapeSummary()` snapshots per-type signals keyed by canonical

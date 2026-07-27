@@ -126,13 +126,34 @@ serialized by geometry.
 
 **Detection:** Requires all of:
 1. Thread-escape evidence for the type (atomics, sync primitives, publication
-   to threads/globals — see [architecture.md](architecture.md)),
+   to threads/globals, or a record written from ≥2 functions one of which is
+   spawned as a thread — see [architecture.md](architecture.md)),
 2. At least one mutable co-resident pair (per the pair co-residency contract),
-3. At least one atomic field in the record.
+3. Concurrency evidence: either an atomic field, or proven distinct writer
+   functions for the pair.
 
-Refcount-only records (a single atomic whose name matches a refcount pattern,
-sharing lines only with immutable data) are suppressed — COW/`shared_ptr`
-control blocks do not false-share.
+**Atomicity is not the gate.** Striped and role-partitioned fields guarantee
+single-writer-per-slot, so the dominant false-sharing idiom is deliberately
+non-atomic — no data race, pure coherence traffic. An atomicity precondition
+scored zero on exactly that shape. A non-atomic record keeps the severity, since
+the mechanism and cost are identical, and takes a lower confidence, since
+concurrent execution of the writers is not proven.
+
+A pair may be **intra-array** — two elements of one array on one line. An array
+is a single `FieldDecl`, so pairing distinct decls alone can never express it.
+Because co-residency is not contention (padding arrays share lines by
+construction and are never written), an intra-array pair additionally requires
+distinct writers reaching the array.
+
+Two records are reported but demoted, never suppressed:
+
+- **Refcount-only** — a single atomic whose name matches a refcount pattern,
+  sharing lines only with immutable data. COW/`shared_ptr` control blocks do
+  not false-share.
+- **Self-guarded** — a record carrying its own sync primitive with no atomics.
+  A mutex co-located with the data it guards is a deliberate, benign layout:
+  writes under that lock are already serialized. Per-field lock coverage is not
+  provable here, so the finding is marked rather than dropped.
 
 **Severity and confidence ladder:**
 
@@ -486,10 +507,26 @@ consumers own `tail`. On one line, every enqueue invalidates every consumer's
 cached `tail` and vice versa — the queue serializes on coherence instead of
 running concurrently.
 
-**Detection:** Atomic fields whose names match head/tail/producer/consumer
-index conventions, co-resident on one line (pair co-residency contract).
-Line-aligned records rate `Proven` (0.82); sub-line alignment rates `Likely`
-(0.76).
+**Detection, atomic path:** Atomic fields whose names match
+head/tail/producer/consumer index conventions, co-resident on one line (pair
+co-residency contract). Line-aligned records rate `Proven` (0.82); sub-line
+alignment rates `Likely` (0.76).
+
+**Detection, plain path:** A ring whose head and tail are plain indices is the
+canonical contended queue — single-writer-per-index needs no atomicity — so
+atomics are not required. This path is gated far harder, because scanning all
+mutable fields for the name list matches `bytes_read`/`bytes_written` on every
+stats struct in a server. It requires:
+
+1. a thread-escape verdict (the atomic path takes the atomics as their own
+   evidence),
+2. one head-like *and* one tail-like index, and
+3. those two to be the co-located pair, not merely present in the record.
+
+A queue-ish type name alone does not qualify without atomics — `buffer` and
+`cache` name plenty of non-queues. Confidence drops by 0.14, and the finding
+reports only the head/tail pair so queue-index language is never attached to
+unrelated arrays sharing the line.
 
 **Not demoted by deliberate layout** — an aligned queue struct whose indices
 still share a line is the bug this rule exists to catch.
