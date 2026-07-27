@@ -50,10 +50,60 @@ Generates one self-contained directory per hypothesis:
 | `scripts/run_perf_stat.sh` / `run_perf_c2c.sh` | Counter collection partitioned to PMU limits; `perf c2c` for sharing/contention classes |
 | `hypothesis.json` | Machine-readable hypothesis, including the structural features required by `feedback` |
 | `README.md` | Human-readable design with the statistical parameters |
+| `src/pmu_calib.h`, `pmu_sweep` | FL003 only — coherence-counter election and the stride sweep that carries the verdict (below) |
 
 13 hazard classes have dedicated treatment/control kernel generators.
 CentralizedDispatch, HazardAmplification, and SynthesizedInteraction emit
 editable stubs — compound hazards need context a generator cannot invent.
+
+### The coherence endpoint (FL003)
+
+Elapsed time is a downstream, confounded proxy for coherence traffic. A vCPU
+preemption or a P-state change inflates it without touching the mechanism, so
+on a shared or virtualized host the timing endpoint goes bimodal and a single
+sample per point can draw a step function out of scheduling noise. A
+cache-to-cache fill count cannot be manufactured that way.
+
+StripedArray bundles therefore run two endpoints in a fixed order of
+authority. `pmu_sweep` counts coherence fills observed by the measured thread
+and produces the verdict; the p99.9 latency arm corroborates when its
+stability gate passes and is skipped, with the reason printed, when it does
+not. A skipped latency arm never downgrades the coherence verdict.
+
+Because a counter is only evidence once it has been shown to measure the
+mechanism, `pmu_sweep` calibrates before it measures:
+
+1. **Candidates** are enumerated as `(event × umask)` pairs, not event names.
+   On Zen the discrimination lives in a single umask bit, and an all-sources
+   OR folds local-L2 and DRAM fills into the same counter — roughly 10× worse
+   signal-to-background, with the collapse smeared away. `LSHAZ_PMU_CANDIDATES`
+   appends raw configs for silicon the built-in table predates; they are
+   shape-tested like any other.
+2. **Stage 1** is a two-point ratio against a known-shared line — a necessary
+   condition, cheap, and not sufficient.
+3. **Stage 2** requires the count to collapse at exactly the configured line
+   size, sampled as the median of repeats. The two arms differ in prefetch
+   behaviour, store-buffer occupancy and page locality as well as coherence,
+   so counters sensitive to any of those pass stage 1. Requiring the collapse
+   at the line is what lets calibration *reject* a discriminating
+   non-coherence event; a test that can only confirm is not a test.
+4. **Ranking** uses a Poisson lower bound on the count ratio. A zero control
+   arm widens the interval rather than being clamped to 1 — clamping turns
+   "below the measurement floor" into an unbounded score computed from a data
+   point that does not exist, which ranks rare noise-driven events above the
+   real one.
+
+A counter that discriminates but collapses at the wrong stride is reported
+rather than silently dropped: either it is not measuring coherence, or the
+configured line size is wrong for the host. This is the only check in the
+tool that can catch a mis-set target line size, which otherwise corrupts
+FL001/FL002/FL003 verdicts uniformly and invisibly.
+
+Every failure path withholds the verdict and names its remediation — no PMU
+access, no known encoding for the vendor, no candidate reproducing the
+mechanism, or a multiplexed counter (refused, since a scaled estimate is
+indistinguishable from a count in the value alone). None of them fall back to
+the timing endpoint, which is the proxy the counter replaced.
 
 ### Perf access
 
