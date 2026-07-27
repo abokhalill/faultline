@@ -3,7 +3,10 @@
 // Tests: matchesGlob, filterSources, CompileDBResolver, RepoProvider.
 // No subprocess invocations. Isolated, deterministic.
 
+#include "pmu_calib.h"
+
 #include "lshaz/analysis/EscapeSummary.h"
+#include "lshaz/hypothesis/PMUCalibration.h"
 #include "lshaz/analysis/ThreadRoleSummary.h"
 #include "lshaz/core/Diagnostic.h"
 #include "lshaz/pipeline/CompileDBResolver.h"
@@ -580,6 +583,60 @@ void testThreadRoleCycle() {
     check(v.roleOf("w") == ROLE_WORKER, "self-recursion converges");
 }
 
+// --- PMU instrument election ---------------------------------------------
+//
+// Curves are recorded from a Zen4 host, strides {4,8,16,32,64,128,256}B, so
+// index 4 is the 64B line. Exercising the predicate against recorded data
+// keeps the gate testable on hosts with no PMU.
+
+void testPMUCliffAtLineSize() {
+    // PMCx043 umask 0x02 (local-CCX cache fill) — a real coherence counter.
+    const uint64_t curve[] = {43334, 43659, 48248, 65025, 1, 1, 1};
+    check(lshaz_pmu_cliff_index(curve, 7) == 4, "coherence curve collapses at 64B");
+}
+
+void testPMUCliffRejectsWrongMechanism() {
+    // PMCx000 umask 0x10 — separates the two arms (nonzero shared, zero
+    // isolated) and so passes a two-point ratio test, but collapses at 16B.
+    // Whatever it counts is not cache-line coherence.
+    const uint64_t curve[] = {736, 3196, 0, 0, 0, 0, 0};
+    check(lshaz_pmu_cliff_index(curve, 7) == 2, "non-coherence curve collapses at 16B");
+}
+
+void testPMUCliffNoTransition() {
+    const uint64_t flat[] = {40000, 41000, 39500, 40200, 40100, 39900, 40050};
+    check(lshaz_pmu_cliff_index(flat, 7) == 0, "flat curve has no cliff");
+}
+
+void testPMUCliffRejectsLowCounts() {
+    // Perfect separation on a handful of events is not evidence.
+    const uint64_t sparse[] = {50, 60, 0, 0, 0, 0, 0};
+    check(lshaz_pmu_cliff_index(sparse, 7) == 0, "low counts fail the power gate");
+}
+
+void testPMUCliffIgnoresTransientDip() {
+    const uint64_t dip[] = {50000, 1, 50000, 1, 1, 1, 1};
+    check(lshaz_pmu_cliff_index(dip, 7) == 3, "only a durable collapse is a cliff");
+}
+
+void testPMURatioLowerBoundPenalisesSparseCounts() {
+    // The defect this replaces: clamping a zero control arm to 1 scores a
+    // 60-event candidate above a 195070-event one.
+    const double real = lshaz_pmu_ratio_lb(195070, 3);
+    const double sparse = lshaz_pmu_ratio_lb(60, 0);
+    check(real > sparse, "dense evidence outranks a sparse perfect separation");
+    check(lshaz_pmu_ratio_lb(0, 0) == 0.0, "no evidence scores zero, not infinity");
+    check(lshaz_pmu_ratio_lb(200, 20) < lshaz_pmu_ratio_lb(2000, 20),
+          "lower bound rises with treatment counts");
+}
+
+void testPMUTemplateEmbedded() {
+    const char *tpl = lshaz::pmuCalibrationTemplate();
+    check(tpl != nullptr && std::string(tpl).find("lshaz_pmu_calibrate") !=
+              std::string::npos,
+          "embedded template carries the election entry point");
+}
+
 } // anonymous namespace
 
 int main() {
@@ -624,6 +681,15 @@ int main() {
     testThreadRolePatternRoots();
     testThreadRoleNoWorkers();
     testThreadRoleCycle();
+
+    // PMU instrument election
+    testPMUCliffAtLineSize();
+    testPMUCliffRejectsWrongMechanism();
+    testPMUCliffNoTransition();
+    testPMUCliffRejectsLowCounts();
+    testPMUCliffIgnoresTransientDip();
+    testPMURatioLowerBoundPenalisesSparseCounts();
+    testPMUTemplateEmbedded();
 
     std::cerr << "\n" << passed << " passed, " << failures << " failed\n";
     if (failures > 0) {
