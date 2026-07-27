@@ -31,6 +31,27 @@ message(STATUS "LLVM libs: ${LSHAZ_LLVM_LIBS}")
 # --- Project includes ---
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
+# --- Embedded harness templates ---
+# Single-sourced: the template is a real compilable header, unit-tested by
+# pipeline_unit_test and embedded verbatim here, so the code under test and the
+# code emitted into a bundle are the same text.
+find_package(Threads REQUIRED)
+set(LSHAZ_PMU_CALIB_TEMPLATE ${CMAKE_SOURCE_DIR}/src/hypothesis/templates/pmu_calib.h)
+file(READ ${LSHAZ_PMU_CALIB_TEMPLATE} LSHAZ_PMU_CALIB_SRC)
+# The template is wrapped in a raw string literal; a closing delimiter inside
+# it would silently truncate the emitted harness into something that still
+# compiles. Refuse to configure instead.
+string(FIND "${LSHAZ_PMU_CALIB_SRC}" ")LSHAZ_TPL\"" LSHAZ_TPL_ESCAPE)
+if(NOT LSHAZ_TPL_ESCAPE EQUAL -1)
+    message(FATAL_ERROR
+        "${LSHAZ_PMU_CALIB_TEMPLATE} contains the raw-string terminator "
+        "at offset ${LSHAZ_TPL_ESCAPE}; embedding it would truncate the harness.")
+endif()
+configure_file(${CMAKE_SOURCE_DIR}/src/hypothesis/PMUCalibration.cpp.in
+               ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp @ONLY)
+set_property(DIRECTORY APPEND PROPERTY
+             CMAKE_CONFIGURE_DEPENDS ${LSHAZ_PMU_CALIB_TEMPLATE})
+
 # --- Source files ---
 set(LSHAZ_SOURCES
     src/main.cpp
@@ -87,6 +108,7 @@ set(LSHAZ_SOURCES
     src/hypothesis/CalibrationFeedback.cpp
     src/hypothesis/PMUTraceFeedback.cpp
     src/hypothesis/InteractionModel.cpp
+    ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp
     src/pipeline/ScanPipeline.cpp
     src/pipeline/AbsolutePathCompilationDatabase.cpp
     src/pipeline/CompileDBResolver.cpp
@@ -147,8 +169,10 @@ add_executable(pipeline_unit_test
     src/pipeline/RepoProvider.cpp
     src/analysis/ThreadRoleSummary.cpp
     src/analysis/StripedArraySummary.cpp
+    ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp
 )
-target_link_libraries(pipeline_unit_test PRIVATE ${LSHAZ_LLVM_LIBS})
+target_link_libraries(pipeline_unit_test PRIVATE ${LSHAZ_LLVM_LIBS} Threads::Threads)
+target_include_directories(pipeline_unit_test PRIVATE ${CMAKE_SOURCE_DIR}/src/hypothesis/templates)
 
 # --- Analysis ground truth test ---
 add_executable(analysis_ground_truth_test
