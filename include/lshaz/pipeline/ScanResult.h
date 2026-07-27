@@ -6,6 +6,7 @@
 #include "lshaz/analysis/EscapeSummary.h"
 #include "lshaz/analysis/ThreadRoleSummary.h"
 #include "lshaz/analysis/StripedArraySummary.h"
+#include "lshaz/analysis/ScanCoverage.h"
 
 #include <cstdint>
 #include <string>
@@ -37,6 +38,10 @@ struct ScanResult {
 
     // Per-thread striped arrays, merged across TUs.
     StripedArraySummary stripedArrays;
+
+    // What the scan examined, so a partially-analyzed codebase is
+    // distinguishable from a clean one.
+    ScanCoverage coverage;
 
     // Counts for summary reporting.
     unsigned suppressedByCalibration = 0;

@@ -287,7 +287,8 @@ std::string serializeShardResult(int exitCode,
                                   const std::vector<Diagnostic> &diagnostics,
                                   const EscapeSummary &escapeSummary,
                                   const ThreadRoleSummary &threadRoles,
-                                  const StripedArraySummary &striped) {
+                                  const StripedArraySummary &striped,
+                                  const ScanCoverage &coverage) {
     auto esc = [](const std::string &s) -> std::string {
         std::string out;
         out.reserve(s.size() + 4);
@@ -440,6 +441,10 @@ std::string serializeShardResult(int exitCode,
     }
     buf += "}";
 
+    buf += ",\"cov\":{\"fs\":" + std::to_string(coverage.functionsSeen) +
+           ",\"fh\":" + std::to_string(coverage.functionsHot) +
+           ",\"rs\":" + std::to_string(coverage.recordsSeen) + "}";
+
     buf += "}";
     return buf;
 }
@@ -451,6 +456,7 @@ struct ShardIPC {
     EscapeSummary escapeSummary;
     ThreadRoleSummary threadRoles;
     StripedArraySummary striped;
+    ScanCoverage coverage;
 };
 
 namespace ipc {
@@ -791,6 +797,22 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                 auto it = out.striped.find(k);
                 if (it == out.striped.end()) out.striped.emplace(k, std::move(a));
                 else it->second.merge(a);
+                ipc::expect(json, i, ',');
+            }
+        } else if (key == "cov") {
+            ipc::expect(json, i, '{');
+            while (true) {
+                ipc::skipWS(json, i);
+                if (i >= json.size() || json[i] == '}') {
+                    if (i < json.size()) ++i;
+                    break;
+                }
+                std::string k = ipc::parseStr(json, i);
+                ipc::expect(json, i, ':');
+                auto v = static_cast<uint64_t>(ipc::parseNum(json, i));
+                if (k == "fs")      out.coverage.functionsSeen = v;
+                else if (k == "fh") out.coverage.functionsHot = v;
+                else if (k == "rs") out.coverage.recordsSeen = v;
                 ipc::expect(json, i, ',');
             }
         } else {
@@ -1778,6 +1800,7 @@ ScanResult ScanPipeline::run(
             mergeEscapeSummaries(result.escapeSummary, factory.escapeSummary());
             result.threadRoleFacts.merge(factory.threadRoles());
             mergeStripedArrays(result.stripedArrays, factory.stripedArrays());
+            result.coverage.merge(factory.coverage());
             ++completedTUs;
             report("progress", std::to_string(completedTUs) + "/" +
                    std::to_string(totalTUs));
@@ -1828,6 +1851,7 @@ ScanResult ScanPipeline::run(
                 EscapeSummary childEscape;
                 ThreadRoleSummary childThreadRoles;
                 StripedArraySummary childStriped;
+                ScanCoverage childCoverage;
                 int childRet = 0;
 
                 for (const auto &src : shards[j]) {
@@ -1859,11 +1883,12 @@ ScanResult ScanPipeline::run(
                     mergeEscapeSummaries(childEscape, factory.escapeSummary());
                     childThreadRoles.merge(factory.threadRoles());
                     mergeStripedArrays(childStriped, factory.stripedArrays());
+                    childCoverage.merge(factory.coverage());
                 }
 
                 std::string json = serializeShardResult(
                     childRet, childFailed, childDiags, childEscape,
-                    childThreadRoles, childStriped);
+                    childThreadRoles, childStriped, childCoverage);
                 std::error_code ec;
                 llvm::raw_fd_ostream out(std::string(ipcPath), ec);
                 if (!ec)
@@ -1895,6 +1920,7 @@ ScanResult ScanPipeline::run(
                         shard.escapeSummary);
                     result.threadRoleFacts.merge(shard.threadRoles);
                     mergeStripedArrays(result.stripedArrays, shard.striped);
+                    result.coverage.merge(shard.coverage);
                 } else {
                     llvm::errs() << "lshaz: failed to parse IPC from shard "
                                  << child.shardIdx << "\n";
