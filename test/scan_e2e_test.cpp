@@ -21,6 +21,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <cctype>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -101,6 +103,25 @@ std::string fixturePath() {
     return "";
 }
 
+std::string canaryPath() {
+    if (fs::exists("test/fixtures/canary"))
+        return "test/fixtures/canary";
+    return "";
+}
+
+// Collect every "FLnnn" appearing as a ruleID value.
+void collectFiredRules(const std::string &json, std::set<std::string> &out) {
+    const std::string key = "\"ruleID\":";
+    for (size_t i = json.find(key); i != std::string::npos;
+         i = json.find(key, i + key.size())) {
+        size_t q = json.find('"', i + key.size());
+        if (q == std::string::npos) break;
+        size_t e = json.find('"', q + 1);
+        if (e == std::string::npos) break;
+        out.insert(json.substr(q + 1, e - q - 1));
+    }
+}
+
 // Copy fixture to isolated temp directory. Returns temp root path.
 fs::path isolateFixture(const std::string &fixture, const std::string &suffix) {
     auto tmp = fs::temp_directory_path() /
@@ -112,6 +133,57 @@ fs::path isolateFixture(const std::string &fixture, const std::string &suffix) {
     // Remove stale build dir to avoid CMakeCache.txt path mismatch.
     fs::remove_all(tmp / "project" / "build");
     return tmp;
+}
+
+// Every registered rule must fire on some canary fixture.
+//
+// A rule that stops firing is a silent recall loss: output identical to a
+// clean scan. The FL002/FL041 audit turned up two such rules, and both were
+// caught by a hand-written fixture rather than by any gate. Enumerating the
+// registry through `explain --list` rather than a hardcoded list means a new
+// rule cannot be added without a canary, and a rule cannot be silently
+// removed from coverage.
+void testEveryRuleHasCanary(const std::string &bin,
+                            const std::string &hftFixture,
+                            const std::string &canaryFixture) {
+    std::cerr << "test: every registered rule fires on a canary\n";
+
+    auto listed = run(bin + " explain --list");
+    std::set<std::string> registered;
+    for (size_t i = 0; (i = listed.out.find("FL", i)) != std::string::npos;
+         i += 2) {
+        if (i + 5 > listed.out.size()) break;
+        std::string id = listed.out.substr(i, 5);
+        if (std::isdigit(static_cast<unsigned char>(id[2])) &&
+            std::isdigit(static_cast<unsigned char>(id[3])) &&
+            std::isdigit(static_cast<unsigned char>(id[4])))
+            registered.insert(id);
+    }
+    check(registered.size() >= 15, "explain --list enumerates the registry");
+
+    std::set<std::string> fired;
+    int idx = 0;
+    for (const auto &fx : {hftFixture, canaryFixture}) {
+        if (fx.empty()) continue;
+        auto tmp = isolateFixture(fx, "canary" + std::to_string(idx++));
+        auto r = run(bin + " scan " + (tmp / "project").string() +
+                     " --no-ir --format json");
+        collectFiredRules(r.out, fired);
+        fs::remove_all(tmp);
+    }
+
+    std::vector<std::string> missing;
+    for (const auto &id : registered)
+        if (!fired.count(id))
+            missing.push_back(id);
+
+    if (!missing.empty()) {
+        std::cerr << "    rules with no canary: ";
+        for (const auto &m : missing) std::cerr << m << " ";
+        std::cerr << "\n";
+    }
+    check(missing.empty(),
+          "every registered rule fires on hft_core or canary");
 }
 
 // ===== CLI dispatch tests =====
@@ -622,6 +694,9 @@ int main() {
     testCMakeGeneration(bin, fixture);
     testExplicitCompileDB(bin, fixture);
     testDirectCompileDBPath(bin, fixture);
+
+    // Recall canary: registry completeness.
+    testEveryRuleHasCanary(bin, fixture, canaryPath());
 
     // Hazard detection.
     testHazardDetectionWithConfig(bin, fixture);
