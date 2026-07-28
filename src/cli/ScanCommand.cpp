@@ -70,6 +70,7 @@ struct ScanArgs {
     bool watch = false;
     unsigned watchInterval = 2;
     bool trustBuildSystem = false;
+    bool includeVendored = false;
     std::string changedFilesPath;
     std::string targetArch;
     std::vector<std::string> enabledRules;  // --rule FL001 (repeatable)
@@ -111,6 +112,7 @@ void printScanUsage() {
         << "      --pmu-trace <file>   Production PMU trace ingestion\n"
         << "      --pmu-priors <file>  Persist/load Bayesian hazard priors\n"
         << "      --watch-interval <N> Seconds between polls (default: 2)\n"
+        << "      --include-vendored   Analyze deps/, third_party/, vendor/ trees too\n"
         << "      --trust-build-system Allow cmake/meson/bear on cloned repos\n"
         << "      --changed-files <p>  Only scan TUs affected by files listed in <path>\n"
         << "  -h, --help               Show this help\n"
@@ -181,6 +183,10 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (std::strcmp(argv[i], "--no-ir") == 0) { args.noIR = true; continue; }
         if (std::strcmp(argv[i], "--no-ir-cache") == 0) { args.noIRCache = true; continue; }
         if (std::strcmp(argv[i], "--watch") == 0 || std::strcmp(argv[i], "-w") == 0) { args.watch = true; continue; }
+        if (std::strcmp(argv[i], "--include-vendored") == 0) {
+            args.includeVendored = true;
+            continue;
+        }
         if (std::strcmp(argv[i], "--trust-build-system") == 0) { args.trustBuildSystem = true; continue; }
         if (consumeArg(i, argc, argv, "--changed-files", args.changedFilesPath)) continue;
         if (consumeArg(i, argc, argv, "--target-arch", args.targetArch, "-a")) continue;
@@ -437,6 +443,8 @@ int runScanCommand(int argc, const char **argv) {
     request.filter.maxFiles = args.maxFiles;
     request.filter.includeFiles = args.includeFiles;
     request.filter.excludeFiles = args.excludeFiles;
+    request.filter.skipVendored = cfg.skipVendored && !args.includeVendored;
+    request.filter.vendorPatterns = cfg.vendorPathPatterns;
 
     if (!args.changedFilesPath.empty()) {
         auto bufOrErr = llvm::MemoryBuffer::getFile(args.changedFilesPath);
@@ -493,6 +501,10 @@ int runScanCommand(int argc, const char **argv) {
         if (result.totalTUsFailed > 0)
             llvm::errs() << ", " << result.totalTUsFailed << " failed";
         llvm::errs() << "\n";
+        if (result.vendoredTUsSkipped > 0)
+            llvm::errs() << "lshaz: " << result.vendoredTUsSkipped
+                         << " TU(s) skipped as vendored (vendor_path_patterns); "
+                            "--include-vendored to analyze them\n";
 
         if (result.totalTUsFailed > 0) {
             unsigned cap = std::min(result.totalTUsFailed, 10u);
