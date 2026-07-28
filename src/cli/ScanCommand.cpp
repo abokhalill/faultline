@@ -15,6 +15,7 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -518,6 +519,33 @@ int runScanCommand(int argc, const char **argv) {
                    "  hot_file_patterns/hot_function_patterns in "
                    "lshaz.config.yaml, or\n"
                    "  __attribute__((hot)) on the entry points.\n";
+
+        // Which rules produced nothing. "Looked and found nothing" and
+        // "never ran" are the same output otherwise, and that ambiguity is
+        // what let two rules sit silent through an entire audit.
+        {
+            std::unordered_set<std::string> fired;
+            for (const auto &d : result.diagnostics)
+                fired.insert(d.ruleID);
+            // Rules the caller switched off are not inert; reporting them
+            // as such would bury the ones that ran and saw nothing.
+            std::unordered_set<std::string> off(cfg.disabledRules.begin(),
+                                                cfg.disabledRules.end());
+            std::vector<std::string> inert;
+            for (const auto &r : RuleRegistry::instance().rules()) {
+                std::string id(r->getID());
+                if (!fired.count(id) && !off.count(id))
+                    inert.push_back(id);
+            }
+            std::sort(inert.begin(), inert.end());
+            if (!inert.empty()) {
+                llvm::errs() << "lshaz: " << inert.size()
+                             << " rule(s) produced no findings:";
+                for (const auto &id : inert)
+                    llvm::errs() << " " << id;
+                llvm::errs() << "\n";
+            }
+        }
     }
 
     if (result.suppressedByCalibration > 0)
