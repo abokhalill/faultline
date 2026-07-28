@@ -24,9 +24,38 @@ struct BranchSite {
     unsigned switchCases; // only for switch
 };
 
+// A switch whose every arm returns a constant is a lookup, not a branch
+// tree: the compiler emits a jump table into trivial stubs, or an indexed
+// array of constants with no branch at all. Either way there is one indirect
+// branch at most, and the cost does not scale with case count — so the
+// BTB-capacity mechanism this rule reports does not apply to it.
+// redis's sentinelFailoverStateStr (8 arms, each `return "literal"`) is the
+// shape; reporting it as jump-table pressure is a fabricated mechanism.
+bool isConstantLookupSwitch(const clang::SwitchStmt *S,
+                            clang::ASTContext &Ctx) {
+    bool anyCase = false;
+    for (const auto *sc = S->getSwitchCaseList(); sc;
+         sc = sc->getNextSwitchCase()) {
+        const clang::Stmt *body = sc->getSubStmt();
+        // Fallthrough chains: walk to the first non-label statement.
+        while (const auto *nested = llvm::dyn_cast_or_null<clang::SwitchCase>(body))
+            body = nested->getSubStmt();
+        const auto *ret = llvm::dyn_cast_or_null<clang::ReturnStmt>(body);
+        if (!ret) return false;
+        const clang::Expr *v = ret->getRetValue();
+        if (!v) return false;
+        v = v->IgnoreParenImpCasts();
+        if (llvm::isa<clang::StringLiteral>(v)) { anyCase = true; continue; }
+        if (v->isEvaluatable(Ctx)) { anyCase = true; continue; }
+        return false;
+    }
+    return anyCase;
+}
+
 class BranchDepthVisitor : public clang::RecursiveASTVisitor<BranchDepthVisitor> {
 public:
-    explicit BranchDepthVisitor(unsigned threshold) : threshold_(threshold) {}
+    BranchDepthVisitor(unsigned threshold, clang::ASTContext &Ctx)
+        : threshold_(threshold), ctx_(Ctx) {}
 
     bool TraverseIfStmt(clang::IfStmt *S) {
         ++depth_;
@@ -46,7 +75,7 @@ public:
         for (auto *sc = S->getSwitchCaseList(); sc; sc = sc->getNextSwitchCase())
             ++caseCount;
 
-        if (caseCount >= 8) {
+        if (caseCount >= 8 && !isConstantLookupSwitch(S, ctx_)) {
             sites_.push_back({S->getSwitchLoc(), depth_, true, caseCount});
         }
         return true;
@@ -57,6 +86,7 @@ public:
 
 private:
     unsigned threshold_;
+    clang::ASTContext &ctx_;
     unsigned depth_ = 0;
     unsigned maxDepth_ = 0;
     std::vector<BranchSite> sites_;
@@ -93,7 +123,7 @@ public:
 
         const unsigned threshold = Cfg.branchDepthWarn;
 
-        BranchDepthVisitor visitor(threshold);
+        BranchDepthVisitor visitor(threshold, Ctx);
         visitor.TraverseStmt(FD->getBody());
 
         if (visitor.sites().empty())
