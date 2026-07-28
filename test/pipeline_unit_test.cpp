@@ -583,6 +583,40 @@ void testThreadRoleCycle() {
     check(v.roleOf("w") == ROLE_WORKER, "self-recursion converges");
 }
 
+void testFilterSourcesSkipsVendored() {
+    std::vector<std::string> src = {
+        "/p/src/server.c", "/p/deps/jemalloc/jemalloc.c",
+        "/p/third_party/lua/lua.c", "/p/vendor/x.c", "/p/src/db.c"};
+    const std::vector<std::string> pats = {
+        "*/deps/*", "*/third_party/*", "*/vendor/*"};
+
+    lshaz::FilterOptions f;
+    f.vendorPatterns = pats;
+    unsigned skipped = 0;
+    auto out = lshaz::filterSources(src, f, skipped);
+    check(out.size() == 2 && skipped == 3, "vendored trees skipped by default");
+
+    f.skipVendored = false;
+    auto all = lshaz::filterSources(src, f, skipped);
+    check(all.size() == 5 && skipped == 0, "--include-vendored restores them");
+
+    // Patterns are config-driven: a project whose own module lives under
+    // external/ must be able to stop the default from hiding it.
+    lshaz::FilterOptions narrowed;
+    narrowed.vendorPatterns = {"*/deps/*"};
+    auto kept = lshaz::filterSources(src, narrowed, skipped);
+    check(kept.size() == 4 && skipped == 1,
+          "vendor patterns are overridable, not baked in");
+
+    // An explicit --include is a direct instruction and outranks the default.
+    lshaz::FilterOptions inc;
+    inc.vendorPatterns = pats;
+    inc.includeFiles = {"*/deps/*"};
+    auto only = lshaz::filterSources(src, inc, skipped);
+    check(only.size() == 1 && skipped == 0,
+          "explicit include outranks the vendored default");
+}
+
 // --- PMU instrument election ---------------------------------------------
 //
 // Curves are recorded from a Zen4 host, strides {4,8,16,32,64,128,256}B, so
@@ -654,6 +688,7 @@ int main() {
     testFilterSourcesMaxFiles();
     testFilterSourcesCombined();
     testFilterSourcesEmpty();
+    testFilterSourcesSkipsVendored();
 
     // CompileDBResolver
     testCandidatePaths();
