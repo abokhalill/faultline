@@ -36,7 +36,19 @@ public:
         return true;
     }
 
+    // Fan-out means transfers of control: each one costs a BTB entry and an
+    // I-cache line at the callee. A compiler builtin costs neither — an AVX
+    // intrinsic is a CallExpr in the AST and a single instruction in the
+    // object code. Counting them read redis's SIMD distance kernels
+    // (vectors_distance_*_avx2/avx512) as 12-way dispatchers, and those were
+    // every one of this rule's High findings on that corpus.
     bool VisitCallExpr(clang::CallExpr *E) {
+        if (const auto *FD = E->getDirectCallee()) {
+            if (FD->getBuiltinID() != 0)
+                return true;
+            if (FD->hasAttr<clang::AlwaysInlineAttr>())
+                return true;
+        }
         ++info_.callees;
         return true;
     }
