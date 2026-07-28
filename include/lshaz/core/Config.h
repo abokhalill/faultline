@@ -49,6 +49,20 @@ struct Config {
     std::vector<std::string> hotFunctionPatterns;
     std::vector<std::string> hotFilePatterns;
 
+    // Vendored third-party trees, skipped unless --include-vendored or
+    // skip_vendored: false. Directory naming is convention, not fact, so a
+    // project whose own code lives under one of these names must be able to
+    // replace the list — set vendor_path_patterns to the trees that really
+    // are vendored. A non-empty list replaces these defaults; use
+    // skip_vendored to turn the behaviour off, since YAML's empty sequence
+    // is indistinguishable from an absent key here.
+    bool skipVendored = true;
+    std::vector<std::string> vendorPathPatterns = {
+        "*/deps/*", "*/third_party/*", "*/thirdparty/*", "*/third-party/*",
+        "*/vendor/*", "*/external/*", "*/extern/*", "*/contrib/*",
+        "*/node_modules/*", "*/subprojects/*",
+    };
+
     // Rule enable/disable
     std::vector<std::string> disabledRules;
 
