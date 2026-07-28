@@ -47,6 +47,7 @@ struct ScanResult {
     unsigned suppressedByCalibration = 0;
     unsigned suppressedByFilter      = 0;
     unsigned totalTUsAnalyzed        = 0;
+    unsigned vendoredTUsSkipped      = 0;
     unsigned totalTUsFailed          = 0;
 };
 

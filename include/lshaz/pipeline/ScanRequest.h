@@ -42,6 +42,15 @@ struct FilterOptions {
     // If any changed file is a header (.h/.hpp/.hxx), all TUs are included
     // (conservative: no dependency graph resolution).
     std::vector<std::string> changedFiles;
+
+    // Vendored third-party trees. On redis these were 36% of all findings,
+    // in code the project neither owns nor patches. Directory naming is a
+    // convention, not a fact, so the patterns are config-driven rather than
+    // policy baked in here — a project whose own module happens to sit under
+    // external/ must be able to say so. Never silent: the skipped count is
+    // reported and --include-vendored restores them.
+    bool skipVendored = true;
+    std::vector<std::string> vendorPatterns;
 };
 
 struct ScanRequest {

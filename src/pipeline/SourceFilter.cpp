@@ -32,6 +32,16 @@ static bool endsWith(const std::string &str, const std::string &suffix) {
 std::vector<std::string> filterSources(
         const std::vector<std::string> &sources,
         const FilterOptions &filter) {
+    unsigned ignored = 0;
+    return filterSources(sources, filter, ignored);
+}
+
+std::vector<std::string> filterSources(
+        const std::vector<std::string> &sources,
+        const FilterOptions &filter,
+        unsigned &vendoredSkipped) {
+
+    vendoredSkipped = 0;
 
     // Incremental mode: restrict to TUs affected by changed files.
     const std::vector<std::string> *effective = &sources;
@@ -75,6 +85,17 @@ std::vector<std::string> filterSources(
             if (matchesGlob(src, pat)) { excluded = true; break; }
         }
         if (excluded) continue;
+
+        // An explicit --include is a direct instruction and outranks the
+        // vendored default; asking for a path and not getting it would be
+        // the worse surprise.
+        if (filter.skipVendored && filter.includeFiles.empty()) {
+            bool vendored = false;
+            for (const auto &pat : filter.vendorPatterns) {
+                if (matchesGlob(src, pat)) { vendored = true; break; }
+            }
+            if (vendored) { ++vendoredSkipped; continue; }
+        }
 
         result.push_back(src);
 

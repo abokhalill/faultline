@@ -14,4 +14,11 @@ std::vector<std::string> filterSources(
     const std::vector<std::string> &sources,
     const FilterOptions &filter);
 
+// Same, reporting how many sources the vendored-tree filter removed so the
+// caller can state it rather than quietly analyzing less than asked.
+std::vector<std::string> filterSources(
+    const std::vector<std::string> &sources,
+    const FilterOptions &filter,
+    unsigned &vendoredSkipped);
+
 } // namespace lshaz

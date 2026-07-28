@@ -1677,16 +1677,22 @@ ScanResult ScanPipeline::execute(const ScanRequest &request) {
         std::sort(sources.begin(), sources.end());
     }
 
-    sources = filterSources(sources, request.filter);
-    return run(request, compDB, sources);
+    unsigned vendored = 0;
+    sources = filterSources(sources, request.filter, vendored);
+    auto r = run(request, compDB, sources);
+    r.vendoredTUsSkipped = vendored;
+    return r;
 }
 
 ScanResult ScanPipeline::executeWithDB(
         const ScanRequest &request,
         const clang::tooling::CompilationDatabase &compDB,
         const std::vector<std::string> &sources) {
-    auto filtered = filterSources(sources, request.filter);
-    return run(request, compDB, filtered);
+    unsigned vendored = 0;
+    auto filtered = filterSources(sources, request.filter, vendored);
+    auto r = run(request, compDB, filtered);
+    r.vendoredTUsSkipped = vendored;
+    return r;
 }
 
 // Compute the Clang resource directory for the LLVM this binary was linked
