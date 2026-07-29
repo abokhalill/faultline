@@ -71,6 +71,32 @@ public:
                 "guaranteed cross-core cache line contention");
         }
 
+        // The NUMA and coherence mechanisms need concurrent writers. A
+        // global written six times from startup configuration has neither,
+        // and asserting them for it is a hardware claim the shape does not
+        // support. Where concurrency cannot be established the finding is
+        // reported at reduced severity saying so, rather than dropped:
+        // writers may live in another TU, and unestablished is not absent.
+        auto gw = escape.globalWriterEvidence(VD);
+        const bool concurrentWriters =
+            hasAtomics || (gw.writtenFromThreadEntry && gw.writerFunctions >= 2);
+        if (!concurrentWriters) {
+            if (sev == Severity::High)
+                sev = Severity::Medium;
+            escalations.push_back(
+                gw.writerFunctions == 0
+                    ? "no write sites in this TU: contention is assumed, not "
+                      "observed"
+                    : "written from " + std::to_string(gw.writerFunctions) +
+                          " function(s) in this TU, none of them a thread "
+                          "entry: concurrent access is assumed, not observed");
+        } else if (!hasAtomics) {
+            escalations.push_back(
+                "written from " + std::to_string(gw.writerFunctions) +
+                " function(s), at least one spawned as a thread: concurrent "
+                "writes are evidenced, not assumed");
+        }
+
         const auto &SM = Ctx.getSourceManager();
         auto loc = VD->getLocation();
 
@@ -87,11 +113,15 @@ public:
         std::ostringstream hw;
         hw << "Global mutable variable '" << VD->getNameAsString()
            << "' (type: " << QT.getAsString() << "). "
-           << "Accessible from any thread without confinement. "
-           << "On multi-socket systems, remote NUMA access adds ~100-300ns. "
-           << "Under multi-core write contention, cache line bouncing "
-           << "degrades linearly with core count. "
-           << "[Assumes: variable is accessed concurrently from multiple threads]";
+           << "Accessible from any thread without confinement. ";
+        if (concurrentWriters)
+            hw << "On multi-socket systems, remote NUMA access adds "
+               << "~100-300ns. Under multi-core write contention, cache line "
+               << "bouncing degrades linearly with core count.";
+        else
+            hw << "Concurrent access is not established here, so the NUMA "
+               << "and coherence penalties are potential rather than "
+               << "demonstrated; the finding stands on centralization alone.";
         diag.hardwareReasoning = hw.str();
 
         diag.structuralEvidence = {
