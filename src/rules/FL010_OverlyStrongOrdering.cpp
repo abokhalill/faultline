@@ -386,9 +386,7 @@ public:
                       Cfg.targetArch == TargetArch::ARM64Apple);
 
         for (const auto &site : visitor.sites()) {
-            // On x86-64 TSO, seq_cst loads are free (plain MOV, same as acquire).
-            // On ARM64, seq_cst loads require LDAR which is costlier than relaxed.
-            if (site.opClass == AtomicOpClass::Load && !isARM)
+            if (!isARM && site.opClass != AtomicOpClass::Store)
                 continue;
 
             bool isStore = (site.opClass == AtomicOpClass::Store);
