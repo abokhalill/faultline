@@ -296,21 +296,28 @@ public:
         if (writeCount < 2 && !hasLoopWrite)
             return;
 
-        // Emit one diagnostic per function summarizing the contention risk.
-        Severity sev = Severity::Critical;
+        Severity sev = hasLoopWrite  ? Severity::Critical
+                     : writeCount >= 3 ? Severity::High
+                                       : Severity::Medium;
         std::vector<std::string> escalations;
 
         if (writeCount >= 3) {
             escalations.push_back(
-                "3+ atomic writes per invocation: high store buffer pressure, "
-                "sustained RFO traffic");
+                std::to_string(writeCount) +
+                " atomic writes per invocation: each LOCK-prefixed op "
+                "serializes against the store buffer even uncontended");
         }
 
         if (hasLoopWrite) {
             escalations.push_back(
-                "Atomic write inside loop: per-iteration cache line ownership "
-                "transfer, store buffer saturation risk");
+                "Atomic write inside loop: the per-op serialization is paid "
+                "every iteration");
         }
+
+        escalations.push_back(
+            "cross-core RFO traffic would dominate this cost, but a second "
+            "writing core is not established here — severity reflects the "
+            "uncontended per-op cost only");
 
         auto loc = FD->getLocation();
 
