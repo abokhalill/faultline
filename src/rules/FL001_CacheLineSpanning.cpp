@@ -61,12 +61,54 @@ public:
         // occupies at any alignment; the worst case stays in the text.
         uint64_t minLines =
             (sizeBytes + Cfg.cacheLineBytes - 1) / Cfg.cacheLineBytes;
+
+        // Lines carrying at least one written field. Coherence traffic and
+        // hot-path L1D pressure scale with the lines a writer actually
+        // touches, not with the object's footprint: a 504B struct whose
+        // written fields share one line costs one line. Total span is
+        // footprint; this is the part layout can remove.
+        //
+        // Absence of write sites in THIS TU is not proof of no writers, so
+        // it never demotes — the same rule applied to unestablished write
+        // frequency in FL003 and to unprovable arguments in FL070.
+        unsigned writerLines = 0;
+        for (const auto &b : map.buckets()) {
+            for (const auto *f : b.fields) {
+                if (f->decl &&
+                    escape.fieldWriteEvidence(f->decl).writeSites > 0) {
+                    ++writerLines;
+                    break;
+                }
+            }
+        }
+
         if (minLines >= 3) {
-            sev = Severity::Critical;
-            escalations.push_back(
-                "occupies " + std::to_string(minLines) +
-                " cache lines at any alignment (worst case " +
-                std::to_string(lines) + "): elevated L1D eviction pressure");
+            if (writerLines == 0) {
+                sev = Severity::Critical;
+                escalations.push_back(
+                    "occupies " + std::to_string(minLines) +
+                    " cache lines at any alignment (worst case " +
+                    std::to_string(lines) + "): elevated L1D eviction "
+                    "pressure. No write sites observed in this TU, so the "
+                    "span is assessed on footprint alone");
+            } else if (writerLines >= 3) {
+                sev = Severity::Critical;
+                escalations.push_back(
+                    "written fields occupy " + std::to_string(writerLines) +
+                    " of " + std::to_string(minLines) +
+                    " cache lines: each carries its own RFO traffic");
+            } else {
+                // Clustering the written fields is what removes the cost,
+                // and this struct has already done it. Reporting the same
+                // severity as a scattered one gives no credit for the work
+                // and is how a tool stops being read.
+                sev = Severity::High;
+                escalations.push_back(
+                    "occupies " + std::to_string(minLines) +
+                    " cache lines but written fields touch only " +
+                    std::to_string(writerLines) +
+                    ": the remaining span is footprint, not coherence traffic");
+            }
         }
 
         auto straddlers = map.straddlingFields();
@@ -178,6 +220,7 @@ public:
         diag.structuralEvidence = {
             {"sizeof", std::to_string(sizeBytes) + "B"},
             {"lines_spanned", std::to_string(lines)},
+            {"writer_lines", std::to_string(writerLines)},
             {"straddling_fields", std::to_string(straddlers.size())},
             {"atomic_fields", std::to_string(map.totalAtomicFields())},
             {"mutable_fields", std::to_string(map.totalMutableFields())},
