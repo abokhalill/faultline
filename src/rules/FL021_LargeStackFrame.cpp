@@ -123,13 +123,26 @@ public:
 
         diag.location = resolveSourceLocation(loc, SM);
 
+        // The mechanism has to be sized to the frame. A sub-page frame sits
+        // on the hottest, most reliably TLB-resident memory in the process;
+        // claiming D-TLB working-set growth and page-fault risk for it is a
+        // hardware sentence the shape does not produce. What a sub-page
+        // frame does cost is the L1D lines it touches on entry.
+        const uint64_t pages = (totalBytes + Cfg.pageSize - 1) / Cfg.pageSize;
+        const uint64_t linesTouched =
+            (totalBytes + Cfg.cacheLineBytes - 1) / Cfg.cacheLineBytes;
         std::ostringstream hw;
         hw << "Function '" << FD->getQualifiedNameAsString()
-           << "' estimated stack frame ~" << totalBytes
-           << "B. Spans ~" << ((totalBytes + Cfg.pageSize - 1) / Cfg.pageSize)
-           << " page(s). Large stack frames increase D-TLB working set, "
-           << "pressure L1D capacity, and risk stack page faults "
-           << "on deep call chains.";
+           << "' estimated stack frame ~" << totalBytes << "B, ~"
+           << linesTouched << " cache line(s) across " << pages << " page(s). ";
+        if (pages >= 2)
+            hw << "Spanning more than one page grows the D-TLB working set "
+               << "and risks a stack page fault on first touch, on top of "
+               << "L1D capacity pressure.";
+        else
+            hw << "Within a single page, so the cost is L1D capacity "
+               << "pressure from the lines touched on entry, not D-TLB "
+               << "reach — the stack's own pages stay resident.";
         diag.hardwareReasoning = hw.str();
 
         diag.structuralEvidence = {
