@@ -215,6 +215,21 @@ bool EscapeAnalysis::hasPublicationEvidence(const clang::RecordDecl *RD) const {
     return publishedTypes_.count(canon->getQualifiedNameAsString()) > 0;
 }
 
+EscapeAnalysis::GlobalWriterEvidence
+EscapeAnalysis::globalWriterEvidence(const clang::VarDecl *VD) const {
+    GlobalWriterEvidence e;
+    if (!VD) return e;
+    auto it = globalWriters_.find(VD->getCanonicalDecl());
+    if (it == globalWriters_.end()) return e;
+    e.writerFunctions = static_cast<unsigned>(it->second.size());
+    for (const auto *w : it->second)
+        if (threadEntries_.count(w->getCanonicalDecl())) {
+            e.writtenFromThreadEntry = true;
+            break;
+        }
+    return e;
+}
+
 void EscapeAnalysis::markThreadEntry(const clang::Expr *E) {
     if (!E) return;
     E = E->IgnoreParenImpCasts();
@@ -499,17 +514,22 @@ public:
         std::unordered_map<const clang::FieldDecl *,
                            EscapeAnalysis::FieldWriteRecord>;
 
+    using GlobalWriters =
+        std::unordered_map<const clang::VarDecl *,
+                           std::unordered_set<const clang::FunctionDecl *>>;
+
     std::unordered_map<const clang::VarDecl *, unsigned> &counts;
     std::unordered_map<const clang::VarDecl *, unsigned> &loopCounts;
     FieldWrites &fieldWrites;
+    GlobalWriters &globalWriters;
     const clang::FunctionDecl *currentFn = nullptr;
     unsigned loopDepth = 0;
 
     GlobalWriteVisitor(
         std::unordered_map<const clang::VarDecl *, unsigned> &c,
         std::unordered_map<const clang::VarDecl *, unsigned> &lc,
-        FieldWrites &fw)
-        : counts(c), loopCounts(lc), fieldWrites(fw) {}
+        FieldWrites &fw, GlobalWriters &gw)
+        : counts(c), loopCounts(lc), fieldWrites(fw), globalWriters(gw) {}
 
     // write rate, not site count, is what coherence sees: a write under
     // any of these is repeatable per iteration.
@@ -636,9 +656,12 @@ private:
         if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E)) {
             if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(DRE->getDecl())) {
                 if (VD->hasGlobalStorage()) {
-                    ++counts[VD->getCanonicalDecl()];
+                    const auto *cv = VD->getCanonicalDecl();
+                    ++counts[cv];
                     if (loopDepth > 0)
-                        ++loopCounts[VD->getCanonicalDecl()];
+                        ++loopCounts[cv];
+                    if (currentFn)
+                        globalWriters[cv].insert(currentFn->getCanonicalDecl());
                 }
             }
         }
@@ -692,7 +715,7 @@ void EscapeAnalysis::collectTypeAccessors(
 void EscapeAnalysis::collectGlobalWriteSites(
     const std::vector<const clang::FunctionDecl *> &bodies) {
     GlobalWriteVisitor visitor(globalWriteCounts_, globalLoopWriteCounts_,
-                               fieldWrites_);
+                               fieldWrites_, globalWriters_);
     for (const auto *FD : bodies) {
         visitor.currentFn = FD;
         visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));

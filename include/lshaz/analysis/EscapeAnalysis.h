@@ -108,6 +108,16 @@ public:
     // millions of RFOs/s; site count alone cannot see that.
     unsigned getGlobalLoopWriteCount(const clang::VarDecl *VD) const;
 
+    // Concurrency evidence for a global: how many distinct functions write
+    // it in this TU, and whether any of them is spawned as a thread. The
+    // coherence and NUMA mechanisms need concurrent writers; a global
+    // written six times from startup configuration has neither.
+    struct GlobalWriterEvidence {
+        unsigned writerFunctions = 0;
+        bool writtenFromThreadEntry = false;
+    };
+    GlobalWriterEvidence globalWriterEvidence(const clang::VarDecl *VD) const;
+
     // Per-field write evidence within this TU: direct member mutation
     // (assignment, ++/--, atomic store/RMW forms) attributed to the
     // enclosing function. Constructor member-init lists deliberately
@@ -165,6 +175,12 @@ private:
     // that is the striped-counter shape.
     std::unordered_set<const clang::FunctionDecl *> threadEntries_;
     bool hasThreadEntryWriters(const clang::RecordDecl *RD) const;
+
+    // Which functions write each global, so rules can ask whether the
+    // writers can actually run concurrently instead of assuming it.
+    std::unordered_map<const clang::VarDecl *,
+                       std::unordered_set<const clang::FunctionDecl *>>
+        globalWriters_;
 
     void collectGlobalWriteSites(
         const std::vector<const clang::FunctionDecl *> &bodies);
