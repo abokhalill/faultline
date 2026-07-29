@@ -16,6 +16,7 @@ namespace lshaz {
 namespace {
 
 struct DiagKey {
+    std::string entity;  // type_name or functionName; stable across moves
     std::string ruleID;
     std::string file;
     unsigned line = 0;
@@ -23,10 +24,14 @@ struct DiagKey {
     bool operator<(const DiagKey &o) const {
         if (ruleID != o.ruleID) return ruleID < o.ruleID;
         if (file != o.file) return file < o.file;
-        return line < o.line;
+        if (entity != o.entity) return entity < o.entity;
+        return entity.empty() ? line < o.line : false;
     }
     bool operator==(const DiagKey &o) const {
-        return ruleID == o.ruleID && file == o.file && line == o.line;
+        if (ruleID != o.ruleID || file != o.file || entity != o.entity)
+            return false;
+        // Anonymous findings have only their position to identify them.
+        return entity.empty() ? line == o.line : true;
     }
 };
 
@@ -36,6 +41,33 @@ struct DiagEntry {
     std::string title;
     double confidence = 0.0;
 };
+
+// Two scans of the same project usually come from different checkouts; a
+// base build and a PR build, so their absolute roots differ. Keying on
+// absolute paths then reports every finding as new and every old one as
+// resolved, which is precisely backwards for the CI gate this command
+// exists to be. Strip each scan's own common root so the comparison runs on
+// project-relative paths.
+void normalizePaths(std::vector<DiagEntry> &diags) {
+    if (diags.empty()) return;
+    std::string prefix = diags.front().key.file;
+    for (const auto &d : diags) {
+        size_t i = 0;
+        while (i < prefix.size() && i < d.key.file.size() &&
+               prefix[i] == d.key.file[i])
+            ++i;
+        prefix.resize(i);
+        if (prefix.empty()) return;
+    }
+    // Only whole directory components are a root; a shared filename prefix
+    // between sibling files is not.
+    auto slash = prefix.rfind('/');
+    if (slash == std::string::npos) return;
+    prefix.resize(slash + 1);
+    for (auto &d : diags)
+        if (d.key.file.rfind(prefix, 0) == 0)
+            d.key.file.erase(0, prefix.size());
+}
 
 // Minimal JSON string extraction. Finds "key": "value" pairs.
 // Handles backslash-escaped quotes within values.
@@ -146,11 +178,20 @@ ParsedScan parseDiagFile(const std::string &path) {
         e.key.ruleID = extractString(obj, "ruleID");
         e.key.file = extractString(obj, "file");
         e.key.line = extractUnsigned(obj, "line");
+        // Identity is the entity the finding is about, not where it sits
+        // today. Keying on the line number makes any refactor that moves a
+        // struct read as one finding resolved and an identical one
+        // introduced, which floods the gate with churn on exactly the
+        // commits most worth reviewing. Line stays for display.
+        e.key.entity = extractString(obj, "type_name");
+        if (e.key.entity.empty())
+            e.key.entity = extractString(obj, "functionName");
         e.severity = extractString(obj, "severity");
         e.title = extractString(obj, "title");
         e.confidence = extractDouble(obj, "confidence");
         result.diags.push_back(std::move(e));
     }
+    normalizePaths(result.diags);
     return result;
 }
 
