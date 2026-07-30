@@ -174,20 +174,28 @@ public:
         const auto &SM = Ctx.getSourceManager();
 
         for (const auto &site : visitor.sites()) {
-            Severity sev = Severity::Critical;
+            Severity sev = (site.inLoop && site.isNested) ? Severity::Critical
+                         : (site.inLoop || site.isNested) ? Severity::High
+                                                          : Severity::Medium;
             std::vector<std::string> escalations;
 
             if (site.isNested) {
                 escalations.push_back(
-                    "Nested lock acquisition: deadlock risk and compounding "
-                    "serialization latency");
+                    "Nested lock acquisition: widens the critical section and "
+                    "serializes on two locks, before any contention");
             }
 
             if (site.inLoop) {
                 escalations.push_back(
-                    "Lock inside loop: per-iteration lock convoy risk, "
-                    "sustained context switch pressure under contention");
+                    "Lock inside loop: the acquisition cost is paid every "
+                    "iteration whether or not the lock is contended");
             }
+
+            escalations.push_back(
+                "the convoy cost — futex wait and context switch, ~1-10us — "
+                "requires a second thread contending this lock, which is not "
+                "established here; severity reflects acquisition frequency "
+                "and critical-section width only");
 
             Diagnostic diag;
             diag.ruleID    = "FL012";
