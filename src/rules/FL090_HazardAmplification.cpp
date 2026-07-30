@@ -48,11 +48,23 @@ public:
 
         bool multiLine    = map.maxLinesSpanned() >= 3;
         bool hasAtomics   = map.totalAtomicFields() > 0;
+        bool escapeBeyondAtomics =
+            ev.hasSyncPrims || ev.hasSharedOwner || ev.hasVolatile ||
+            ev.hasPublication || ev.hasThreadWriters;
+
+        // A single atomic occupies one line at runtime however many buckets
+        // alignment uncertainty smears it across. Amplification needs the RFO
+        // surface itself to span lines; the same realizability test FL001
+        // applies before its own Critical.
+        unsigned atomicLines = 0;
+        for (const auto &b : map.buckets())
+            if (b.atomicCount > 0) ++atomicLines;
+        bool multiLineAtomics = map.totalAtomicFields() >= 2 && atomicLines >= 2;
 
         unsigned signalCount = 0;
-        if (multiLine)   ++signalCount;
-        if (hasAtomics)  ++signalCount;
-        if (ev.escapes)  ++signalCount;
+        if (multiLine)            ++signalCount;
+        if (multiLineAtomics)     ++signalCount;
+        if (escapeBeyondAtomics)  ++signalCount;
 
         if (signalCount < 3)
             return;
@@ -74,12 +86,9 @@ public:
                 "acting");
         }
 
-        unsigned atomicLines = 0;
         unsigned hotLines = 0;
-        for (const auto &b : map.buckets()) {
-            if (b.atomicCount > 0) ++atomicLines;
+        for (const auto &b : map.buckets())
             if (b.mutableCount > 0) ++hotLines;
-        }
 
         escalations.push_back(
             std::to_string(map.recordSizeBytes()) + "B across " +
@@ -89,8 +98,17 @@ public:
             std::to_string(map.totalAtomicFields()) + " atomic field(s) on " +
             std::to_string(atomicLines) + " line(s): per-line RFO ownership transfer");
 
+        // Named rather than asserted: which route establishes sharing is the
+        // difference between a compound hazard and a large struct that
+        // happens to contain an atomic.
         escalations.push_back(
-            "thread-escaping: coherence traffic amplified across participating cores");
+            std::string("thread-escaping via ") +
+            (ev.hasThreadWriters ? "writers on a spawned thread"
+             : ev.hasPublication ? "publication to a thread or global"
+             : ev.hasSyncPrims   ? "an embedded sync primitive"
+             : ev.hasSharedOwner ? "shared ownership"
+                                 : "volatile members") +
+            ": coherence traffic amplified across participating cores");
 
         auto straddlers = map.straddlingFields();
         if (!straddlers.empty()) {
