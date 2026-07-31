@@ -345,6 +345,20 @@ std::string serializeShardResult(int exitCode,
             if (j) buf += ',';
             buf += '"'; buf += esc(d.escalations[j]); buf += '"';
         }
+        buf += "]";
+        // Unserialized fields are a jobs-dependent verdict: present on the
+        // sequential path, gone on the forked one. This is the third such
+        // field after the FL003 writer tier and the thread-writer escape
+        // signal, so it crosses the boundary with the rest.
+        buf += ",\"mc\":[";
+        for (size_t j = 0; j < d.mechanismClaims.size(); ++j) {
+            const auto &c = d.mechanismClaims[j];
+            if (j) buf += ',';
+            buf += "{\"e\":\"" + esc(c.effect) + "\",\"p\":\"" +
+                   esc(c.precondition) + "\",\"k\":" +
+                   std::to_string(c.established ? 1 : 0) + ",\"s\":\"" +
+                   std::string(severityToString(c.supports)) + "\"}";
+        }
         buf += "]}";
     }
     buf += "]";
@@ -607,6 +621,28 @@ static Diagnostic parseDiag(const std::string &s, size_t &i) {
                 skipWS(s, i);
                 if (i >= s.size() || s[i] == ']') { if (i < s.size()) ++i; break; }
                 d.escalations.push_back(parseStr(s, i));
+                expect(s, i, ',');
+            }
+        } else if (key == "mc") {
+            expect(s, i, '[');
+            while (true) {
+                skipWS(s, i);
+                if (i >= s.size() || s[i] == ']') { if (i < s.size()) ++i; break; }
+                expect(s, i, '{');
+                MechanismClaim c;
+                while (true) {
+                    skipWS(s, i);
+                    if (i >= s.size() || s[i] == '}') { if (i < s.size()) ++i; break; }
+                    std::string ck = parseStr(s, i);
+                    expect(s, i, ':');
+                    if (ck == "e")      c.effect = parseStr(s, i);
+                    else if (ck == "p") c.precondition = parseStr(s, i);
+                    else if (ck == "k") c.established = parseNum(s, i) != 0;
+                    else if (ck == "s") c.supports = toSeverity(parseStr(s, i));
+                    else skipValue(s, i);
+                    expect(s, i, ',');
+                }
+                d.mechanismClaims.push_back(std::move(c));
                 expect(s, i, ',');
             }
         } else {
@@ -2210,6 +2246,24 @@ ScanResult ScanPipeline::run(
             result.status = ScanStatus::ToolError;
             return result;
         }
+    }
+
+    // A finding may not outrank the mechanism claims it established. Rules
+    // declaring no claims are unconstrained; where a rule does declare them
+    // this holds by construction at output, so the invariant cannot be
+    // reintroduced by a future rule the way it was by eleven past ones.
+    for (auto &d : result.diagnostics) {
+        if (d.suppressed || d.mechanismClaims.empty())
+            continue;
+        Severity ceiling = d.severitySupportedByClaims();
+        if (d.severity <= ceiling)
+            continue;
+        d.escalations.push_back(
+            "severity clamped from " + std::string(severityToString(d.severity)) +
+            " to " + std::string(severityToString(ceiling)) +
+            ": the effect justifying the higher grade has an unestablished "
+            "precondition");
+        d.severity = ceiling;
     }
 
     // A finding outside the scanned tree is third-party by construction.
