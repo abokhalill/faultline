@@ -169,6 +169,14 @@ public:
                 "Consider template-based dispatch.";
 
             diag.escalations = std::move(escalations);
+            diag.mechanismClaims = {
+                {"indirect branch through the vtable pointer: a BTB entry, "
+                 "and a pipeline flush when the target mispredicts",
+                 "a virtual call on a hot path", true, Severity::High},
+                {"sustained BTB pressure from repeated indirect branches",
+                 "the call sits inside a loop", site.inLoop != 0,
+                 Severity::Critical},
+            };
             out.push_back(std::move(diag));
         }
     }

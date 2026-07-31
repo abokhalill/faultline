@@ -538,6 +538,21 @@ public:
                 diag.structuralEvidence["feeds_branch"] = "yes";
             }
 
+            // Only a store can be weakened into different machine code on
+            // x86-64; on ARM64 the load and RMW forms differ too. The
+            // sweep already excludes what cannot be weakened, so reaching
+            // here means the saving is real on the configured target.
+            diag.mechanismClaims = {
+                {isARM ? "seq_cst barrier cost against a weaker ordering"
+                       : "XCHG with implicit LOCK and store-buffer drain, "
+                         "against a plain MOV",
+                 isARM ? "an atomic op whose relaxed form emits fewer barriers"
+                       : "a seq_cst store on x86-64",
+                 true, sev},
+                {"the operation is on a path executed often enough to matter",
+                 "the write sits inside a loop", site.inLoop != 0,
+                 Severity::Critical},
+            };
             diag.escalations = std::move(escalations);
             out.push_back(std::move(diag));
         }

@@ -294,6 +294,20 @@ public:
                 "Reserve std::vector capacity upfront.";
 
             diag.escalations = std::move(escalations);
+            diag.mechanismClaims = {
+                {"allocate/free round trip, and locality lost against inline "
+                 "or stack storage",
+                 "an allocation on a hot path", true, Severity::Medium},
+                {"allocator arena lock contention",
+                 "an allocation not served from the thread cache",
+                 ac != AllocatorClass::ThreadLocal, Severity::High},
+                {"mmap syscall, page faults, TLB shootdown on munmap",
+                 "an allocation above the mmap threshold",
+                 ac == AllocatorClass::Syscall, Severity::Critical},
+                {"the cost is paid on every iteration",
+                 "the allocation sits inside a loop", site.inLoop != 0,
+                 Severity::High},
+            };
             out.push_back(std::move(diag));
         }
     }

@@ -220,6 +220,15 @@ public:
             "Consider cache-line-aware queue implementations.";
 
         diag.escalations = std::move(escalations);
+        diag.mechanismClaims = {
+            {"head and tail indices occupy one line",
+             "queue-shaped naming with the pair co-resident", true,
+             Severity::Medium},
+            {"producer/consumer ownership ping-pong on every operation",
+             fromAtomics ? "atomic indices evidencing multi-writer intent"
+                         : "a thread-escape verdict for the record",
+             true, Severity::Critical},
+        };
         out.push_back(std::move(diag));
     }
 };

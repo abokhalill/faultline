@@ -202,6 +202,18 @@ public:
                 "Use __builtin_expect for predictable branches.";
 
             diag.escalations = std::move(escalations);
+            diag.mechanismClaims = {
+                {"branch prediction surface on a hot path",
+                 "a deep nest or a large switch in a hot function", true,
+                 Severity::Medium},
+                {"indirect jump the BTB must predict among many targets",
+                 "a switch whose arms are real work, not a constant lookup",
+                 site.isSwitchStmt, Severity::High},
+                {"correlated misprediction chains that defeat pattern "
+                 "predictors",
+                 "nesting depth at or beyond six",
+                 !site.isSwitchStmt && site.depth >= 6, Severity::High},
+            };
             out.push_back(std::move(diag));
         }
     }

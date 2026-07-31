@@ -295,6 +295,16 @@ public:
             "Pad independently-written fields to separate 64B cache lines "
             "with alignas(64). Consider per-thread/per-core replicas.";
 
+        diag.mechanismClaims = {
+            {"co-located mutable fields share a line",
+             "two mutable fields co-resident under some base alignment", true,
+             Severity::Medium},
+            {"MESI invalidation ping-pong between cores",
+             "distinct writers reaching the pair, or atomics evidencing "
+             "multi-writer intent",
+             hasAtomicPairs || wev == kMultiWriter,
+             deliberateLayout ? Severity::Medium : Severity::Critical},
+        };
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));
     }

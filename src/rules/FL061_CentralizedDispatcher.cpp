@@ -189,6 +189,21 @@ public:
             "Shard by core to eliminate cross-core contention on dispatcher state. "
             "Consider table-driven dispatch with function pointer arrays.";
 
+        // Fan-out is counted in real transfers of control: builtins and
+        // always_inline callees cost neither a BTB entry nor an I-cache
+        // line at a callee, and counting them read SIMD kernels as
+        // dispatchers.
+        diag.mechanismClaims = {
+            {"I-cache and BTB footprint from wide fan-out",
+             "a hot function with many real (non-builtin) call targets",
+             true, Severity::Medium},
+            {"indirect target misprediction across polymorphic sites",
+             "three or more virtual dispatch sites",
+             info.virtualCalls >= 3, Severity::High},
+            {"the fan-out is re-walked on every iteration",
+             "the dispatch sits inside a loop", info.hasLoop,
+             Severity::High},
+        };
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));
     }

@@ -227,6 +227,17 @@ public:
                 "Use std::variant + visitor for closed type sets.";
 
             diag.escalations = std::move(escalations);
+            diag.mechanismClaims = {
+                {"indirect call through type-erased storage, and the "
+                 "inlining the erasure prevents",
+                 "a std::function used on a hot path", true, Severity::High},
+                {"heap allocation when the callable exceeds the small-buffer",
+                 "the callable is constructed here rather than only invoked",
+                 site.kind == StdFuncSite::Construct, Severity::High},
+                {"the indirect call and any allocation recur per iteration",
+                 "the use sits inside a loop", site.inLoop != 0,
+                 Severity::Critical},
+            };
             out.push_back(std::move(diag));
         }
 
@@ -265,6 +276,15 @@ public:
                 "Use raw function pointer if target is known. "
                 "Use std::variant + visitor for closed type sets.";
 
+            // A parameter, not a use site: the erasure is in the signature,
+            // so the indirect call is certain but neither the allocation nor
+            // the per-iteration cost can be attributed from here.
+            diag.mechanismClaims = {
+                {"indirect call through type-erased storage, and the "
+                 "inlining the erasure prevents",
+                 "a std::function parameter on a hot path", true,
+                 Severity::High},
+            };
             out.push_back(std::move(diag));
         }
     }

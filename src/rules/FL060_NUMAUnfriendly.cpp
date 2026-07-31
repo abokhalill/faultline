@@ -180,6 +180,14 @@ public:
             "Consider interleaved allocation for balanced access patterns.";
 
         diag.escalations = std::move(escalations);
+        diag.mechanismClaims = {
+            {"a large shared mutable structure with no placement control",
+             "size past the threshold, thread escape, mutable state", true,
+             Severity::Medium},
+            {"remote-node access at ~100-300ns against ~60-80ns local",
+             "a multi-socket deployment (numa_sockets >= 2)",
+             Cfg.numaSockets >= 2, Severity::Critical},
+        };
         out.push_back(std::move(diag));
     }
 };

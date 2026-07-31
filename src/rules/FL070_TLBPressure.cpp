@@ -213,6 +213,12 @@ public:
                         : "alignas(2*1024*1024) on the definition, then "
                           "madvise(MADV_HUGEPAGE)/THP. Alignment is the "
                           "gate: without it the kernel cannot collapse.";
+                diag.mechanismClaims = {
+                    {"page walks once the working set outruns dTLB reach",
+                     "a region spanning far more base pages than the dTLB "
+                     "covers", true,
+                     hugeAligned ? Severity::Informational : Severity::Medium},
+                };
                 out.push_back(std::move(diag));
             }
         }
@@ -269,6 +275,14 @@ public:
             diag.mitigation =
                 "MAP_HUGETLB (reserved pool) or madvise(MADV_HUGEPAGE) "
                 "after the map; 2MB-align the base either way.";
+            diag.mechanismClaims = {
+                {"page walks once the working set outruns dTLB reach",
+                 "a mapping large enough to exceed dTLB reach", true,
+                 Severity::Medium},
+                {"the mapping actually lands on base pages",
+                 "no hugepage alignment or THP-backed allocator exonerates it",
+                 !s.unprovableArg && !thpAllocator, Severity::Medium},
+            };
             out.push_back(std::move(diag));
         }
     }

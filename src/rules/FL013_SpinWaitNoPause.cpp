@@ -402,6 +402,17 @@ public:
                       "longer waits. If the bare spin is the design, say "
                       "so: // lshaz-suppress FL013.";
 
+            diag.mechanismClaims = {
+                {"memory-order machine clear when the peer's write lands",
+                 "a tight poll loop with no pause or wait hint", true,
+                 Severity::Medium},
+                {"sibling starvation: the spin holds issue slots the peer "
+                 "needs to make the progress being waited on",
+                 "SMT enabled on the deployment", smt, Severity::High},
+                {"RFO ping-pong with the line held Modified",
+                 "the spin writes each iteration (TAS) rather than reading",
+                 s.tasForm, Severity::High},
+            };
             out.push_back(std::move(diag));
         }
     }
