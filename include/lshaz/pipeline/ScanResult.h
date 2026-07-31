@@ -48,6 +48,7 @@ struct ScanResult {
     unsigned suppressedByFilter      = 0;
     unsigned totalTUsAnalyzed        = 0;
     unsigned vendoredTUsSkipped      = 0;
+    unsigned outOfTreeSuppressed     = 0;
     unsigned totalTUsFailed          = 0;
 };
 

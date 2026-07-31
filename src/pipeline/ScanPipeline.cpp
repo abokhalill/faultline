@@ -2212,6 +2212,29 @@ ScanResult ScanPipeline::run(
         }
     }
 
+    // A finding outside the scanned tree is third-party by construction.
+    // Toolchain and dependency headers reached through -I rather than
+    // -isystem are analyzed like project code and are not skipped by the
+    // vendored-path patterns, which only match directories inside the
+    // project.
+    if (!request.workingDirectory.empty()) {
+        llvm::SmallString<256> rootBuf(request.workingDirectory);
+        llvm::sys::fs::make_absolute(rootBuf);
+        // "." makes absolute as "<cwd>/.", which prefix-matches nothing.
+        llvm::sys::path::remove_dots(rootBuf, /*remove_dot_dot=*/true);
+        std::string root(rootBuf.str());
+        if (!root.empty() && root.back() != '/')
+            root += '/';
+        for (auto &d : result.diagnostics) {
+            if (d.suppressed || d.location.file.empty())
+                continue;
+            if (d.location.file.rfind(root, 0) == 0)
+                continue;
+            d.suppressed = true;
+            ++result.outOfTreeSuppressed;
+        }
+    }
+
     // Filter and sort.
     filterAndSort(request.filter, result.diagnostics);
 
