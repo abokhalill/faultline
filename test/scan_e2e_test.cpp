@@ -242,8 +242,9 @@ void testMechanismClaimsBoundSeverity(const std::string &bin,
     }
     std::cerr << "    " << checked << " finding(s) with declared claims, "
               << unmigrated << " unmigrated\n";
-    check(checked > 0, "some rules declare mechanism claims");
+    check(checked > 0, "rules declare mechanism claims");
     check(violations == 0, "no finding outranks its established claims");
+    check(unmigrated == 0, "every emitted finding declares its mechanism");
     fs::remove_all(tmp);
 }
 
