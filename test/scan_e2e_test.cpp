@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -184,6 +185,66 @@ void testEveryRuleHasCanary(const std::string &bin,
     }
     check(missing.empty(),
           "every registered rule fires on hft_core or canary");
+}
+
+void testMechanismClaimsBoundSeverity(const std::string &bin,
+                                      const std::string &fixture) {
+    std::cerr << "test: severity never outranks an established mechanism\n";
+    auto tmp = isolateFixture(fixture, "mech");
+    auto r = run(bin + " scan " + (tmp / "project").string() +
+                 " --no-ir --format json");
+
+    auto rank = [](const std::string &s) {
+        if (s == "Critical") return 3;
+        if (s == "High")     return 2;
+        if (s == "Medium")   return 1;
+        return 0;
+    };
+    auto strAfter = [](const std::string &s, const std::string &key,
+                       size_t from) -> std::string {
+        auto at = s.find(key, from);
+        if (at == std::string::npos) return {};
+        auto q = s.find('"', at + key.size());
+        if (q == std::string::npos) return {};
+        auto e = s.find('"', q + 1);
+        if (e == std::string::npos) return {};
+        return s.substr(q + 1, e - q - 1);
+    };
+
+    size_t checked = 0, violations = 0, unmigrated = 0;
+    for (size_t i = r.out.find("\"ruleID\":"); i != std::string::npos;
+         i = r.out.find("\"ruleID\":", i + 1)) {
+        size_t end = r.out.find("\"ruleID\":", i + 1);
+        std::string obj = r.out.substr(
+            i, end == std::string::npos ? std::string::npos : end - i);
+        if (obj.find("\"mechanismClaims\"") == std::string::npos) {
+            ++unmigrated;
+            continue;
+        }
+        ++checked;
+
+        int sev = rank(strAfter(obj, "\"severity\":", 0));
+
+        // Ceiling is the highest grade any ESTABLISHED claim supports.
+        int ceiling = 0;
+        for (size_t c = obj.find("\"established\":"); c != std::string::npos;
+             c = obj.find("\"established\":", c + 1)) {
+            bool established = obj.compare(c + 15, 4, "true") == 0;
+            if (!established) continue;
+            ceiling = std::max(ceiling, rank(strAfter(obj, "\"supports\":", c)));
+        }
+        if (sev > ceiling) {
+            std::cerr << "    " << strAfter(obj, "\"ruleID\":", 0)
+                      << " severity " << strAfter(obj, "\"severity\":", 0)
+                      << " exceeds its established claims\n";
+            ++violations;
+        }
+    }
+    std::cerr << "    " << checked << " finding(s) with declared claims, "
+              << unmigrated << " unmigrated\n";
+    check(checked > 0, "some rules declare mechanism claims");
+    check(violations == 0, "no finding outranks its established claims");
+    fs::remove_all(tmp);
 }
 
 // ===== CLI dispatch tests =====
@@ -697,6 +758,7 @@ int main() {
 
     // Recall canary: registry completeness.
     testEveryRuleHasCanary(bin, fixture, canaryPath());
+    testMechanismClaimsBoundSeverity(bin, fixture);
 
     // Hazard detection.
     testHazardDetectionWithConfig(bin, fixture);

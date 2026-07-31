@@ -617,6 +617,40 @@ void testFilterSourcesSkipsVendored() {
           "explicit include outranks the vendored default");
 }
 
+// --- mechanism claims -----------------------------------------------------
+
+void testMechanismClaimCeiling() {
+    using lshaz::MechanismClaim;
+    lshaz::Diagnostic d;
+
+    // A rule that declares nothing is unconstrained rather than clamped to
+    // Informational, so migrating rules one at a time cannot silently gut
+    // the ones not yet migrated.
+    check(d.severitySupportedByClaims() == lshaz::Severity::Critical,
+          "no declared claims leaves severity unconstrained");
+
+    // The shape of every defect found in the audit: the effect carrying the
+    // high grade is exactly the one whose precondition was never checked.
+    d.mechanismClaims = {
+        {"lock acquisition cost", "a lock on a hot path", true,
+         lshaz::Severity::Medium},
+        {"convoy: futex wait and context switch",
+         "a second thread contending", false, lshaz::Severity::Critical},
+    };
+    check(d.severitySupportedByClaims() == lshaz::Severity::Medium,
+          "an unestablished claim cannot raise the ceiling");
+
+    d.mechanismClaims[1].established = true;
+    check(d.severitySupportedByClaims() == lshaz::Severity::Critical,
+          "establishing the precondition restores the grade");
+
+    // Nothing established at all: the finding is structural only.
+    d.mechanismClaims[0].established = false;
+    d.mechanismClaims[1].established = false;
+    check(d.severitySupportedByClaims() == lshaz::Severity::Informational,
+          "no established claim supports nothing above Informational");
+}
+
 // --- PMU instrument election ---------------------------------------------
 //
 // Curves are recorded from a Zen4 host, strides {4,8,16,32,64,128,256}B, so
@@ -718,6 +752,7 @@ int main() {
     testThreadRoleCycle();
 
     // PMU instrument election
+    testMechanismClaimCeiling();
     testPMUCliffAtLineSize();
     testPMUCliffRejectsWrongMechanism();
     testPMUCliffNoTransition();
