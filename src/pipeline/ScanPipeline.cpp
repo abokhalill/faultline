@@ -44,6 +44,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <csignal>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -1930,6 +1931,18 @@ ScanResult ScanPipeline::run(
 
             if (pid == 0) {
                 // --- Child process ---
+                // Shard-loss handling is only as good as its test, and the
+                // realistic trigger (the OOM killer) cannot be summoned on
+                // demand. This makes the death deterministic. Announced on
+                // stderr so an injected run can never be mistaken for a real
+                // one; unset, it costs one getenv per shard.
+                if (const char *f = ::getenv("LSHAZ_FAULT_KILL_SHARD")) {
+                    if (static_cast<unsigned>(atoi(f)) == j) {
+                        llvm::errs() << "lshaz: FAULT INJECTION active, "
+                                        "killing shard " << j << "\n";
+                        ::raise(SIGKILL);
+                    }
+                }
                 llvm::CrashRecoveryContext::Enable();
                 std::vector<Diagnostic> childDiags;
                 std::vector<FailedTU> childFailed;

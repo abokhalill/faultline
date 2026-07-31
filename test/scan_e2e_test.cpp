@@ -619,6 +619,54 @@ void testMinSeverityFilter(const std::string &bin, const std::string &fixture) {
     fs::remove_all(tmp);
 }
 
+// ===== Shard loss accounting =====
+
+// A shard that dies takes its translation units with it. If the parent does
+// not account for them, the scan reports the same thing a clean scan does:
+// no findings, no failures, exit 0. Forcing the IPC write to fail is the
+// cheapest reproduction of the whole class (the OOM killer is the realistic
+// one). What is asserted is the accounting, not the specific failure.
+void testLostShardIsNotACleanScan(const std::string &bin,
+                                  const std::string &fixture) {
+    std::cerr << "test: a lost shard is accounted, not silently dropped\n";
+    auto tmp = isolateFixture(fixture, "shardloss");
+    auto project = (tmp / "project").string();
+    std::string config = project + "/lshaz.config.yaml";
+
+    std::string scan = bin + " scan " + project + " --config " + config +
+                       " --no-ir --jobs 2";
+
+    auto clean = run(scan);
+    auto killed = run("LSHAZ_FAULT_KILL_SHARD=0 " + scan);
+
+    // The comparison is the point: the two runs must not look alike.
+    check(contains(killed.err, "FAULT INJECTION"), "fault injection fired");
+    check(killed.exitCode != 0, "lost shard does not exit 0");
+    check(contains(killed.err, "unanalyzed"),
+          "stderr names the shard's TUs as unanalyzed");
+    check(contains(killed.err, "killed by signal"),
+          "stderr gives the reason the shard was lost");
+
+    // The defect this guards: without accounting, the killed shard's TUs are
+    // counted as parsed, so both runs print the same "N/N parsed" with no
+    // failures and exit alike. Assert the summaries actually differ.
+    auto summary = [](const std::string &err) {
+        auto pos = err.find(" TU(s) parsed");
+        if (pos == std::string::npos) return std::string();
+        auto begin = err.rfind('\n', pos);
+        begin = (begin == std::string::npos) ? 0 : begin + 1;
+        return err.substr(begin, err.find('\n', pos) - begin);
+    };
+    check(contains(summary(clean.err), "4/4"), "clean scan parses every TU");
+    check(contains(summary(killed.err), "2/4") &&
+          contains(summary(killed.err), "2 failed"),
+          "lost shard's TUs are reported unparsed and failed");
+    check(summary(clean.err) != summary(killed.err),
+          "a lost shard is distinguishable from a clean scan");
+
+    fs::remove_all(tmp);
+}
+
 // ===== Determinism test =====
 
 void testDeterminism(const std::string &bin, const std::string &fixture) {
@@ -789,6 +837,9 @@ int main() {
     testMaxFiles(bin, fixture);
     testCombinedFilters(bin, fixture);
     testMinSeverityFilter(bin, fixture);
+
+    // Loud failure.
+    testLostShardIsNotACleanScan(bin, fixture);
 
     // Determinism.
     testDeterminism(bin, fixture);
