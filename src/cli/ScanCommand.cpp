@@ -505,6 +505,10 @@ int runScanCommand(int argc, const char **argv) {
             llvm::errs() << "lshaz: " << result.vendoredTUsSkipped
                          << " TU(s) skipped as vendored (vendor_path_patterns); "
                             "--include-vendored to analyze them\n";
+        if (result.outOfTreeSuppressed > 0)
+            llvm::errs() << "lshaz: " << result.outOfTreeSuppressed
+                         << " finding(s) suppressed outside the scanned tree "
+                            "(toolchain/dependency headers)\n";
 
         if (result.totalTUsFailed > 0) {
             unsigned cap = std::min(result.totalTUsFailed, 10u);
