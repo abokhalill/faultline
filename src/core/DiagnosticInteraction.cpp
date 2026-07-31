@@ -154,6 +154,17 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 compound.evidenceTier = std::min(dA.evidenceTier,
                                                   dB.evidenceTier);
 
+                // A compound cannot outrank its weaker leg: if one
+                // component's own mechanism was only partly established,
+                // the interaction it participates in is not better
+                // evidenced than that component is.
+                compound.mechanismClaims = {
+                    {"two hazards on one entity, paid together under load",
+                     "both components' own mechanisms established", true,
+                     std::min(dA.severitySupportedByClaims(),
+                              dB.severitySupportedByClaims())},
+                };
+
                 compound.location = dA.location;
                 compound.functionName = dA.functionName.empty()
                     ? dB.functionName : dA.functionName;
@@ -245,6 +256,13 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                 compound.evidenceTier = std::min({dA.evidenceTier,
                                                    dB.evidenceTier,
                                                    dC.evidenceTier});
+                compound.mechanismClaims = {
+                    {"three hazards on one entity, paid together under load",
+                     "all three components' own mechanisms established", true,
+                     std::min({dA.severitySupportedByClaims(),
+                               dB.severitySupportedByClaims(),
+                               dC.severitySupportedByClaims()})},
+                };
                 compound.location = dA.location;
                 compound.functionName = dA.functionName;
 

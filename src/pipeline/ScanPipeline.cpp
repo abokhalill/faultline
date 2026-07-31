@@ -1450,6 +1450,24 @@ static unsigned emitStripedArrayFindings(
                 "base is line-aligned with a padded index origin: slot 0 is "
                 "isolated, slots 1.. still share lines");
 
+        // Striping guarantees single-writer-per-slot, so atomicity is not
+        // what establishes contention here — index provenance and distinct
+        // writers are. The write-frequency tier is the other precondition:
+        // unestablished it must not carry the top grade, which is the same
+        // discipline FL040 and FL011 now follow.
+        d.mechanismClaims = {
+            {"several thread slots share one cache line",
+             "an element stride narrower than the line, unpadded", true,
+             Severity::Medium},
+            {"per-write RFO transfer between the owning cores",
+             "distinct thread-indexed writers reaching separate slots",
+             v.writerCount >= 2 || s.tlsIndexed,
+             v.multiRole ? Severity::Critical : Severity::High},
+            {"the traffic is sustained at hot-path rates",
+             "writes established on a hot path rather than assumed",
+             v.frequency == WriteFrequencyTier::Hot, Severity::Critical},
+        };
+
         {
             std::ostringstream mit;
             switch (v.fixShape) {
