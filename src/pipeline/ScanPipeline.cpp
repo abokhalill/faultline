@@ -1579,6 +1579,17 @@ static unsigned synthesizeUnappliedMitigation(
             "Apply the codebase's existing isolation idiom (as on '" +
             mitigated.front() + "') to the disjoint-writer fields of '" +
             tit->second + "'.";
+        // FL092 asserts nothing about hardware on its own: it inherits the
+        // component's mechanism and adds that this codebase already knows
+        // the fix. So it can never outrank the finding it was built from.
+        c.mechanismClaims = {
+            {"the component hazard's own mechanism",
+             "the attributed finding established it", true,
+             d.severitySupportedByClaims()},
+            {"the fix idiom is established in-tree and was not applied here",
+             "another type in this codebase is deliberately line-isolated",
+             !mitigated.empty(), d.severity},
+        };
         c.escalations = {
             "precedent join: " + std::to_string(mitigated.size()) +
             " deliberately line-isolated type(s) in this codebase"};
