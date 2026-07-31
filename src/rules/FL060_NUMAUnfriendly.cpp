@@ -47,6 +47,15 @@ public:
         if (!canComputeRecordLayout(RD, Ctx))
             return;
 
+        // On one socket there is no remote node, so this rule's entire
+        // mechanism is null and reporting it would spend a reviewer's
+        // attention on a penalty that cannot occur. Socket count is a
+        // deployment property and genuinely unreadable from source, so the
+        // tool takes it from config rather than guessing: 0 leaves the
+        // assumption labelled in the output, as before.
+        if (Cfg.numaSockets == 1)
+            return;
+
         const auto &layout = Ctx.getASTRecordLayout(RD);
         uint64_t sizeBytes = layout.getSize().getQuantity();
 
