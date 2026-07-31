@@ -40,6 +40,7 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("hot_file_patterns",      cfg.hotFilePatterns);
         io.mapOptional("vendor_path_patterns",   cfg.vendorPathPatterns);
         io.mapOptional("skip_vendored",          cfg.skipVendored);
+        io.mapOptional("numa_sockets",           cfg.numaSockets);
         io.mapOptional("disabled_rules",         cfg.disabledRules);
         io.mapOptional("page_size",              cfg.pageSize);
         io.mapOptional("perf_profile_path",      cfg.perfProfilePath);

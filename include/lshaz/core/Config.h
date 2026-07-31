@@ -63,6 +63,12 @@ struct Config {
         "*/node_modules/*", "*/subprojects/*",
     };
 
+    // Deployment socket count. Unlike the preconditions other rules assume,
+    // this one genuinely cannot be read from source; it is a property of
+    // where the binary runs. 0 means unknown, and FL060 then reports with
+    // the assumption labelled.
+    unsigned numaSockets = 0;
+
     // Rule enable/disable
     std::vector<std::string> disabledRules;
 
