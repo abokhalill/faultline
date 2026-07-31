@@ -72,6 +72,21 @@ void run() {
     b.join();
 }
 
+// A loop-swept subscript reached outside any enclosing function. The striped
+// array visitor keyed writer attribution on the current function without
+// filtering that state, which segfaulted the analyzer on rocksdb rather than
+// producing a finding — a crash is a silent recall loss for the whole TU.
+static constexpr int kSeedLen = 8;
+static int seed_table[kSeedLen] = {0, 1, 2, 3, 4, 5, 6, 7};
+struct SeedSum {
+    int value = [] {
+        int acc = 0;
+        for (int i = 0; i < kSeedLen; ++i) acc += seed_table[i];
+        return acc;
+    }();
+};
+static SeedSum g_seed_sum;
+
 } // namespace canary
 
 int main() {

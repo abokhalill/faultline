@@ -162,6 +162,7 @@ public:
 
     // read side: loop-swept access is aggregation, never striping.
     bool VisitArraySubscriptExpr(clang::ArraySubscriptExpr *E) {
+        if (!currentFn) return true;
         if (classify(E->getIdx()) != IndexProvenance::LoopInduction)
             return true;
         if (auto *s = siteFor(E))

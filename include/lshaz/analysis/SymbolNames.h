@@ -5,6 +5,9 @@
 #include <clang/AST/DeclCXX.h>
 #include <clang/Basic/SourceManager.h>
 
+#include <llvm/Support/raw_ostream.h>
+
+#include <cstdlib>
 #include <string>
 
 namespace lshaz {
@@ -15,8 +18,19 @@ namespace lshaz {
 // function stringifies as "(anonymous class)::operator()", collapsing
 // distinct lambdas into one node. Line:col disambiguates; source-stable,
 // TU-local (lambdas never need cross-TU joining).
+//
+// A use outside any function (namespace-scope initializer, default member
+// initializer) has no thread-role node. That is a legitimate AST state, so
+// callers must filter it; returning a placeholder here would insert a bogus
+// node and silently corrupt writer attribution instead of crashing.
 inline std::string threadRoleNodeName(const clang::FunctionDecl *FD,
                                       const clang::ASTContext &Ctx) {
+    if (!FD) {
+        llvm::errs() << "lshaz: FATAL: threadRoleNodeName(nullptr); a caller "
+                        "failed to filter a use outside any function. This is "
+                        "an analysis defect, not a bad input.\n";
+        std::abort();
+    }
     if (const auto *MD = llvm::dyn_cast<clang::CXXMethodDecl>(FD)) {
         const auto *RD = MD->getParent();
         if (RD && RD->isLambda()) {
