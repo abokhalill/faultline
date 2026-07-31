@@ -475,20 +475,20 @@ constexpr int kShardIPCWriteFailed = 42;
 // action differs: raise --memory-limit-mb or lower --jobs.
 constexpr int kShardMemoryExhausted = 43;
 
-// Address space a shard may map, MiB. Deriving from *available* memory rather
-// than total keeps a scan from evicting whatever else the box is doing; the
-// floor is what one template-heavy C++ TU needs before the cap becomes the
-// binding constraint instead of the workload.
+// Address space a shard may map, MiB. Derived from *total* memory, not
+// available: available fluctuates with whatever else the box is doing, and a
+// cap that moves between runs would make output depend on ambient load.
 unsigned resolveShardMemoryLimitMB(unsigned requested, unsigned jobs) {
     if (requested != 0)
         return requested;
-    const long pages = ::sysconf(_SC_AVPHYS_PAGES);
+    const long pages = ::sysconf(_SC_PHYS_PAGES);
     const long pageSz = ::sysconf(_SC_PAGESIZE);
     if (pages <= 0 || pageSz <= 0)
-        return 0; // cannot size it honestly; leave uncapped rather than guess
-    const unsigned long long availMB =
+        return 0; // cannot size it honestly; leave uncapped 
+    const unsigned long long totalMB =
         (static_cast<unsigned long long>(pages) * pageSz) >> 20;
-    const unsigned long long share = availMB / std::max(1u, jobs);
+    // Leave headroom for the parent and the rest of the machine.
+    const unsigned long long share = (totalMB * 3 / 4) / std::max(1u, jobs);
     return static_cast<unsigned>(std::max(2048ULL, share));
 }
 
