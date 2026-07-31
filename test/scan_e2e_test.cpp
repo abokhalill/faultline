@@ -188,11 +188,21 @@ void testEveryRuleHasCanary(const std::string &bin,
 }
 
 void testMechanismClaimsBoundSeverity(const std::string &bin,
-                                      const std::string &fixture) {
+                                      const std::string &fixture,
+                                      const std::string &canaryFixture) {
     std::cerr << "test: severity never outranks an established mechanism\n";
+    // Both fixtures, because the ratchet is only as wide as what the corpus
+    // emits: FL092 stayed unmigrated through a passing run because neither
+    // fixture alone produced it. A gate catches what the corpus contains.
     auto tmp = isolateFixture(fixture, "mech");
     auto r = run(bin + " scan " + (tmp / "project").string() +
                  " --no-ir --format json");
+    if (!canaryFixture.empty()) {
+        auto tmp2 = isolateFixture(canaryFixture, "mech2");
+        r.out += run(bin + " scan " + (tmp2 / "project").string() +
+                     " --no-ir --format json").out;
+        fs::remove_all(tmp2);
+    }
 
     auto rank = [](const std::string &s) {
         if (s == "Critical") return 3;
@@ -759,7 +769,7 @@ int main() {
 
     // Recall canary: registry completeness.
     testEveryRuleHasCanary(bin, fixture, canaryPath());
-    testMechanismClaimsBoundSeverity(bin, fixture);
+    testMechanismClaimsBoundSeverity(bin, fixture, canaryPath());
 
     // Hazard detection.
     testHazardDetectionWithConfig(bin, fixture);
