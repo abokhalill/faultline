@@ -463,6 +463,11 @@ std::string serializeShardResult(int exitCode,
     return buf;
 }
 
+// Child exit status reserved for "analysis ran, IPC handoff failed". Distinct
+// from 1 (analysis itself reported an error) so the parent does not blame the
+// source when the temp filesystem is at fault.
+constexpr int kShardIPCWriteFailed = 42;
+
 struct ShardIPC {
     int exitCode = -1;
     std::vector<FailedTU> failedTUs;
@@ -1909,8 +1914,17 @@ ScanResult ScanPipeline::run(
 
             pid_t pid = fork();
             if (pid < 0) {
+                // The shard's TUs are unanalyzed; they must be accounted as
+                // failed or the scan reports coverage it never had.
                 llvm::errs() << "lshaz: fork() failed for shard " << j
                              << ": " << strerror(errno) << "\n";
+                for (const auto &src : shards[j]) {
+                    FailedTU ftu;
+                    ftu.file = src;
+                    ftu.error = std::string("fork() failed: ") + strerror(errno);
+                    failedTUsDetailed.push_back(ftu);
+                }
+                toolRet = 1;
                 continue;
             }
 
@@ -1962,9 +1976,23 @@ ScanResult ScanPipeline::run(
                     childThreadRoles, childStriped, childCoverage);
                 std::error_code ec;
                 llvm::raw_fd_ostream out(std::string(ipcPath), ec);
-                if (!ec)
-                    out << json;
+                if (ec) {
+                    // Exiting 0 here would hand the parent an absent IPC file
+                    // indistinguishable from a shard that legitimately found
+                    // nothing. Distinct code so the parent can say why.
+                    llvm::errs() << "lshaz: shard " << j
+                                 << " could not write IPC to " << ipcPath
+                                 << ": " << ec.message() << "\n";
+                    _exit(kShardIPCWriteFailed);
+                }
+                out << json;
                 out.close();
+                if (out.has_error()) {
+                    llvm::errs() << "lshaz: shard " << j
+                                 << " failed writing IPC to " << ipcPath
+                                 << ": " << out.error().message() << "\n";
+                    _exit(kShardIPCWriteFailed);
+                }
                 _exit(childRet != 0 ? 1 : 0);
             }
 
@@ -1972,15 +2000,35 @@ ScanResult ScanPipeline::run(
             children.push_back({pid, std::string(ipcPath), j});
         }
 
-        // Reap all children.
+        // Reap all children. A shard is accounted for in exactly one way:
+        // its IPC parsed, or every TU it owned is marked failed. Any path
+        // that does neither converts a lost shard into silently missing
+        // coverage that reads identically to a clean scan.
         for (auto &child : children) {
             int status = 0;
-            waitpid(child.pid, &status, 0);
+            std::string lostReason;
+            if (waitpid(child.pid, &status, 0) < 0) {
+                lostReason = std::string("waitpid() failed: ") + strerror(errno);
+            } else if (WIFSIGNALED(status)) {
+                // Signalled children are unrecoverable even if a partial IPC
+                // file exists: SIGKILL (the OOM killer's signal) can land
+                // mid-write, leaving a prefix that may still parse.
+                lostReason = "killed by signal " +
+                             std::to_string(WTERMSIG(status));
+            } else if (WIFEXITED(status) &&
+                       WEXITSTATUS(status) == kShardIPCWriteFailed) {
+                lostReason = "could not write its IPC file";
+            }
 
-            auto buf = llvm::MemoryBuffer::getFile(child.ipcPath);
-            if (buf) {
+            if (lostReason.empty()) {
+                auto buf = llvm::MemoryBuffer::getFile(child.ipcPath);
                 ShardIPC shard;
-                if (deserializeShardResult((*buf)->getBuffer().str(), shard)) {
+                if (!buf) {
+                    lostReason = "left no IPC file: " + buf.getError().message();
+                } else if (!deserializeShardResult((*buf)->getBuffer().str(),
+                                                   shard)) {
+                    lostReason = "wrote unparseable IPC";
+                } else {
                     if (shard.exitCode != 0) toolRet = shard.exitCode;
                     result.diagnostics.insert(result.diagnostics.end(),
                         std::make_move_iterator(shard.diagnostics.begin()),
@@ -1992,20 +2040,21 @@ ScanResult ScanPipeline::run(
                     result.threadRoleFacts.merge(shard.threadRoles);
                     mergeStripedArrays(result.stripedArrays, shard.striped);
                     result.coverage.merge(shard.coverage);
-                } else {
-                    llvm::errs() << "lshaz: failed to parse IPC from shard "
-                                 << child.shardIdx << "\n";
                 }
-            } else if (WIFSIGNALED(status)) {
-                llvm::errs() << "lshaz: shard " << child.shardIdx
-                             << " killed by signal "
-                             << WTERMSIG(status) << "\n";
+            }
+
+            if (!lostReason.empty()) {
+                llvm::errs() << "lshaz: shard " << child.shardIdx << " ("
+                             << shards[child.shardIdx].size() << " TU(s)) "
+                             << lostReason
+                             << "; its translation units are unanalyzed\n";
                 for (const auto &src : shards[child.shardIdx]) {
                     FailedTU ftu;
                     ftu.file = src;
-                    ftu.error = "killed by signal " + std::to_string(WTERMSIG(status));
+                    ftu.error = "shard lost: " + lostReason;
                     failedTUsDetailed.push_back(ftu);
                 }
+                toolRet = 1;
             }
             llvm::sys::fs::remove(child.ipcPath);
             completedTUs += static_cast<unsigned>(shards[child.shardIdx].size());
