@@ -52,6 +52,13 @@ struct SourceLocation {
 
 SourceLocation resolveSourceLocation(clang::SourceLocation loc,
                                      const clang::SourceManager &SM);
+                                     
+struct MechanismClaim {
+    std::string effect;        // what the hardware does
+    std::string precondition;  // what must hold for it to happen
+    bool        established = false;
+    Severity    supports    = Severity::Informational;
+};
 
 struct Diagnostic {
     std::string    ruleID;
@@ -68,6 +75,24 @@ struct Diagnostic {
 
     // Escalation trace: why severity was raised from base.
     std::vector<std::string> escalations;
+
+    // Mechanism claims, when the rule declares them. Empty means the rule
+    // has not been migrated, which the invariant gate counts and reports
+    // rather than silently passing.
+    std::vector<MechanismClaim> mechanismClaims;
+
+    // Highest severity the established claims justify. Informational when
+    // nothing is established; Critical when the rule declares nothing, so
+    // an unmigrated rule is unconstrained rather than wrongly clamped.
+    Severity severitySupportedByClaims() const {
+        if (mechanismClaims.empty())
+            return Severity::Critical;
+        Severity best = Severity::Informational;
+        for (const auto &c : mechanismClaims)
+            if (c.established && c.supports > best)
+                best = c.supports;
+        return best;
+    }
 
     // Serialize structuralEvidence to "key=value; ..." for output/logging.
     std::string serializeEvidence() const;
