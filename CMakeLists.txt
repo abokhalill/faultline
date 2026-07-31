@@ -17,6 +17,31 @@ include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${CLANG_INCLUDE_DIRS})
 add_definitions(${LLVM_DEFINITIONS})
 
+# The compiler must be able to consume the LLVM headers we just located.
+include(CheckCXXSourceCompiles)
+unset(LSHAZ_TOOLCHAIN_SEES_LLVM CACHE)
+set(CMAKE_REQUIRED_INCLUDES ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS})
+set(CMAKE_REQUIRED_QUIET ON)
+check_cxx_source_compiles(
+    "#include <llvm/Support/raw_ostream.h>\nint main(){return 0;}"
+    LSHAZ_TOOLCHAIN_SEES_LLVM)
+unset(CMAKE_REQUIRED_INCLUDES)
+unset(CMAKE_REQUIRED_QUIET)
+
+if(NOT LSHAZ_TOOLCHAIN_SEES_LLVM)
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} -dumpmachine
+                    OUTPUT_VARIABLE LSHAZ_CXX_TRIPLE
+                    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    set(LSHAZ_TOOLCHAIN_ERROR
+        "${CMAKE_CXX_COMPILER} (target ${LSHAZ_CXX_TRIPLE}) cannot compile against "
+        "the LLVM headers in ${LLVM_INCLUDE_DIRS} on this "
+        "${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR} host. "
+        "If the targets disagree, configure with "
+        "-DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++")
+    string(REPLACE ";" "" LSHAZ_TOOLCHAIN_ERROR "${LSHAZ_TOOLCHAIN_ERROR}")
+    message(FATAL_ERROR "${LSHAZ_TOOLCHAIN_ERROR}")
+endif()
+
 # Prefer the monolithic LLVM target (shared builds with LLVM_BUILD_LLVM_DYLIB=ON).
 # Fall back to individual component libs for static LLVM builds where the
 # monolithic target doesn't exist.
