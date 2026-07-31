@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/core/Rule.h"
+#include "lshaz/analysis/LayoutSafety.h"
 #include "lshaz/core/RuleRegistry.h"
 #include "lshaz/core/HotPathOracle.h"
 #include "lshaz/analysis/EscapeAnalysis.h"
@@ -24,7 +25,10 @@ constexpr uint64_t kTLBSpanBytes = 2ull * 1024 * 1024;
 constexpr uint64_t kMapHugetlb = 0x40000; // linux MAP_HUGETLB
 
 uint64_t typeBytes(clang::ASTContext &Ctx, clang::QualType QT) {
-    if (QT->isDependentType() || QT->isIncompleteType())
+    // Dependent/incomplete is not the whole precondition: error-containing,
+    // undeduced-auto and unexpanded-pack types also make getTypeSizeInChars
+    // undefined, and template C++ produces all of them.
+    if (!canComputeTypeSize(QT, Ctx))
         return 0;
     return static_cast<uint64_t>(Ctx.getTypeSizeInChars(QT).getQuantity());
 }

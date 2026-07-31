@@ -324,7 +324,11 @@ void StripedArrayAnalysis::catalogue(const std::vector<clang::Decl *> &decls) {
 
     for (auto *D : decls) {
         if (auto *VD = llvm::dyn_cast<clang::VarDecl>(D)) {
-            if (VD->hasGlobalStorage() && !VD->isConstexpr())
+            // getDeclAlign is undefined on a dependent type and segfaults on
+            // decltype in an uninstantiated template. add() checks the element
+            // type, but that is too late: this argument is evaluated first.
+            if (VD->hasGlobalStorage() && !VD->isConstexpr() &&
+                canComputeTypeSize(VD->getType(), ctx_))
                 add(VD, VD->getType(),
                     ctx_.getDeclAlign(VD).getQuantity(),
                     VD->getFormalLinkage() == clang::Linkage::Internal, {});
