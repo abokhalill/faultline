@@ -232,8 +232,17 @@ public:
                << "'. Allocator class: " << allocatorClassName(ac)
                << ". ";
             if (ac == AllocatorClass::ThreadLocal) {
+                // A thread-cache hit returns a previously freed chunk from a
+                // per-thread free list: no lock is taken and no page is
+                // mapped, so neither arena contention nor TLB pressure
+                // applies. What remains is the call itself and the locality
+                // loss against inline or stack storage.
                 hw << "Thread-local cache hit expected (" << Cfg.linkedAllocator
-                   << "), low contention. Still incurs TLB pressure for new pages.";
+                   << "): no arena lock and no new page mapping, so neither "
+                   << "contention nor TLB reach is at issue here. The cost is "
+                   << "the allocate/free round trip and the loss of locality "
+                   << "against inline or stack storage — the returned chunk "
+                   << "is typically cold in L1D.";
             } else if (ac == AllocatorClass::Syscall) {
                 hw << "Large allocation triggers mmap syscall. "
                    << "Page fault jitter, TLB shootdown on munmap.";
