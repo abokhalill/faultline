@@ -43,6 +43,60 @@ double safeDouble(double v) {
 
 } // anonymous namespace
 
+// Single source for the diagnostic body: both format() overloads emitted it
+// verbatim, so every schema change had to be made twice or silently diverge.
+void emitDiagnostic(std::ostringstream &os, const Diagnostic &d) {
+    os << "    {\n";
+    os << "      \"ruleID\": \"" << escape(d.ruleID) << "\",\n";
+    os << "      \"title\": \"" << escape(d.title) << "\",\n";
+    os << "      \"severity\": \"" << severityToString(d.severity) << "\",\n";
+    os << "      \"confidence\": " << safeDouble(d.confidence) << ",\n";
+    os << "      \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
+    os << "      \"location\": {\n";
+    os << "        \"file\": \"" << escape(d.location.file) << "\",\n";
+    os << "        \"line\": " << d.location.line << ",\n";
+    os << "        \"column\": " << d.location.column << "\n";
+    os << "      },\n";
+    os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
+    os << "      \"hardwareReasoning\": \"" << escape(d.hardwareReasoning) << "\",\n";
+    os << "      \"structuralEvidence\": {";
+    {
+        bool first = true;
+        for (const auto &[k, v] : d.structuralEvidence) {
+            if (!first) os << ", ";
+            os << "\"" << escape(k) << "\": \"" << escape(v) << "\"";
+            first = false;
+        }
+    }
+    os << "},\n";
+    os << "      \"mitigation\": \"" << escape(d.mitigation) << "\",\n";
+
+    os << "      \"escalations\": [";
+    for (size_t j = 0; j < d.escalations.size(); ++j) {
+        os << "\"" << escape(d.escalations[j]) << "\"";
+        if (j + 1 < d.escalations.size()) os << ", ";
+    }
+    os << "]";
+
+    // Which hardware effects this finding claims, and whether their physical
+    // preconditions were established. A reviewer sees what was proven and
+    // what was only possible without reading the rule.
+    if (!d.mechanismClaims.empty()) {
+        os << ",\n      \"mechanismClaims\": [";
+        for (size_t j = 0; j < d.mechanismClaims.size(); ++j) {
+            const auto &c = d.mechanismClaims[j];
+            os << "\n        {\"effect\": \"" << escape(c.effect)
+               << "\", \"precondition\": \"" << escape(c.precondition)
+               << "\", \"established\": " << (c.established ? "true" : "false")
+               << ", \"supports\": \"" << severityToString(c.supports)
+               << "\"}";
+            if (j + 1 < d.mechanismClaims.size()) os << ",";
+        }
+        os << "\n      ]";
+    }
+    os << "\n    }";
+}
+
 std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnostics) {
     std::ostringstream os;
     os << "{\n";
@@ -51,40 +105,7 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
     os << "  \"diagnostics\": [\n";
 
     for (size_t i = 0; i < diagnostics.size(); ++i) {
-        const auto &d = diagnostics[i];
-        os << "    {\n";
-        os << "      \"ruleID\": \"" << escape(d.ruleID) << "\",\n";
-        os << "      \"title\": \"" << escape(d.title) << "\",\n";
-        os << "      \"severity\": \"" << severityToString(d.severity) << "\",\n";
-        os << "      \"confidence\": " << safeDouble(d.confidence) << ",\n";
-        os << "      \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
-        os << "      \"location\": {\n";
-        os << "        \"file\": \"" << escape(d.location.file) << "\",\n";
-        os << "        \"line\": " << d.location.line << ",\n";
-        os << "        \"column\": " << d.location.column << "\n";
-        os << "      },\n";
-        os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
-        os << "      \"hardwareReasoning\": \"" << escape(d.hardwareReasoning) << "\",\n";
-        os << "      \"structuralEvidence\": {";
-        {
-            bool first = true;
-            for (const auto &[k, v] : d.structuralEvidence) {
-                if (!first) os << ", ";
-                os << "\"" << escape(k) << "\": \"" << escape(v) << "\"";
-                first = false;
-            }
-        }
-        os << "},\n";
-        os << "      \"mitigation\": \"" << escape(d.mitigation) << "\",\n";
-
-        os << "      \"escalations\": [";
-        for (size_t j = 0; j < d.escalations.size(); ++j) {
-            os << "\"" << escape(d.escalations[j]) << "\"";
-            if (j + 1 < d.escalations.size()) os << ", ";
-        }
-        os << "]\n";
-
-        os << "    }";
+        emitDiagnostic(os, diagnostics[i]);
         if (i + 1 < diagnostics.size()) os << ",";
         os << "\n";
     }
@@ -128,40 +149,7 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
     os << "  \"diagnostics\": [\n";
 
     for (size_t i = 0; i < diagnostics.size(); ++i) {
-        const auto &d = diagnostics[i];
-        os << "    {\n";
-        os << "      \"ruleID\": \"" << escape(d.ruleID) << "\",\n";
-        os << "      \"title\": \"" << escape(d.title) << "\",\n";
-        os << "      \"severity\": \"" << severityToString(d.severity) << "\",\n";
-        os << "      \"confidence\": " << safeDouble(d.confidence) << ",\n";
-        os << "      \"evidenceTier\": \"" << evidenceTierName(d.evidenceTier) << "\",\n";
-        os << "      \"location\": {\n";
-        os << "        \"file\": \"" << escape(d.location.file) << "\",\n";
-        os << "        \"line\": " << d.location.line << ",\n";
-        os << "        \"column\": " << d.location.column << "\n";
-        os << "      },\n";
-        os << "      \"functionName\": \"" << escape(d.functionName) << "\",\n";
-        os << "      \"hardwareReasoning\": \"" << escape(d.hardwareReasoning) << "\",\n";
-        os << "      \"structuralEvidence\": {";
-        {
-            bool first = true;
-            for (const auto &[k, v] : d.structuralEvidence) {
-                if (!first) os << ", ";
-                os << "\"" << escape(k) << "\": \"" << escape(v) << "\"";
-                first = false;
-            }
-        }
-        os << "},\n";
-        os << "      \"mitigation\": \"" << escape(d.mitigation) << "\",\n";
-
-        os << "      \"escalations\": [";
-        for (size_t j = 0; j < d.escalations.size(); ++j) {
-            os << "\"" << escape(d.escalations[j]) << "\"";
-            if (j + 1 < d.escalations.size()) os << ", ";
-        }
-        os << "]\n";
-
-        os << "    }";
+        emitDiagnostic(os, diagnostics[i]);
         if (i + 1 < diagnostics.size()) os << ",";
         os << "\n";
     }
