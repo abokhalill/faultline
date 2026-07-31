@@ -174,6 +174,13 @@ public:
             "Split hot (frequently written) and cold (rarely accessed) fields. "
             "Consider per-core replicas with periodic merge.";
 
+        diag.mechanismClaims = {
+            {"per-line RFO transfer across the footprint",
+             "atomics spanning >=2 lines and a sharing route independent of "
+             "them",
+             multiLineAtomics && escapeBeyondAtomics,
+             deliberateLayout ? Severity::Medium : Severity::Critical},
+        };
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));
     }

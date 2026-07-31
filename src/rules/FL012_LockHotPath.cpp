@@ -229,6 +229,16 @@ public:
                 "Partition state to eliminate shared mutable access. "
                 "Use try_lock with fallback to avoid blocking.";
 
+            diag.mechanismClaims = {
+                {"lock acquisition cost and critical-section width",
+                 "a lock taken on a hot path", true,
+                 (site.inLoop && site.isNested) ? Severity::Critical
+                 : (site.inLoop || site.isNested) ? Severity::High
+                                                  : Severity::Medium},
+                {"lock convoy: futex wait and context switch",
+                 "a second thread contending this lock", false,
+                 Severity::Critical},
+            };
             diag.escalations = std::move(escalations);
             out.push_back(std::move(diag));
         }

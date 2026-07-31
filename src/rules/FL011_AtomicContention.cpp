@@ -319,6 +319,15 @@ public:
             "writing core is not established here — severity reflects the "
             "uncontended per-op cost only");
 
+        std::vector<MechanismClaim> claims = {
+            {"LOCK-prefixed op serializes against the store buffer",
+             "an atomic write on a hot path", true,
+             hasLoopWrite ? Severity::Critical : Severity::High},
+            {"cross-core cache line ownership transfer",
+             "a second core writing the same line", false,
+             Severity::Critical},
+        };
+
         auto loc = FD->getLocation();
 
         Diagnostic diag;
@@ -369,6 +378,7 @@ public:
             "Redesign ownership model to single-writer pattern. "
             "Consider thread-local accumulation with periodic merge.";
 
+        diag.mechanismClaims = std::move(claims);
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));
     }
