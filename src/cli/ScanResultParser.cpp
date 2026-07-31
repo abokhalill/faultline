@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <cstdlib>
+#include <llvm/Support/raw_ostream.h>
 #include "ScanResultParser.h"
 
 #include <fstream>
@@ -8,7 +10,7 @@ namespace lshaz {
 
 namespace {
 
-// Tiny helpers — not a real JSON parser, just enough to read lshaz output.
+// Tiny helpers; not a real JSON parser, just enough to read lshaz output.
 
 void skipWS(const std::string &s, size_t &i) {
     while (i < s.size() && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t'))
@@ -75,9 +77,9 @@ void skipValue(const std::string &s, size_t &i) {
     if (s[i] == '{') {
         ++i; int depth = 1;
         while (i < s.size() && depth > 0) {
+            if (s[i] == '"') { parseString(s, i); continue; }
             if (s[i] == '{') ++depth;
             else if (s[i] == '}') --depth;
-            else if (s[i] == '"') { --i; parseString(s, i); continue; }
             ++i;
         }
         return;
@@ -85,9 +87,9 @@ void skipValue(const std::string &s, size_t &i) {
     if (s[i] == '[') {
         ++i; int depth = 1;
         while (i < s.size() && depth > 0) {
+            if (s[i] == '"') { parseString(s, i); continue; }
             if (s[i] == '[') ++depth;
             else if (s[i] == ']') --depth;
-            else if (s[i] == '"') { --i; parseString(s, i); continue; }
             ++i;
         }
         return;
@@ -118,6 +120,8 @@ EvidenceTier parseEvidenceTier(const std::string &str) {
 Diagnostic parseDiagnostic(const std::string &s, size_t &i) {
     Diagnostic d;
     while (true) {
+        const size_t before = i;
+
         skipWS(s, i);
         if (i >= s.size() || s[i] == '}') { if (i < s.size()) ++i; break; }
         std::string key = parseString(s, i);
@@ -168,6 +172,15 @@ Diagnostic parseDiagnostic(const std::string &s, size_t &i) {
         }
 
         expect(s, i, ',');
+
+        if (i <= before) {
+            llvm::errs() << "lshaz: FATAL: scan-result parser stalled at "
+                            "offset " << before
+                         << " on key '" << key
+                         << "'; refusing to loop. This is a parser defect, "
+                            "not a bad input.\n";
+            std::abort();
+        }
     }
     return d;
 }
