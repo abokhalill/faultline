@@ -664,6 +664,18 @@ void testLostShardIsNotACleanScan(const std::string &bin,
     check(summary(clean.err) != summary(killed.err),
           "a lost shard is distinguishable from a clean scan");
 
+    // Same accounting, different cause. A cap too low to analyze anything is
+    // the controllable stand-in for the TU that would otherwise OOM the host,
+    // and the reason must name the cap so the operator knows which knob moved.
+    auto starved = run(scan + " --memory-limit-mb 64");
+    check(starved.exitCode != 0, "memory-starved shard does not exit 0");
+    check(contains(starved.err, "memory cap"),
+          "stderr attributes the loss to the memory cap, not a generic crash");
+    check(contains(starved.err, "--memory-limit-mb"),
+          "stderr names the knob that fixes it");
+    check(contains(summary(starved.err), "failed"),
+          "starved shard's TUs are reported failed");
+
     fs::remove_all(tmp);
 }
 

@@ -45,6 +45,8 @@
 #include <vector>
 
 #include <csignal>
+#include <new>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -468,6 +470,27 @@ std::string serializeShardResult(int exitCode,
 // from 1 (analysis itself reported an error) so the parent does not blame the
 // source when the temp filesystem is at fault.
 constexpr int kShardIPCWriteFailed = 42;
+
+// Shard hit its address-space cap. Distinct from a crash because the operator
+// action differs: raise --memory-limit-mb or lower --jobs.
+constexpr int kShardMemoryExhausted = 43;
+
+// Address space a shard may map, MiB. Deriving from *available* memory rather
+// than total keeps a scan from evicting whatever else the box is doing; the
+// floor is what one template-heavy C++ TU needs before the cap becomes the
+// binding constraint instead of the workload.
+unsigned resolveShardMemoryLimitMB(unsigned requested, unsigned jobs) {
+    if (requested != 0)
+        return requested;
+    const long pages = ::sysconf(_SC_AVPHYS_PAGES);
+    const long pageSz = ::sysconf(_SC_PAGESIZE);
+    if (pages <= 0 || pageSz <= 0)
+        return 0; // cannot size it honestly; leave uncapped rather than guess
+    const unsigned long long availMB =
+        (static_cast<unsigned long long>(pages) * pageSz) >> 20;
+    const unsigned long long share = availMB / std::max(1u, jobs);
+    return static_cast<unsigned>(std::max(2048ULL, share));
+}
 
 struct ShardIPC {
     int exitCode = -1;
@@ -1836,6 +1859,16 @@ ScanResult ScanPipeline::run(
     if (jobs > static_cast<unsigned>(sources.size()))
         jobs = static_cast<unsigned>(sources.size());
 
+    const unsigned shardMemoryLimitMB =
+        resolveShardMemoryLimitMB(request.memoryLimitMB, jobs);
+    if (shardMemoryLimitMB == 0) {
+        llvm::errs() << "lshaz: WARNING cannot read available memory, shards "
+                        "run uncapped; a heavy TU can OOM the host\n";
+    } else if (jobs > 1) {
+        report("memory", std::to_string(shardMemoryLimitMB) +
+                         " MiB cap per shard");
+    }
+
     int toolRet = 0;
 
     llvm::CrashRecoveryContext::Enable();
@@ -1943,6 +1976,32 @@ ScanResult ScanPipeline::run(
                         ::raise(SIGKILL);
                     }
                 }
+
+                if (shardMemoryLimitMB != 0) {
+                    struct rlimit rl;
+                    rl.rlim_cur = static_cast<rlim_t>(shardMemoryLimitMB)
+                                  << 20;
+                    rl.rlim_max = rl.rlim_cur;
+                    if (::setrlimit(RLIMIT_AS, &rl) != 0) {
+                        llvm::errs() << "lshaz: shard " << j
+                                     << " could not set its memory cap: "
+                                     << strerror(errno) << "\n";
+                        _exit(kShardIPCWriteFailed);
+                    }
+                    // Turn allocation failure into a named exit rather than a
+                    // bad_alloc unwinding through Clang into an opaque crash.
+                    llvm::install_bad_alloc_error_handler(
+                        [](void *, const char *reason, bool) {
+                            llvm::errs() << "lshaz: shard exhausted its memory "
+                                            "cap: " << reason << "\n";
+                            _exit(kShardMemoryExhausted);
+                        });
+                    std::set_new_handler([]() {
+                        llvm::errs() << "lshaz: shard exhausted its memory "
+                                        "cap in operator new\n";
+                        _exit(kShardMemoryExhausted);
+                    });
+                }
                 llvm::CrashRecoveryContext::Enable();
                 std::vector<Diagnostic> childDiags;
                 std::vector<FailedTU> childFailed;
@@ -2031,6 +2090,12 @@ ScanResult ScanPipeline::run(
             } else if (WIFEXITED(status) &&
                        WEXITSTATUS(status) == kShardIPCWriteFailed) {
                 lostReason = "could not write its IPC file";
+            } else if (WIFEXITED(status) &&
+                       WEXITSTATUS(status) == kShardMemoryExhausted) {
+                lostReason = "exceeded its " +
+                             std::to_string(shardMemoryLimitMB) +
+                             " MiB memory cap (raise --memory-limit-mb or "
+                             "lower --jobs)";
             }
 
             if (lostReason.empty()) {
@@ -2429,15 +2494,21 @@ ScanResult ScanPipeline::run(
 
     // Extract file paths for compatibility with existing metadata/failedTUs.
     result.failedTUs.clear();
+    result.failedTUErrors.clear();
     result.failedTUs.reserve(failedTUsDetailed.size());
-    for (const auto &ftu : failedTUsDetailed)
+    result.failedTUErrors.reserve(failedTUsDetailed.size());
+    for (const auto &ftu : failedTUsDetailed) {
         result.failedTUs.push_back(ftu.file);
+        result.failedTUErrors.push_back(
+            ftu.error.empty() ? "unspecified" : ftu.error);
+    }
 
     // Summary counts.
     result.totalTUsFailed = static_cast<unsigned>(result.failedTUs.size());
     result.metadata.totalTUs = result.totalTUsAnalyzed;
     result.metadata.failedTUCount = result.totalTUsFailed;
     result.metadata.failedTUs = result.failedTUs;
+    result.metadata.failedTUErrors = result.failedTUErrors;
 
     // Status.
     bool parseError = (toolRet != 0 || result.totalTUsFailed > 0);

@@ -26,8 +26,10 @@ struct ScanResult {
     std::vector<Diagnostic> diagnostics;
     ExecutionMetadata metadata;
 
-    // Per-TU parse failure tracking.
+    // Per-TU parse failure tracking. Parallel arrays: a path with no
+    // reason is a failure we could not explain, which is itself a defect.
     std::vector<std::string> failedTUs;
+    std::vector<std::string> failedTUErrors;
 
     // Cross-TU aggregated escape summary. Merged from all per-TU summaries.
     EscapeSummary escapeSummary;

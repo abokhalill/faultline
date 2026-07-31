@@ -63,6 +63,7 @@ struct ScanArgs {
     unsigned irBatchSize = 1;
     unsigned maxFiles = 0;
     unsigned jobs = 0;
+    unsigned memoryLimitMB = 0;
     std::vector<std::string> includeFiles;
     std::vector<std::string> excludeFiles;
     bool noIR = false;
@@ -95,6 +96,8 @@ void printScanUsage() {
         << "  -s, --min-severity <lv>  Minimum severity (Informational|Medium|High|Critical)\n"
         << "  -e, --min-evidence <t>   Minimum evidence tier (proven|likely|speculative)\n"
         << "  -j, --jobs <N>           Parallel AST analysis jobs (default: nproc)\n"
+        << "      --memory-limit-mb <N> Per-shard address-space cap "
+           "(default: available/jobs)\n"
         << "  -n, --max-files <N>      Maximum translation units to analyze\n"
         << "  -I, --include <pattern>  Only analyze files matching pattern (repeatable)\n"
         << "  -X, --exclude <pattern>  Skip files matching pattern (repeatable)\n"
@@ -172,6 +175,8 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (consumeArgUnsigned(i, argc, argv, "--ir-jobs", args.irJobs)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--ir-batch-size", args.irBatchSize)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--jobs", args.jobs, "-j")) continue;
+        if (consumeArgUnsigned(i, argc, argv, "--memory-limit-mb",
+                               args.memoryLimitMB)) continue;
         if (consumeArgUnsigned(i, argc, argv, "--max-files", args.maxFiles, "-n")) continue;
         { std::string v; if (consumeArg(i, argc, argv, "--include", v, "-I")) { args.includeFiles.push_back(v); continue; } }
         { std::string v; if (consumeArg(i, argc, argv, "--exclude", v, "-X")) { args.excludeFiles.push_back(v); continue; } }
@@ -465,6 +470,7 @@ int runScanCommand(int argc, const char **argv) {
     }
 
     request.analysisJobs = args.jobs;
+    request.memoryLimitMB = args.memoryLimitMB;
 
     request.perfProfilePath = args.perfProfile;
     request.hotnessThreshold = args.hotnessThreshold;
@@ -512,8 +518,12 @@ int runScanCommand(int argc, const char **argv) {
 
         if (result.totalTUsFailed > 0) {
             unsigned cap = std::min(result.totalTUsFailed, 10u);
-            for (unsigned i = 0; i < cap; ++i)
-                llvm::errs() << "  failed: " << result.failedTUs[i] << "\n";
+            for (unsigned i = 0; i < cap; ++i) {
+                llvm::errs() << "  failed: " << result.failedTUs[i];
+                if (i < result.failedTUErrors.size())
+                    llvm::errs() << " — " << result.failedTUErrors[i];
+                llvm::errs() << "\n";
+            }
             if (result.totalTUsFailed > cap)
                 llvm::errs() << "  ... and "
                              << (result.totalTUsFailed - cap) << " more\n";

@@ -25,6 +25,7 @@ struct ExecutionMetadata {
     unsigned totalTUs      = 0;
     unsigned failedTUCount = 0;
     std::vector<std::string> failedTUs;
+    std::vector<std::string> failedTUErrors;
 };
 
 } // namespace lshaz

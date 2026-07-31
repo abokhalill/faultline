@@ -77,6 +77,11 @@ struct ScanRequest {
     // Parallel AST analysis. 0 = hardware_concurrency, 1 = sequential.
     unsigned analysisJobs = 0;
 
+    // Per-shard address-space cap, MiB. A template-heavy TU can exceed the
+    // box and take unrelated processes with it; capping converts that into
+    // one attributable failed shard. 0 = derive from available memory.
+    unsigned memoryLimitMB = 0;
+
     // Perf profile for hotness-guided analysis.
     std::string perfProfilePath;
     double hotnessThreshold = 1.0;
