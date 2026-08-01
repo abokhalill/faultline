@@ -1,5 +1,5 @@
 {
-  "source_scan": "/tmp/claude-1000/-home-ousef-lshaz/5ff57a78-c0f8-41f6-a143-a4df2e1c905a/scratchpad/mc_p1c.json",
+  "source_scan": "/tmp/claude-1000/-home-ousef-lshaz/5ff57a78-c0f8-41f6-a143-a4df2e1c905a/scratchpad/mc_final.json",
   "seed": "lshaz-p2",
   "per_stratum": 6,
   "population": {
@@ -8,19 +8,17 @@
     "FL001/Medium": 89,
     "FL002/High": 8,
     "FL002/Medium": 12,
-    "FL013/Informational": 1,
     "FL013/Medium": 2,
-    "FL020/High": 74,
-    "FL020/Medium": 2,
-    "FL021/High": 2,
-    "FL021/Medium": 21,
+    "FL020/High": 7,
+    "FL020/Medium": 6,
+    "FL021/High": 1,
+    "FL021/Medium": 22,
     "FL040/High": 9,
     "FL040/Medium": 75,
-    "FL050/Informational": 21,
-    "FL050/Medium": 4,
-    "FL061/High": 16,
-    "FL061/Informational": 20,
-    "FL061/Medium": 4,
+    "FL050/Informational": 13,
+    "FL061/High": 9,
+    "FL061/Informational": 3,
+    "FL061/Medium": 2,
     "FL092/High": 2,
     "FL092/Medium": 1
   },
@@ -30,7 +28,9 @@
     "FP": "the stated mechanism cannot apply at this site",
     "?": "not adjudicated"
   },
-  "adjudicators": [],
+  "adjudicators": [
+    "architect (tool author -- anchoring risk, single adjudicator)"
+  ],
   "items": [
     {
       "id": "dcdfea9be54f",
@@ -85,8 +85,8 @@
         "    96      store_io_thread *io_threads;",
         "    97      store_io_thread *bg_thread; /* dedicated thread for write submit / compact ops */"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "TP-NWF",
+      "rationale": "store_engine 360B/7 lines with straddling fields: split load/store is structurally true, but engine state is touched per-IO not per-request."
     },
     {
       "id": "4d6dce808601",
@@ -141,8 +141,8 @@
         "    44      // TODO: logger instance.",
         "    45      pthread_mutex_t lock;"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "TP-NWF",
+      "rationale": "slab_rebal_thread 248B; rebalance is a background maintenance path."
     },
     {
       "id": "610bc634935f",
@@ -197,8 +197,8 @@
         "    61      unsigned int version;",
         "    62      unsigned int refcount;"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "TP-NWF",
+      "rationale": "_store_page 120B/3 lines; straddle is real, page state is per-page and not on the per-request path."
     },
     {
       "id": "a7e9eb94e94c",
@@ -253,8 +253,8 @@
         "    82      store_engine *e;",
         "    83      unsigned int depth; // queue depth"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "TP-NWF",
+      "rationale": "store_io_thread 120B; per-thread struct, so the layout cost is real but uncontended and off the request path."
     },
     {
       "id": "6fd47b8c5c69",
@@ -309,8 +309,8 @@
         "   458      char *inter;",
         "   459      int verbose;"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "FP",
+      "rationale": "settings: claim is 'atomic fields span lines, each needs independent RFO'. RFO requires ownership transfer on write; settings is read-mostly."
     },
     {
       "id": "51f158d3c4c7",
@@ -365,8 +365,8 @@
         "   930      bool miss; // version flipped out from under us",
         "   931  };"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "TP-NWF",
+      "rationale": "storage_compact_wrap 112B; compaction is background."
     },
     {
       "id": "975a20aafb8a",
@@ -750,8 +750,8 @@
         "    58  };",
         "    59  "
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "FP",
+      "rationale": "_crawler_module_t is per-module state owned by the crawler thread."
     },
     {
       "id": "318ebe80c47b",
@@ -799,8 +799,8 @@
         "    83      unsigned int iovcnt; /* number of IOV's */",
         "    84      unsigned int page_version;     /* page version for read mode */"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "FP",
+      "rationale": "_obj_io is a per-request I/O object handed between threads sequentially. One owner at a time, so no concurrent writers to the line."
     },
     {
       "id": "dace374df366",
@@ -848,8 +848,8 @@
         "   436      float         extstore_memory_pressure; /* when extstore might memory evict */",
         "   437      unsigned int  conn_structs;"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "TP",
+      "rationale": "stats_state is global and worker threads increment co-located counters; distinct writers to distinct fields of one line is exactly the RFO ping-pong claimed."
     },
     {
       "id": "c6834bce386d",
@@ -897,8 +897,8 @@
         "   458      char *inter;",
         "   459      int verbose;"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "FP",
+      "rationale": "settings is startup-written, read-mostly config. 931 'mutable pairs' on a struct with no concurrent writers; MESI invalidation needs writes."
     },
     {
       "id": "9c6585d9a055",
@@ -946,8 +946,8 @@
         "   629      rel_time_t      exptime;    /* expire time */",
         "   630      int             nbytes;     /* size of data */"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "FP",
+      "rationale": "crawler item: next/prev/h_next are its own list pointers, single-owner."
     },
     {
       "id": "2feebd9da408",
@@ -995,8 +995,8 @@
         "    26      unsigned int d_clsid;",
         "    27      uint32_t cls_size;"
       ],
-      "verdict": "?",
-      "rationale": ""
+      "verdict": "FP",
+      "rationale": "slab_rebalance is written by the rebalance thread under slabs_lock; single writer, so co-location costs nothing."
     },
     {
       "id": "39d036d0f4d0",
@@ -1293,63 +1293,6 @@
       "rationale": ""
     },
     {
-      "id": "a0b842a8087f",
-      "rule": "FL013",
-      "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/timedrun.c:37",
-      "function": "wait_for_process",
-      "mechanism": "Tight loop polls 'caught_sig' (load spin, 2 body stmt(s)) with no pause/yield/backoff. Every cross-core invalidation of the polled line costs a memory-order machine clear; the spin also starves the SMT sibling's issue ports.",
-      "claims": [
-        {
-          "effect": "memory-order machine clear when the peer's write lands",
-          "precondition": "a tight poll loop with no pause or wait hint",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "sibling starvation: the spin holds issue slots the peer needs to make the progress being waited on",
-          "precondition": "SMT enabled on the deployment",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "RFO ping-pong with the line held Modified",
-          "precondition": "the spin writes each iteration (TAS) rather than reading",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "body_stmts": "2",
-        "form": "load-spin",
-        "polled": "caught_sig",
-        "smt_model": "on"
-      },
-      "context": [
-        "    31      sigaction(SIGINT, &sig_handler, NULL);",
-        "    32      sigaction(SIGUSR1, &sig_handler, NULL);",
-        "    33      sigaction(SIGTERM, &sig_handler, NULL);",
-        "    34      sigaction(SIGPIPE, &sig_handler, NULL);",
-        "    35  ",
-        "    36      /* Loop forever waiting for the process to quit */",
-        "    37>     for (i = 0; ;i++) {",
-        "    38          pid_t p = waitpid(pid, &status, 0);",
-        "    39          if (p == pid) {",
-        "    40              /* child exited.  Let's get out of here */",
-        "    41              rv = WIFEXITED(status) ?",
-        "    42                  WEXITSTATUS(status) :",
-        "    43                  (0x80 | WTERMSIG(status));"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
       "id": "00b9392acb7d",
       "rule": "FL013",
       "_stratum_severity": "Medium",
@@ -1464,78 +1407,12 @@
       "rationale": ""
     },
     {
-      "id": "7dd9255731b7",
+      "id": "6bb217ff32f3",
       "rule": "FL020",
       "_stratum_severity": "High",
-      "site": "/home/ousef/lshaz/memcached-fork/extstore.c:334",
-      "function": "extstore_init",
-      "mechanism": "'free' in hot function 'extstore_init'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
-      "claims": [
-        {
-          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
-          "precondition": "an allocation on a hot path",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "allocator arena lock contention",
-          "precondition": "an allocation not served from the thread cache",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
-          "precondition": "an allocation above the mmap threshold",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the cost is paid on every iteration",
-          "precondition": "the allocation sits inside a loop",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "alloc_escapes": "yes",
-        "alloc_type": "free",
-        "allocator_class": "arena-lock",
-        "flows_to_loop": "no",
-        "function": "extstore_init",
-        "hot_path": "true",
-        "in_loop": "no"
-      },
-      "context": [
-        "   328      e->page_count = temp_page_count;",
-        "   329  ",
-        "   330      e->pages = calloc(e->page_count, sizeof(store_page));",
-        "   331      if (e->pages == NULL) {",
-        "   332          *res = EXTSTORE_INIT_OOM;",
-        "   333          // FIXME: loop-close. make error label",
-        "   334>         free(e);",
-        "   335          return NULL;",
-        "   336      }",
-        "   337  ",
-        "   338      // interleave the pages between devices",
-        "   339      f = NULL; // start at the first device.",
-        "   340      for (i = 0; i < e->page_count; i++) {"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "cfec82375179",
-      "rule": "FL020",
-      "_stratum_severity": "High",
-      "site": "/home/ousef/lshaz/memcached-fork/items.c:1557",
-      "function": "lru_maintainer_thread",
-      "mechanism": "'calloc' in hot function 'lru_maintainer_thread'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "site": "/home/ousef/lshaz/memcached-fork/crawler.c:134",
+      "function": "lru_crawler_close_client",
+      "mechanism": "'free' in hot function 'lru_crawler_close_client'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
       "claims": [
         {
           "effect": "allocate/free round trip, and locality lost against inline or stack storage",
@@ -1570,27 +1447,93 @@
       ],
       "evidence": {
         "alloc_escapes": "no",
-        "alloc_type": "calloc",
+        "alloc_type": "free",
         "allocator_class": "arena-lock",
         "flows_to_loop": "no",
-        "function": "lru_maintainer_thread",
+        "function": "lru_crawler_close_client",
         "hot_path": "true",
         "in_loop": "no"
       },
       "context": [
-        "  1551      useconds_t to_sleep = MIN_LRU_MAINTAINER_SLEEP;",
-        "  1552      useconds_t last_sleep = MIN_LRU_MAINTAINER_SLEEP;",
-        "  1553      rel_time_t last_crawler_check = 0;",
-        "  1554      useconds_t next_juggles[MAX_NUMBER_OF_SLAB_CLASSES] = {0};",
-        "  1555      useconds_t backoff_juggles[MAX_NUMBER_OF_SLAB_CLASSES] = {0};",
-        "  1556      struct crawler_expired_data *cdata =",
-        "  1557>         calloc(1, sizeof(struct crawler_expired_data));",
-        "  1558      if (cdata == NULL) {",
-        "  1559          fprintf(stderr, \"Failed to allocate crawler data for LRU maintainer thread\\n\");",
-        "  1560          abort();",
-        "  1561      }",
-        "  1562      pthread_mutex_init(&cdata->lock, NULL);",
-        "  1563      cdata->crawl_complete = true; // kick off the crawler."
+        "   128  #define LRU_CRAWLER_MINBUFSPACE 8192",
+        "   129  ",
+        "   130  static void lru_crawler_close_client(crawler_client_t *c) {",
+        "   131      //fprintf(stderr, \"CRAWLER: Closing client\\n\");",
+        "   132      sidethread_conn_close(c->c);",
+        "   133      c->c = NULL;",
+        "   134>     free(c->buf);",
+        "   135      c->buf = NULL;",
+        "   136  }",
+        "   137  ",
+        "   138  static void lru_crawler_release_client(crawler_client_t *c) {",
+        "   139      //fprintf(stderr, \"CRAWLER: Closing client\\n\");",
+        "   140      redispatch_conn(c->c);"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
+      "id": "095ddf3a2367",
+      "rule": "FL020",
+      "_stratum_severity": "High",
+      "site": "/home/ousef/lshaz/memcached-fork/crawler.c:148",
+      "function": "lru_crawler_expand_buf",
+      "mechanism": "'realloc' in hot function 'lru_crawler_expand_buf'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "claims": [
+        {
+          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
+          "precondition": "an allocation on a hot path",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "allocator arena lock contention",
+          "precondition": "an allocation not served from the thread cache",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
+          "precondition": "an allocation above the mmap threshold",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "the cost is paid on every iteration",
+          "precondition": "the allocation sits inside a loop",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
+          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
+          "established": false,
+          "gating": true
+        }
+      ],
+      "evidence": {
+        "alloc_escapes": "no",
+        "alloc_type": "realloc",
+        "allocator_class": "arena-lock",
+        "flows_to_loop": "no",
+        "function": "lru_crawler_expand_buf",
+        "hot_path": "true",
+        "in_loop": "no"
+      },
+      "context": [
+        "   142      free(c->buf);",
+        "   143      c->buf = NULL;",
+        "   144  }",
+        "   145  ",
+        "   146  static int lru_crawler_expand_buf(crawler_client_t *c) {",
+        "   147      c->buflen *= 2;",
+        "   148>     char *nb = realloc(c->buf, c->buflen);",
+        "   149      if (nb == NULL) {",
+        "   150          return -1;",
+        "   151      }",
+        "   152      c->buf = nb;",
+        "   153      return 0;",
+        "   154  }"
       ],
       "verdict": "?",
       "rationale": ""
@@ -1662,144 +1605,12 @@
       "rationale": ""
     },
     {
-      "id": "723fdb87b808",
+      "id": "22fa1a371ebc",
       "rule": "FL020",
       "_stratum_severity": "High",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:3684",
-      "function": "server_sockets",
-      "mechanism": "'free' in hot function 'server_sockets'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
-      "claims": [
-        {
-          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
-          "precondition": "an allocation on a hot path",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "allocator arena lock contention",
-          "precondition": "an allocation not served from the thread cache",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
-          "precondition": "an allocation above the mmap threshold",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the cost is paid on every iteration",
-          "precondition": "the allocation sits inside a loop",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "alloc_escapes": "no",
-        "alloc_type": "free",
-        "allocator_class": "arena-lock",
-        "flows_to_loop": "no",
-        "function": "server_sockets",
-        "hot_path": "true",
-        "in_loop": "yes"
-      },
-      "context": [
-        "  3678                  }",
-        "  3679                  ssl_enabled = MC_SSL_ENABLED_NOPEER;",
-        "  3680                  p += strlen(btls) + 1;",
-        "  3681              } else if (strncmp(p, mtls, strlen(mtls)) == 0) {",
-        "  3682                  if (!settings.ssl_enabled) {",
-        "  3683                      fprintf(stderr, \"'otls' option is valid only when SSL is enabled\\n\");",
-        "  3684>                     free(list);",
-        "  3685                      return 1;",
-        "  3686                  }",
-        "  3687                  ssl_enabled = MC_SSL_ENABLED_PEER;",
-        "  3688                  p += strlen(mtls) + 1;",
-        "  3689              }",
-        "  3690  "
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "018fbc81e163",
-      "rule": "FL020",
-      "_stratum_severity": "High",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:3700",
-      "function": "server_sockets",
-      "mechanism": "'free' in hot function 'server_sockets'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
-      "claims": [
-        {
-          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
-          "precondition": "an allocation on a hot path",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "allocator arena lock contention",
-          "precondition": "an allocation not served from the thread cache",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
-          "precondition": "an allocation above the mmap threshold",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the cost is paid on every iteration",
-          "precondition": "the allocation sits inside a loop",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "alloc_escapes": "no",
-        "alloc_type": "free",
-        "allocator_class": "arena-lock",
-        "flows_to_loop": "no",
-        "function": "server_sockets",
-        "hot_path": "true",
-        "in_loop": "yes"
-      },
-      "context": [
-        "  3694              if (strncmp(p, protostr, strlen(protostr)) == 0) {",
-        "  3695                  p += strlen(protostr);",
-        "  3696                  if (*p == '[') {",
-        "  3697                      char *e = strchr(p, ']');",
-        "  3698                      if (e == NULL) {",
-        "  3699                          fprintf(stderr, \"Invalid protocol spec: \\\"%s\\\"\\n\", p);",
-        "  3700>                         free(list);",
-        "  3701                          return 1;",
-        "  3702                      }",
-        "  3703                      char *st = ++p; // skip '[';",
-        "  3704                      *e = '\\0';",
-        "  3705                      size_t len = e - st;",
-        "  3706                      p = ++e; // skip ']'"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "fb29c8eabf9c",
-      "rule": "FL020",
-      "_stratum_severity": "High",
-      "site": "/home/ousef/lshaz/memcached-fork/storage.c:820",
-      "function": "storage_compact_check",
-      "mechanism": "'calloc' in hot function 'storage_compact_check'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:621",
+      "function": "conn_new",
+      "mechanism": "'calloc' in hot function 'conn_new'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
       "claims": [
         {
           "effect": "allocate/free round trip, and locality lost against inline or stack storage",
@@ -1837,35 +1648,167 @@
         "alloc_type": "calloc",
         "allocator_class": "arena-lock",
         "flows_to_loop": "no",
-        "function": "storage_compact_check",
+        "function": "conn_new",
         "hot_path": "true",
         "in_loop": "no"
       },
       "context": [
-        "   814      }",
-        "   815      flags->drop_unread = 0;",
-        "   816  ",
-        "   817      frag_limit = st.page_size * settings.ext_max_frag;",
-        "   818      LOGGER_LOG(l, LOG_SYSEVENTS, LOGGER_COMPACT_FRAGINFO,",
-        "   819              NULL, settings.ext_max_frag, frag_limit);",
-        "   820>     st.page_data = calloc(st.page_count, sizeof(struct extstore_page_data));",
-        "   821      extstore_get_page_data(storage, &st);",
-        "   822  ",
-        "   823      // find either the most fragmented page or the lowest version.",
-        "   824      for (int x = 0; x < st.page_count; x++) {",
-        "   825          buk = &buckets[st.page_data[x].free_bucket];",
-        "   826          buk->pages_total++;"
+        "   615      conn *c;",
+        "   616  ",
+        "   617      assert(sfd >= 0 && sfd < max_fds);",
+        "   618      c = conns[sfd];",
+        "   619  ",
+        "   620      if (NULL == c) {",
+        "   621>         if (!(c = (conn *)calloc(1, sizeof(conn)))) {",
+        "   622              STATS_LOCK();",
+        "   623              stats.malloc_fails++;",
+        "   624              STATS_UNLOCK();",
+        "   625              fprintf(stderr, \"Failed to allocate connection object\\n\");",
+        "   626              return NULL;",
+        "   627          }"
       ],
       "verdict": "?",
       "rationale": ""
     },
     {
-      "id": "85ed42a78804",
+      "id": "6be47606d319",
+      "rule": "FL020",
+      "_stratum_severity": "High",
+      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:638",
+      "function": "conn_new",
+      "mechanism": "'malloc' in hot function 'conn_new'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "claims": [
+        {
+          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
+          "precondition": "an allocation on a hot path",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "allocator arena lock contention",
+          "precondition": "an allocation not served from the thread cache",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
+          "precondition": "an allocation above the mmap threshold",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "the cost is paid on every iteration",
+          "precondition": "the allocation sits inside a loop",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
+          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
+          "established": false,
+          "gating": true
+        }
+      ],
+      "evidence": {
+        "alloc_escapes": "no",
+        "alloc_type": "malloc",
+        "allocator_class": "arena-lock",
+        "flows_to_loop": "no",
+        "function": "conn_new",
+        "hot_path": "true",
+        "in_loop": "no"
+      },
+      "context": [
+        "   632          c->rbuf = NULL;",
+        "   633  ",
+        "   634          c->rsize = read_buffer_size;",
+        "   635  ",
+        "   636          // UDP connections use a persistent static buffer.",
+        "   637          if (c->rsize) {",
+        "   638>             c->rbuf = (char *)malloc((size_t)c->rsize);",
+        "   639          }",
+        "   640  ",
+        "   641          if (c->rsize && c->rbuf == NULL) {",
+        "   642              conn_free(c);",
+        "   643              STATS_LOCK();",
+        "   644              stats.malloc_fails++;"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
+      "id": "8acc1ba6f16e",
+      "rule": "FL020",
+      "_stratum_severity": "High",
+      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:858",
+      "function": "conn_free",
+      "mechanism": "'free' in hot function 'conn_free'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "claims": [
+        {
+          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
+          "precondition": "an allocation on a hot path",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "allocator arena lock contention",
+          "precondition": "an allocation not served from the thread cache",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
+          "precondition": "an allocation above the mmap threshold",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "the cost is paid on every iteration",
+          "precondition": "the allocation sits inside a loop",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
+          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
+          "established": false,
+          "gating": true
+        }
+      ],
+      "evidence": {
+        "alloc_escapes": "no",
+        "alloc_type": "free",
+        "allocator_class": "arena-lock",
+        "flows_to_loop": "no",
+        "function": "conn_free",
+        "hot_path": "true",
+        "in_loop": "no"
+      },
+      "context": [
+        "   852          assert(c != NULL);",
+        "   853          assert(c->sfd >= 0 && c->sfd < max_fds);",
+        "   854  ",
+        "   855          MEMCACHED_CONN_DESTROY(c);",
+        "   856          conns[c->sfd] = NULL;",
+        "   857          if (c->rbuf)",
+        "   858>             free(c->rbuf);",
+        "   859  #ifdef TLS",
+        "   860          if (c->ssl_wbuf)",
+        "   861              c->ssl_wbuf = NULL;",
+        "   862  #endif",
+        "   863  ",
+        "   864          free(c);"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
+      "id": "ffb55b25f690",
       "rule": "FL020",
       "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/testapp.c:2010",
-      "function": "binary_hickup_recv_verification_thread",
-      "mechanism": "'malloc' in hot function 'binary_hickup_recv_verification_thread'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "site": "/home/ousef/lshaz/memcached-fork/assoc.c:125",
+      "function": "assoc_expand",
+      "mechanism": "'calloc' in hot function 'assoc_expand'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
       "claims": [
         {
           "effect": "allocate/free round trip, and locality lost against inline or stack storage",
@@ -1900,38 +1843,38 @@
       ],
       "evidence": {
         "alloc_escapes": "no",
-        "alloc_type": "malloc",
+        "alloc_type": "calloc",
         "allocator_class": "arena-lock",
         "flows_to_loop": "no",
-        "function": "binary_hickup_recv_verification_thread",
+        "function": "assoc_expand",
         "hot_path": "true",
         "in_loop": "no"
       },
       "context": [
-        "  2004      return TEST_PASS;",
-        "  2005  }",
-        "  2006  ",
-        "  2007  volatile bool hickup_thread_running;",
-        "  2008  ",
-        "  2009  static void *binary_hickup_recv_verification_thread(void *arg) {",
-        "  2010>     protocol_binary_response_no_extras *response = malloc(65*1024);",
-        "  2011      if (response != NULL) {",
-        "  2012          while (safe_recv_packet(response, 65*1024)) {",
-        "  2013              /* Just validate the packet format */",
-        "  2014              validate_response_header(response,",
-        "  2015                                       response->message.header.response.opcode,",
-        "  2016                                       response->message.header.response.status);"
+        "   119  }",
+        "   120  ",
+        "   121  /* grows the hashtable to the next power of 2. */",
+        "   122  static void assoc_expand(void) {",
+        "   123      old_hashtable = primary_hashtable;",
+        "   124  ",
+        "   125>     primary_hashtable = calloc(hashsize(hashpower + 1), sizeof(void *));",
+        "   126      if (primary_hashtable) {",
+        "   127          if (settings.verbose > 1)",
+        "   128              fprintf(stderr, \"Hash table expansion starting\\n\");",
+        "   129          hashpower++;",
+        "   130          expanding = true;",
+        "   131          expand_bucket = 0;"
       ],
       "verdict": "?",
       "rationale": ""
     },
     {
-      "id": "490c67d8baf8",
+      "id": "972b312ccc16",
       "rule": "FL020",
       "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/testapp.c:2018",
-      "function": "binary_hickup_recv_verification_thread",
-      "mechanism": "'free' in hot function 'binary_hickup_recv_verification_thread'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "site": "/home/ousef/lshaz/memcached-fork/crawler.c:142",
+      "function": "lru_crawler_release_client",
+      "mechanism": "'free' in hot function 'lru_crawler_release_client'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
       "claims": [
         {
           "effect": "allocate/free round trip, and locality lost against inline or stack storage",
@@ -1965,80 +1908,292 @@
         }
       ],
       "evidence": {
-        "alloc_escapes": "yes",
+        "alloc_escapes": "no",
         "alloc_type": "free",
         "allocator_class": "arena-lock",
         "flows_to_loop": "no",
-        "function": "binary_hickup_recv_verification_thread",
+        "function": "lru_crawler_release_client",
         "hot_path": "true",
         "in_loop": "no"
       },
       "context": [
-        "  2012          while (safe_recv_packet(response, 65*1024)) {",
-        "  2013              /* Just validate the packet format */",
-        "  2014              validate_response_header(response,",
-        "  2015                                       response->message.header.response.opcode,",
-        "  2016                                       response->message.header.response.status);",
-        "  2017          }",
-        "  2018>         free(response);",
-        "  2019      }",
-        "  2020      hickup_thread_running = false;",
-        "  2021      allow_closed_read = false;",
-        "  2022      return NULL;",
-        "  2023  }",
-        "  2024  "
+        "   136  }",
+        "   137  ",
+        "   138  static void lru_crawler_release_client(crawler_client_t *c) {",
+        "   139      //fprintf(stderr, \"CRAWLER: Closing client\\n\");",
+        "   140      redispatch_conn(c->c);",
+        "   141      c->c = NULL;",
+        "   142>     free(c->buf);",
+        "   143      c->buf = NULL;",
+        "   144  }",
+        "   145  ",
+        "   146  static int lru_crawler_expand_buf(crawler_client_t *c) {",
+        "   147      c->buflen *= 2;",
+        "   148      char *nb = realloc(c->buf, c->buflen);"
       ],
       "verdict": "?",
       "rationale": ""
     },
     {
-      "id": "7041e788d723",
-      "rule": "FL021",
-      "_stratum_severity": "High",
-      "site": "/home/ousef/lshaz/memcached-fork/items.c:782",
-      "function": "item_stats",
-      "mechanism": "Function 'item_stats' estimated stack frame ~6932B, ~109 cache line(s) across 2 page(s). Spanning more than one page grows the D-TLB working set and risks a stack page fault on first touch, on top of L1D capacity pressure.",
+      "id": "ea4205b20881",
+      "rule": "FL020",
+      "_stratum_severity": "Medium",
+      "site": "/home/ousef/lshaz/memcached-fork/slabs_mover.c:100",
+      "function": "slab_rebalance_start",
+      "mechanism": "'calloc' in hot function 'slab_rebalance_start'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
       "claims": [
         {
-          "effect": "L1D capacity pressure from lines touched on entry",
-          "precondition": "a stack frame large enough to matter on a hot path",
+          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
+          "precondition": "an allocation on a hot path",
           "established": true,
           "gating": false
         },
         {
-          "effect": "D-TLB working-set growth and stack page-fault risk",
-          "precondition": "a frame spanning more than one page",
+          "effect": "allocator arena lock contention",
+          "precondition": "an allocation not served from the thread cache",
           "established": true,
           "gating": false
         },
         {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
+          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
+          "precondition": "an allocation above the mmap threshold",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "the cost is paid on every iteration",
+          "precondition": "the allocation sits inside a loop",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
           "precondition": "hotness established by profile or declaration, not inferred from shape alone",
           "established": false,
           "gating": true
         }
       ],
       "evidence": {
-        "estimated_frame": "6932B",
-        "ir_allocas": "4",
-        "ir_frame": "6720B",
-        "large_locals": "thread_stats(6448B)",
-        "threshold": "2048B"
+        "alloc_escapes": "no",
+        "alloc_type": "calloc",
+        "allocator_class": "arena-lock",
+        "flows_to_loop": "no",
+        "function": "slab_rebalance_start",
+        "hot_path": "true",
+        "in_loop": "no"
       },
       "context": [
-        "   776                      (unsigned long long)totals.direct_reclaims);",
-        "   777          APPEND_STAT(\"lru_bumps_dropped\", \"%llu\",",
-        "   778                      (unsigned long long)lru_total_bumps_dropped());",
-        "   779      }",
-        "   780  }",
-        "   781  ",
-        "   782> void item_stats(ADD_STAT add_stats, void *c) {",
-        "   783      struct thread_stats thread_stats;",
-        "   784      threadlocal_stats_aggregate(&thread_stats);",
-        "   785      itemstats_t totals;",
-        "   786      int n;",
-        "   787      for (n = 0; n < MAX_NUMBER_OF_SLAB_CLASSES; n++) {",
-        "   788          memset(&totals, 0, sizeof(itemstats_t));"
+        "    94          t->allow_evictions = true;",
+        "    95      }",
+        "    96  ",
+        "    97      void *page = slabs_peek_page(t->rebal.s_clsid, &size, &perslab);",
+        "    98  ",
+        "    99      // Bit-vector to keep track of completed chunks",
+        "   100>     t->rebal.completed = (uint8_t*)calloc(perslab,sizeof(uint8_t));",
+        "   101      if (!t->rebal.completed) {",
+        "   102          return -1;",
+        "   103      }",
+        "   104  ",
+        "   105      /* Always kill the first available slab page as it is most likely to",
+        "   106       * contain the oldest items"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
+      "id": "2f85bae9740a",
+      "rule": "FL020",
+      "_stratum_severity": "Medium",
+      "site": "/home/ousef/lshaz/memcached-fork/slabs_mover.c:550",
+      "function": "slab_rebalance_finish",
+      "mechanism": "'free' in hot function 'slab_rebalance_finish'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "claims": [
+        {
+          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
+          "precondition": "an allocation on a hot path",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "allocator arena lock contention",
+          "precondition": "an allocation not served from the thread cache",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
+          "precondition": "an allocation above the mmap threshold",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "the cost is paid on every iteration",
+          "precondition": "the allocation sits inside a loop",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
+          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
+          "established": false,
+          "gating": true
+        }
+      ],
+      "evidence": {
+        "alloc_escapes": "no",
+        "alloc_type": "free",
+        "allocator_class": "arena-lock",
+        "flows_to_loop": "no",
+        "function": "slab_rebalance_finish",
+        "hot_path": "true",
+        "in_loop": "no"
+      },
+      "context": [
+        "   544      stats.slab_reassign_chunk_rescues += t->rebal.chunk_rescues;",
+        "   545      stats.slab_reassign_busy_deletes += t->rebal.busy_deletes;",
+        "   546      stats.slab_reassign_busy_nomem += t->rebal.busy_nomem;",
+        "   547      stats_state.slab_reassign_running = false;",
+        "   548      STATS_UNLOCK();",
+        "   549  ",
+        "   550>     free(t->rebal.completed);",
+        "   551      memset(&t->rebal, 0, sizeof(t->rebal));",
+        "   552      t->allow_evictions = false;",
+        "   553  }",
+        "   554  ",
+        "   555  static int slab_rebalance_check_automove(struct slab_rebal_thread *t,",
+        "   556          struct timespec *now) {"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
+      "id": "fb29c8eabf9c",
+      "rule": "FL020",
+      "_stratum_severity": "Medium",
+      "site": "/home/ousef/lshaz/memcached-fork/storage.c:820",
+      "function": "storage_compact_check",
+      "mechanism": "'calloc' in hot function 'storage_compact_check'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "claims": [
+        {
+          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
+          "precondition": "an allocation on a hot path",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "allocator arena lock contention",
+          "precondition": "an allocation not served from the thread cache",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
+          "precondition": "an allocation above the mmap threshold",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "the cost is paid on every iteration",
+          "precondition": "the allocation sits inside a loop",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
+          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
+          "established": false,
+          "gating": true
+        }
+      ],
+      "evidence": {
+        "alloc_escapes": "no",
+        "alloc_type": "calloc",
+        "allocator_class": "arena-lock",
+        "flows_to_loop": "no",
+        "function": "storage_compact_check",
+        "hot_path": "true",
+        "in_loop": "no"
+      },
+      "context": [
+        "   814      }",
+        "   815      flags->drop_unread = 0;",
+        "   816  ",
+        "   817      frag_limit = st.page_size * settings.ext_max_frag;",
+        "   818      LOGGER_LOG(l, LOG_SYSEVENTS, LOGGER_COMPACT_FRAGINFO,",
+        "   819              NULL, settings.ext_max_frag, frag_limit);",
+        "   820>     st.page_data = calloc(st.page_count, sizeof(struct extstore_page_data));",
+        "   821      extstore_get_page_data(storage, &st);",
+        "   822  ",
+        "   823      // find either the most fragmented page or the lowest version.",
+        "   824      for (int x = 0; x < st.page_count; x++) {",
+        "   825          buk = &buckets[st.page_data[x].free_bucket];",
+        "   826          buk->pages_total++;"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
+      "id": "6797ac3db757",
+      "rule": "FL020",
+      "_stratum_severity": "Medium",
+      "site": "/home/ousef/lshaz/memcached-fork/storage.c:853",
+      "function": "storage_compact_check",
+      "mechanism": "'free' in hot function 'storage_compact_check'. Allocator class: arena-lock. May contend on allocator arena locks, trigger mmap/brk syscalls, fault new pages into the TLB, and fragment the heap reducing spatial locality. [Assumes: allocation frequency is high at runtime on this path]",
+      "claims": [
+        {
+          "effect": "allocate/free round trip, and locality lost against inline or stack storage",
+          "precondition": "an allocation on a hot path",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "allocator arena lock contention",
+          "precondition": "an allocation not served from the thread cache",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "mmap syscall, page faults, TLB shootdown on munmap",
+          "precondition": "an allocation above the mmap threshold",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "the cost is paid on every iteration",
+          "precondition": "the allocation sits inside a loop",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
+          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
+          "established": false,
+          "gating": true
+        }
+      ],
+      "evidence": {
+        "alloc_escapes": "no",
+        "alloc_type": "free",
+        "allocator_class": "arena-lock",
+        "flows_to_loop": "no",
+        "function": "storage_compact_check",
+        "hot_path": "true",
+        "in_loop": "no"
+      },
+      "context": [
+        "   847              buk->low_page = x;",
+        "   848              buk->low_version = st.page_data[x].version;",
+        "   849              buk->bytes_fragmented = frag;",
+        "   850          }",
+        "   851      }",
+        "   852      *page_size = st.page_size;",
+        "   853>     free(st.page_data);",
+        "   854  ",
+        "   855      buk = &buckets[PAGE_BUCKET_COLDCOMPACT];",
+        "   856      if (buk->pages_total != 0) {",
+        "   857          flags->has_coldcompact = 1;",
+        "   858          if (buk->pages_free == 0 && buk->lowest_version != ULLONG_MAX) {",
+        "   859              extstore_evict_page(storage, buk->lowest_page, buk->lowest_version);"
       ],
       "verdict": "?",
       "rationale": ""
@@ -2094,12 +2249,12 @@
       "rationale": ""
     },
     {
-      "id": "fed8cc5041e1",
+      "id": "69afb43ec4fa",
       "rule": "FL021",
       "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:2032",
-      "function": "get_conn_text",
-      "mechanism": "Function 'get_conn_text' estimated stack frame ~4118B, ~65 cache line(s) across 2 page(s). Spanning more than one page grows the D-TLB working set and risks a stack page fault on first touch, on top of L1D capacity pressure.",
+      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:1755",
+      "function": "server_stats",
+      "mechanism": "Function 'server_stats' estimated stack frame ~6664B, ~105 cache line(s) across 2 page(s). Spanning more than one page grows the D-TLB working set and risks a stack page fault on first touch, on top of L1D capacity pressure.",
       "claims": [
         {
           "effect": "L1D capacity pressure from lines touched on entry",
@@ -2115,26 +2270,70 @@
         }
       ],
       "evidence": {
-        "estimated_frame": "4118B",
-        "ir_allocas": "1",
-        "ir_frame": "4096B",
-        "large_locals": "addr_text(4096B)",
+        "estimated_frame": "6664B",
+        "ir_allocas": "3",
+        "ir_frame": "6656B",
+        "large_locals": "thread_stats(6448B)",
         "threshold": "2048B"
       },
       "context": [
-        "  2026          ret = false;",
-        "  2027      }",
-        "  2028  ",
-        "  2029      return ret;",
-        "  2030  }",
-        "  2031  ",
-        "  2032> static inline void get_conn_text(const conn *c, const int af,",
-        "  2033                  char* addr, struct sockaddr *sock_addr) {",
-        "  2034      char addr_text[MAXPATHLEN];",
-        "  2035      addr_text[0] = '\\0';",
-        "  2036      const char *protoname = \"?\";",
-        "  2037      unsigned short port = 0;",
-        "  2038  "
+        "  1749      va_end(ap);",
+        "  1750  ",
+        "  1751      add_stats(name, strlen(name), val_str, vlen, c);",
+        "  1752  }",
+        "  1753  ",
+        "  1754  /* return server specific stats only */",
+        "  1755> void server_stats(ADD_STAT add_stats, void *c) {",
+        "  1756      pid_t pid = getpid();",
+        "  1757      rel_time_t now = current_time;",
+        "  1758  ",
+        "  1759      struct thread_stats thread_stats;",
+        "  1760      threadlocal_stats_aggregate(&thread_stats);",
+        "  1761      struct slab_stats slab_stats;"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
+      "id": "b5025b18883e",
+      "rule": "FL021",
+      "_stratum_severity": "Medium",
+      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:2685",
+      "function": "transmit",
+      "mechanism": "Function 'transmit' estimated stack frame ~16452B, ~258 cache line(s) across 5 page(s). Spanning more than one page grows the D-TLB working set and risks a stack page fault on first touch, on top of L1D capacity pressure.",
+      "claims": [
+        {
+          "effect": "L1D capacity pressure from lines touched on entry",
+          "precondition": "a stack frame large enough to matter on a hot path",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "D-TLB working-set growth and stack page-fault risk",
+          "precondition": "a frame spanning more than one page",
+          "established": true,
+          "gating": false
+        }
+      ],
+      "evidence": {
+        "estimated_frame": "16452B",
+        "large_locals": "iovs(16384B)",
+        "threshold": "2048B"
+      },
+      "context": [
+        "  2679   * Returns:",
+        "  2680   *   TRANSMIT_COMPLETE   All done writing.",
+        "  2681   *   TRANSMIT_INCOMPLETE More data remaining to write.",
+        "  2682   *   TRANSMIT_SOFT_ERROR Can't write any more right now.",
+        "  2683   *   TRANSMIT_HARD_ERROR Can't write (c->state is set to conn_closing)",
+        "  2684   */",
+        "  2685> static enum transmit_result transmit(conn *c) {",
+        "  2686      assert(c != NULL);",
+        "  2687      struct iovec iovs[IOV_MAX];",
+        "  2688      struct msghdr msg;",
+        "  2689      int iovused = 0;",
+        "  2690  ",
+        "  2691      // init the msg."
       ],
       "verdict": "?",
       "rationale": ""
@@ -2202,12 +2401,6 @@
           "precondition": "a frame spanning more than one page",
           "established": false,
           "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
         }
       ],
       "evidence": {
@@ -2234,12 +2427,12 @@
       "rationale": ""
     },
     {
-      "id": "4943fe442454",
+      "id": "fdb07c374793",
       "rule": "FL021",
       "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:4688",
-      "function": "main",
-      "mechanism": "Function 'main' estimated stack frame ~2052B, ~33 cache line(s) across 1 page(s). Within a single page, so the cost is L1D capacity pressure from the lines touched on entry, not D-TLB reach \u2014 the stack's own pages stay resident.",
+      "site": "/home/ousef/lshaz/memcached-fork/testapp.c:881",
+      "function": "test_issue_102",
+      "mechanism": "Function 'test_issue_102' estimated stack frame ~4188B, ~66 cache line(s) across 2 page(s). Spanning more than one page grows the D-TLB working set and risks a stack page fault on first touch, on top of L1D capacity pressure.",
       "claims": [
         {
           "effect": "L1D capacity pressure from lines touched on entry",
@@ -2250,94 +2443,42 @@
         {
           "effect": "D-TLB working-set growth and stack page-fault risk",
           "precondition": "a frame spanning more than one page",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "estimated_frame": "2052B",
-        "ir_allocas": "23",
-        "ir_frame": "4330B",
-        "large_locals": "slab_sizes(256B), subopts_tokens(320B), longopts(1184B)",
-        "threshold": "2048B"
-      },
-      "context": [
-        "  4682          reuse_mmap = -1;",
-        "  4683      }",
-        "  4684  ",
-        "  4685      return reuse_mmap;",
-        "  4686  }",
-        "  4687  ",
-        "  4688> int main (int argc, char **argv) {",
-        "  4689      int c;",
-        "  4690      bool lock_memory = false;",
-        "  4691      bool do_daemonize = false;",
-        "  4692      bool preallocate = false;",
-        "  4693      int maxcore = 0;",
-        "  4694      char *username = NULL;"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "3dd2bf65e933",
-      "rule": "FL021",
-      "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/testapp.c:1383",
-      "function": "test_binary_set_impl",
-      "mechanism": "Function 'test_binary_set_impl' estimated stack frame ~2069B, ~33 cache line(s) across 1 page(s). Within a single page, so the cost is L1D capacity pressure from the lines touched on entry, not D-TLB reach \u2014 the stack's own pages stay resident.",
-      "claims": [
-        {
-          "effect": "L1D capacity pressure from lines touched on entry",
-          "precondition": "a stack frame large enough to matter on a hot path",
           "established": true,
           "gating": false
-        },
-        {
-          "effect": "D-TLB working-set growth and stack page-fault risk",
-          "precondition": "a frame spanning more than one page",
-          "established": false,
-          "gating": false
         }
       ],
       "evidence": {
-        "estimated_frame": "2069B",
+        "estimated_frame": "4188B",
         "ir_allocas": "2",
-        "ir_frame": "2048B",
-        "large_locals": "send(1024B), receive(1024B)",
+        "ir_frame": "4176B",
+        "large_locals": "buffer(4096B)",
         "threshold": "2048B"
       },
       "context": [
-        "  1377  }",
-        "  1378  ",
-        "  1379  static enum test_return test_binary_quitq(void) {",
-        "  1380      return test_binary_quit_impl(PROTOCOL_BINARY_CMD_QUITQ);",
-        "  1381  }",
-        "  1382  ",
-        "  1383> static enum test_return test_binary_set_impl(const char *key, uint8_t cmd) {",
-        "  1384      union {",
-        "  1385          protocol_binary_request_no_extras request;",
-        "  1386          protocol_binary_response_no_extras response;",
-        "  1387          char bytes[1024];",
-        "  1388      } send, receive;",
-        "  1389      uint64_t value = 0xdeadbeefdeadcafe;"
+        "   875      assert(crc_hw == 0xed37b906);",
+        "   876      assert(crc_sw == 0xed37b906);",
+        "   877  ",
+        "   878      return TEST_PASS;",
+        "   879  }",
+        "   880  ",
+        "   881> static enum test_return test_issue_102(void) {",
+        "   882      char buffer[4096];",
+        "   883      memset(buffer, ' ', sizeof(buffer));",
+        "   884      buffer[sizeof(buffer) - 1] = '\\0';",
+        "   885  ",
+        "   886      close_conn();",
+        "   887      con = connect_server(\"127.0.0.1\", port, false, enable_ssl);"
       ],
       "verdict": "?",
       "rationale": ""
     },
     {
-      "id": "166592569e5f",
+      "id": "dc729500d812",
       "rule": "FL021",
       "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/testapp.c:1643",
-      "function": "test_binary_getq_impl",
-      "mechanism": "Function 'test_binary_getq_impl' estimated stack frame ~3109B, ~49 cache line(s) across 1 page(s). Within a single page, so the cost is L1D capacity pressure from the lines touched on entry, not D-TLB reach \u2014 the stack's own pages stay resident.",
+      "site": "/home/ousef/lshaz/memcached-fork/testapp.c:1572",
+      "function": "test_binary_get_impl",
+      "mechanism": "Function 'test_binary_get_impl' estimated stack frame ~3105B, ~49 cache line(s) across 1 page(s). Within a single page, so the cost is L1D capacity pressure from the lines touched on entry, not D-TLB reach \u2014 the stack's own pages stay resident.",
       "claims": [
         {
           "effect": "L1D capacity pressure from lines touched on entry",
@@ -2353,26 +2494,26 @@
         }
       ],
       "evidence": {
-        "estimated_frame": "3109B",
+        "estimated_frame": "3105B",
         "ir_allocas": "4",
         "ir_frame": "3076B",
-        "large_locals": "send(1024B), temp(1024B), receive(1024B)",
+        "large_locals": "send(1024B), receive(1024B), temp(1024B)",
         "threshold": "2048B"
       },
       "context": [
-        "  1637  }",
-        "  1638  ",
-        "  1639  static enum test_return test_binary_gatk(void) {",
-        "  1640      return test_binary_get_impl(\"test_binary_gatk\", PROTOCOL_BINARY_CMD_GATK);",
-        "  1641  }",
-        "  1642  ",
-        "  1643> static enum test_return test_binary_getq_impl(const char *key, uint8_t cmd) {",
-        "  1644      const char *missing = \"test_binary_getq_missing\";",
-        "  1645      union {",
-        "  1646          protocol_binary_request_no_extras request;",
-        "  1647          protocol_binary_response_no_extras response;",
-        "  1648          char bytes[1024];",
-        "  1649      } send, temp, receive;"
+        "  1566  ",
+        "  1567  static enum test_return test_binary_deleteq(void) {",
+        "  1568      return test_binary_delete_impl(\"test_binary_deleteq\",",
+        "  1569                                     PROTOCOL_BINARY_CMD_DELETEQ);",
+        "  1570  }",
+        "  1571  ",
+        "  1572> static enum test_return test_binary_get_impl(const char *key, uint8_t cmd) {",
+        "  1573      union {",
+        "  1574          protocol_binary_request_no_extras request;",
+        "  1575          protocol_binary_response_no_extras response;",
+        "  1576          char bytes[1024];",
+        "  1577      } send, receive;",
+        "  1578  "
       ],
       "verdict": "?",
       "rationale": ""
@@ -2978,6 +3119,63 @@
       "rationale": ""
     },
     {
+      "id": "2736715af69c",
+      "rule": "FL050",
+      "_stratum_severity": "Informational",
+      "site": "/home/ousef/lshaz/memcached-fork/crawler.c:483",
+      "function": "lru_crawler_write",
+      "mechanism": "Conditional nesting depth 4 in hot function 'lru_crawler_write'. Each nested branch is a prediction point. Deep trees create correlated misprediction chains that defeat pattern-based predictors. [Assumes: branch outcomes are not consistently predictable]",
+      "claims": [
+        {
+          "effect": "branch prediction surface on a hot path",
+          "precondition": "a deep nest or a large switch in a hot function",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "indirect jump the BTB must predict among many targets",
+          "precondition": "a switch whose arms are real work, not a constant lookup",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "correlated misprediction chains that defeat pattern predictors",
+          "precondition": "nesting depth at or beyond six",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
+          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
+          "established": false,
+          "gating": true
+        }
+      ],
+      "evidence": {
+        "depth": "4",
+        "function": "lru_crawler_write",
+        "max_depth": "4",
+        "type": "nested_if"
+      },
+      "context": [
+        "   477              lru_crawler_close_client(c);",
+        "   478              return -1;",
+        "   479          } else if (to_poll[0].revents & POLLOUT) {",
+        "   480              // socket is writeable.",
+        "   481              int total = ((conn*)c->c)->write(c->c, c->buf + sent, data_size - sent);",
+        "   482              if (total == -1) {",
+        "   483>                 if (errno != EAGAIN && errno != EWOULDBLOCK) {",
+        "   484                      lru_crawler_close_client(c);",
+        "   485                      return -1;",
+        "   486                  }",
+        "   487              } else if (total == 0) {",
+        "   488                  lru_crawler_close_client(c);",
+        "   489                  return -1;"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
       "id": "41e2bfaf0751",
       "rule": "FL050",
       "_stratum_severity": "Informational",
@@ -3004,7 +3202,7 @@
           "gating": false
         },
         {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
+          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
           "precondition": "hotness established by profile or declaration, not inferred from shape alone",
           "established": false,
           "gating": true
@@ -3035,12 +3233,12 @@
       "rationale": ""
     },
     {
-      "id": "5aa7eac6330e",
+      "id": "da45f28a9c78",
       "rule": "FL050",
       "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/items.c:1481",
-      "function": "lru_maintainer_crawler_check",
-      "mechanism": "Conditional nesting depth 4 in hot function 'lru_maintainer_crawler_check'. Each nested branch is a prediction point. Deep trees create correlated misprediction chains that defeat pattern-based predictors. [Assumes: branch outcomes are not consistently predictable]",
+      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:691",
+      "function": "conn_new",
+      "mechanism": "Conditional nesting depth 4 in hot function 'conn_new'. Each nested branch is a prediction point. Deep trees create correlated misprediction chains that defeat pattern-based predictors. [Assumes: branch outcomes are not consistently predictable]",
       "claims": [
         {
           "effect": "branch prediction surface on a hot path",
@@ -3069,35 +3267,35 @@
       ],
       "evidence": {
         "depth": "4",
-        "function": "lru_maintainer_crawler_check",
-        "max_depth": "4",
+        "function": "conn_new",
+        "max_depth": "6",
         "type": "nested_if"
       },
       "context": [
-        "  1475              /* Don't bother if the payoff is too low. */",
-        "  1476              for (x = 0; x < 60; x++) {",
-        "  1477                  available_reclaims += s->histo[x];",
-        "  1478                  if (available_reclaims > low_watermark) {",
-        "  1479                      if (next_crawl_wait[i] < (x * 60)) {",
-        "  1480                          next_crawl_wait[i] += 60;",
-        "  1481>                     } else if (next_crawl_wait[i] >= 60) {",
-        "  1482                          next_crawl_wait[i] -= 60;",
-        "  1483                      }",
-        "  1484                      break;",
-        "  1485                  }",
-        "  1486              }",
-        "  1487  "
+        "   685      if (settings.verbose > 1) {",
+        "   686          if (init_state == conn_listening) {",
+        "   687              fprintf(stderr, \"<%d server listening (%s)\\n\", sfd,",
+        "   688                  prot_text(c->protocol));",
+        "   689          } else if (IS_UDP(transport)) {",
+        "   690              fprintf(stderr, \"<%d server listening (udp)\\n\", sfd);",
+        "   691>         } else if (c->protocol == negotiating_prot) {",
+        "   692              fprintf(stderr, \"<%d new auto-negotiating client connection\\n\",",
+        "   693                      sfd);",
+        "   694          } else if (c->protocol == ascii_prot) {",
+        "   695              fprintf(stderr, \"<%d new ascii client connection.\\n\", sfd);",
+        "   696          } else if (c->protocol == binary_prot) {",
+        "   697              fprintf(stderr, \"<%d new binary client connection.\\n\", sfd);"
       ],
       "verdict": "?",
       "rationale": ""
     },
     {
-      "id": "a9eb73222aa1",
+      "id": "0f17cda098a4",
       "rule": "FL050",
       "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:4205",
-      "function": "save_pid",
-      "mechanism": "Conditional nesting depth 4 in hot function 'save_pid'. Each nested branch is a prediction point. Deep trees create correlated misprediction chains that defeat pattern-based predictors. [Assumes: branch outcomes are not consistently predictable]",
+      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:3569",
+      "function": "server_socket",
+      "mechanism": "Conditional nesting depth 4 in hot function 'server_socket'. Each nested branch is a prediction point. Deep trees create correlated misprediction chains that defeat pattern-based predictors. [Assumes: branch outcomes are not consistently predictable]",
       "claims": [
         {
           "effect": "branch prediction surface on a hot path",
@@ -3126,81 +3324,24 @@
       ],
       "evidence": {
         "depth": "4",
-        "function": "save_pid",
+        "function": "server_socket",
         "max_depth": "4",
         "type": "nested_if"
       },
       "context": [
-        "  4199      FILE *fp;",
-        "  4200      if (access(pid_file, F_OK) == 0) {",
-        "  4201          if ((fp = fopen(pid_file, \"r\")) != NULL) {",
-        "  4202              char buffer[1024];",
-        "  4203              if (fgets(buffer, sizeof(buffer), fp) != NULL) {",
-        "  4204                  unsigned int pid;",
-        "  4205>                 if (safe_strtoul(buffer, &pid) && kill((pid_t)pid, 0) == 0) {",
-        "  4206                      fprintf(stderr, \"WARNING: The pid file contained the following (running) pid: %u\\n\", pid);",
-        "  4207                  }",
-        "  4208              }",
-        "  4209              fclose(fp);",
-        "  4210          }",
-        "  4211      }"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "3afa6bc7342e",
-      "rule": "FL050",
-      "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/slabs_mover.c:636",
-      "function": "slab_rebalance_thread",
-      "mechanism": "Conditional nesting depth 4 in hot function 'slab_rebalance_thread'. Each nested branch is a prediction point. Deep trees create correlated misprediction chains that defeat pattern-based predictors. [Assumes: branch outcomes are not consistently predictable]",
-      "claims": [
-        {
-          "effect": "branch prediction surface on a hot path",
-          "precondition": "a deep nest or a large switch in a hot function",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect jump the BTB must predict among many targets",
-          "precondition": "a switch whose arms are real work, not a constant lookup",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "correlated misprediction chains that defeat pattern predictors",
-          "precondition": "nesting depth at or beyond six",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "depth": "4",
-        "function": "slab_rebalance_thread",
-        "max_depth": "4",
-        "type": "nested_if"
-      },
-      "context": [
-        "   630                  // attempt to free up memory in a page",
-        "   631                  if (slab_rebalance_move(t)) {",
-        "   632                      /* Stuck waiting for some items to unlock, so slow down a bit",
-        "   633                       * to give them a chance to free up */",
-        "   634                      usleep(backoff_timer);",
-        "   635                      backoff_timer = backoff_timer * 2;",
-        "   636>                     if (backoff_timer > backoff_max)",
-        "   637                          backoff_timer = backoff_max;",
-        "   638                  } else {",
-        "   639                      backoff_timer = 1;",
-        "   640                  }",
-        "   641              }",
-        "   642          } else {"
+        "  3563                  union {",
+        "  3564                      struct sockaddr_in in;",
+        "  3565                      struct sockaddr_in6 in6;",
+        "  3566                  } my_sockaddr;",
+        "  3567                  socklen_t len = sizeof(my_sockaddr);",
+        "  3568                  if (getsockname(sfd, (struct sockaddr*)&my_sockaddr, &len)==0) {",
+        "  3569>                     if (next->ai_addr->sa_family == AF_INET) {",
+        "  3570                          fprintf(portnumber_file, \"%s INET: %u\\n\",",
+        "  3571                                  IS_UDP(transport) ? \"UDP\" : \"TCP\",",
+        "  3572                                  ntohs(my_sockaddr.in.sin_port));",
+        "  3573                      } else {",
+        "  3574                          fprintf(portnumber_file, \"%s INET6: %u\\n\",",
+        "  3575                                  IS_UDP(transport) ? \"UDP\" : \"TCP\","
       ],
       "verdict": "?",
       "rationale": ""
@@ -3263,12 +3404,12 @@
       "rationale": ""
     },
     {
-      "id": "66f32ac1fa13",
+      "id": "c069662d3a60",
       "rule": "FL050",
       "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/testapp.c:686",
-      "function": "connect_server",
-      "mechanism": "Conditional nesting depth 4 in hot function 'connect_server'. Each nested branch is a prediction point. Deep trees create correlated misprediction chains that defeat pattern-based predictors. [Assumes: branch outcomes are not consistently predictable]",
+      "site": "/home/ousef/lshaz/memcached-fork/storage.c:891",
+      "function": "storage_compact_check",
+      "mechanism": "Conditional nesting depth 4 in hot function 'storage_compact_check'. Each nested branch is a prediction point. Deep trees create correlated misprediction chains that defeat pattern-based predictors. [Assumes: branch outcomes are not consistently predictable]",
       "claims": [
         {
           "effect": "branch prediction surface on a hot path",
@@ -3289,7 +3430,7 @@
           "gating": false
         },
         {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
+          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
           "precondition": "hotness established by profile or declaration, not inferred from shape alone",
           "established": false,
           "gating": true
@@ -3297,372 +3438,24 @@
       ],
       "evidence": {
         "depth": "4",
-        "function": "connect_server",
-        "max_depth": "5",
+        "function": "storage_compact_check",
+        "max_depth": "4",
         "type": "nested_if"
       },
       "context": [
-        "   680                            ai->ai_protocol)) != -1) {",
-        "   681            if (connect(sock, ai->ai_addr, ai->ai_addrlen) == -1) {",
-        "   682               fprintf(stderr, \"Failed to connect socket: %s\\n\",",
-        "   683                       strerror(errno));",
-        "   684               close(sock);",
-        "   685               sock = -1;",
-        "   686>           } else if (nonblock) {",
-        "   687                int flags = fcntl(sock, F_GETFL, 0);",
-        "   688                if (flags < 0 || fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {",
-        "   689                    fprintf(stderr, \"Failed to enable nonblocking mode: %s\\n\",",
-        "   690                            strerror(errno));",
-        "   691                    close(sock);",
-        "   692                    sock = -1;"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "99b4b21f5df9",
-      "rule": "FL050",
-      "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:4564",
-      "function": "_mc_meta_load_cb",
-      "mechanism": "switch statement with 17 cases in hot function '_mc_meta_load_cb'. Non-constexpr switch generates indirect jump table. BTB must predict target from 17 possibilities. I-cache footprint scales with case count. [Assumes: case distribution is non-uniform or unpredictable at runtime]",
-      "claims": [
-        {
-          "effect": "branch prediction surface on a hot path",
-          "precondition": "a deep nest or a large switch in a hot function",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect jump the BTB must predict among many targets",
-          "precondition": "a switch whose arms are real work, not a constant lookup",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "correlated misprediction chains that defeat pattern predictors",
-          "precondition": "nesting depth at or beyond six",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "cases": "17",
-        "depth": "0",
-        "function": "_mc_meta_load_cb",
-        "max_depth": "2",
-        "type": "switch"
-      },
-      "context": [
-        "  4558          } else if (strcmp(val, \"true\") == 0) {",
-        "  4559              val_bool = true;",
-        "  4560          } else {",
-        "  4561              is_bool = false;",
-        "  4562          }",
-        "  4563  ",
-        "  4564>         switch (type) {",
-        "  4565          case R_MMAP_OLDBASE:",
-        "  4566              if (!safe_strtoull_hex(val, &meta->old_base)) {",
-        "  4567                  fprintf(stderr, \"[restart] failed to parse %s: %s\\n\", key, val);",
-        "  4568                  reuse_mmap = -1;",
-        "  4569              }",
-        "  4570              break;"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "3d9831abff35",
-      "rule": "FL050",
-      "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:4967",
-      "function": "main",
-      "mechanism": "switch statement with 38 cases in hot function 'main'. Non-constexpr switch generates indirect jump table. BTB must predict target from 38 possibilities. I-cache footprint scales with case count. [Assumes: case distribution is non-uniform or unpredictable at runtime]",
-      "claims": [
-        {
-          "effect": "branch prediction surface on a hot path",
-          "precondition": "a deep nest or a large switch in a hot function",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect jump the BTB must predict among many targets",
-          "precondition": "a switch whose arms are real work, not a constant lookup",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "correlated misprediction chains that defeat pattern predictors",
-          "precondition": "nesting depth at or beyond six",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "cases": "38",
-        "depth": "0",
-        "function": "main",
-        "max_depth": "3",
-        "type": "switch"
-      },
-      "context": [
-        "  4961  #endif",
-        "  4962          if (optarg) {",
-        "  4963              while(isspace(optarg[0])) {",
-        "  4964                  optarg++;",
-        "  4965              }",
-        "  4966          }",
-        "  4967>         switch (c) {",
-        "  4968          case 'A':",
-        "  4969              /* enables \"shutdown\" command */",
-        "  4970              settings.shutdown_command = true;",
-        "  4971              break;",
-        "  4972          case 'Z':",
-        "  4973              /* enable secure communication*/"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "2c3586fc65a0",
-      "rule": "FL050",
-      "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:5197",
-      "function": "main",
-      "mechanism": "switch statement with 40 cases in hot function 'main'. Non-constexpr switch generates indirect jump table. BTB must predict target from 40 possibilities. I-cache footprint scales with case count. [Assumes: case distribution is non-uniform or unpredictable at runtime]",
-      "claims": [
-        {
-          "effect": "branch prediction surface on a hot path",
-          "precondition": "a deep nest or a large switch in a hot function",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect jump the BTB must predict among many targets",
-          "precondition": "a switch whose arms are real work, not a constant lookup",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "correlated misprediction chains that defeat pattern predictors",
-          "precondition": "nesting depth at or beyond six",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "cases": "40",
-        "depth": "0",
-        "function": "main",
-        "max_depth": "3",
-        "type": "switch"
-      },
-      "context": [
-        "  5191              // BSD getsubopt (at least) has undefined behavior on -1, so",
-        "  5192              // if we want to retry the getsubopt call in submodules we",
-        "  5193              // need an extra layer of string copies.",
-        "  5194              char *subopts_temp_o = NULL;",
-        "  5195              char *subopts_temp = subopts_temp_o = strdup(subopts);",
-        "  5196  ",
-        "  5197>             switch (getsubopt(&subopts, subopts_tokens, &subopts_value)) {",
-        "  5198              case MAXCONNS_FAST:",
-        "  5199                  settings.maxconns_fast = true;",
-        "  5200                  break;",
-        "  5201              case HASHPOWER_INIT:",
-        "  5202                  if (subopts_value == NULL) {",
-        "  5203                      fprintf(stderr, \"Missing numeric argument for hashpower\\n\");"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "3975b0abf3ce",
-      "rule": "FL050",
-      "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/slabs_mover.c:407",
-      "function": "slab_rebalance_move",
-      "mechanism": "switch statement with 8 cases in hot function 'slab_rebalance_move'. Non-constexpr switch generates indirect jump table. BTB must predict target from 8 possibilities. I-cache footprint scales with case count. [Assumes: case distribution is non-uniform or unpredictable at runtime]",
-      "claims": [
-        {
-          "effect": "branch prediction surface on a hot path",
-          "precondition": "a deep nest or a large switch in a hot function",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect jump the BTB must predict among many targets",
-          "precondition": "a switch whose arms are real work, not a constant lookup",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "correlated misprediction chains that defeat pattern predictors",
-          "precondition": "nesting depth at or beyond six",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "cases": "8",
-        "depth": "1",
-        "function": "slab_rebalance_move",
-        "max_depth": "4",
-        "type": "switch"
-      },
-      "context": [
-        "   401          item_chunk *ch = cbarg.ch;",
-        "   402          if (ch) {",
-        "   403              // swap item under examination to the chunk head if we're",
-        "   404              // attempting to move a chunk within a larger item.",
-        "   405              cbarg.it = it = ch->head;",
-        "   406          }",
-        "   407>         switch (status) {",
-        "   408              case MOVE_BUSY_ACTIVE:",
-        "   409              case MOVE_FROM_LRU:",
-        "   410                  /* Lock order is LRU locks -> slabs_lock. unlink uses LRU lock.",
-        "   411                   * We only need to hold the slabs_lock while initially looking",
-        "   412                   * at an item, and at this point we have an exclusive refcount",
-        "   413                   * (2) + the item is locked. Drop slabs lock, drop item to"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "13ca885252dd",
-      "rule": "FL061",
-      "_stratum_severity": "High",
-      "site": "/home/ousef/lshaz/memcached-fork/items.c:725",
-      "function": "item_stats_totals",
-      "mechanism": "Hot function 'item_stats_totals' exhibits centralized dispatcher pattern: 16 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
-      "claims": [
-        {
-          "effect": "I-cache and BTB footprint from wide fan-out",
-          "precondition": "a hot function with many real (non-builtin) call targets",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect target misprediction across polymorphic sites",
-          "precondition": "three or more virtual dispatch sites",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the fan-out is re-walked on every iteration",
-          "precondition": "the dispatch sits inside a loop",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "callees": "16",
-        "function": "item_stats_totals",
-        "has_loop": "yes",
-        "switch_cases": "0",
-        "virtual_calls": "0"
-      },
-      "context": [
-        "   719              cur->age = current_time - tails[i]->time;",
-        "   720          }",
-        "   721          pthread_mutex_unlock(&lru_locks[i]);",
-        "   722       }",
-        "   723  }",
-        "   724  ",
-        "   725> void item_stats_totals(ADD_STAT add_stats, void *c) {",
-        "   726      itemstats_t totals;",
-        "   727      memset(&totals, 0, sizeof(itemstats_t));",
-        "   728      int n;",
-        "   729      for (n = 0; n < MAX_NUMBER_OF_SLAB_CLASSES; n++) {",
-        "   730          int x;",
-        "   731          int i;"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "c52cfdf3451a",
-      "rule": "FL061",
-      "_stratum_severity": "High",
-      "site": "/home/ousef/lshaz/memcached-fork/items.c:782",
-      "function": "item_stats",
-      "mechanism": "Hot function 'item_stats' exhibits centralized dispatcher pattern: 33 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
-      "claims": [
-        {
-          "effect": "I-cache and BTB footprint from wide fan-out",
-          "precondition": "a hot function with many real (non-builtin) call targets",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect target misprediction across polymorphic sites",
-          "precondition": "three or more virtual dispatch sites",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the fan-out is re-walked on every iteration",
-          "precondition": "the dispatch sits inside a loop",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "callees": "33",
-        "function": "item_stats",
-        "has_loop": "yes",
-        "switch_cases": "4",
-        "virtual_calls": "0"
-      },
-      "context": [
-        "   776                      (unsigned long long)totals.direct_reclaims);",
-        "   777          APPEND_STAT(\"lru_bumps_dropped\", \"%llu\",",
-        "   778                      (unsigned long long)lru_total_bumps_dropped());",
-        "   779      }",
-        "   780  }",
-        "   781  ",
-        "   782> void item_stats(ADD_STAT add_stats, void *c) {",
-        "   783      struct thread_stats thread_stats;",
-        "   784      threadlocal_stats_aggregate(&thread_stats);",
-        "   785      itemstats_t totals;",
-        "   786      int n;",
-        "   787      for (n = 0; n < MAX_NUMBER_OF_SLAB_CLASSES; n++) {",
-        "   788          memset(&totals, 0, sizeof(itemstats_t));"
+        "   885                  *page_id = buk->low_page;",
+        "   886                  *page_version = buk->low_version;",
+        "   887                  return 1;",
+        "   888              } else if (buk->pages_free < settings.ext_drop_under",
+        "   889                      && buk->lowest_version != ULLONG_MAX) {",
+        "   890  ",
+        "   891>                 if (x == PAGE_BUCKET_COLDCOMPACT || x == PAGE_BUCKET_OLD) {",
+        "   892                      // this freeing technique doesn't apply to these buckets.",
+        "   893                      // instead these buckets are eviction or normal",
+        "   894                      // defragmentation only.",
+        "   895                      continue;",
+        "   896                  }",
+        "   897                  // Nothing defraggable. Check for other usable conditions."
       ],
       "verdict": "?",
       "rationale": ""
@@ -3726,12 +3519,12 @@
       "rationale": ""
     },
     {
-      "id": "98ac939c15c9",
+      "id": "3483e0fcf2b4",
       "rule": "FL061",
       "_stratum_severity": "High",
-      "site": "/home/ousef/lshaz/memcached-fork/items.c:1549",
-      "function": "lru_maintainer_thread",
-      "mechanism": "Hot function 'lru_maintainer_thread' exhibits centralized dispatcher pattern: 12 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
+      "site": "/home/ousef/lshaz/memcached-fork/logger.c:736",
+      "function": "logger_thread_read",
+      "mechanism": "Hot function 'logger_thread_read' exhibits centralized dispatcher pattern: 10 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
       "claims": [
         {
           "effect": "I-cache and BTB footprint from wide fan-out",
@@ -3759,26 +3552,26 @@
         }
       ],
       "evidence": {
-        "callees": "12",
-        "function": "lru_maintainer_thread",
+        "callees": "10",
+        "function": "logger_thread_read",
         "has_loop": "yes",
         "switch_cases": "0",
         "virtual_calls": "0"
       },
       "context": [
-        "  1543  ",
-        "  1544  static pthread_t lru_maintainer_tid;",
-        "  1545  ",
-        "  1546  #define MAX_LRU_MAINTAINER_SLEEP (1000000-1)",
-        "  1547  #define MIN_LRU_MAINTAINER_SLEEP 1000",
-        "  1548  ",
-        "  1549> static void *lru_maintainer_thread(void *arg) {",
-        "  1550      int i;",
-        "  1551      useconds_t to_sleep = MIN_LRU_MAINTAINER_SLEEP;",
-        "  1552      useconds_t last_sleep = MIN_LRU_MAINTAINER_SLEEP;",
-        "  1553      rel_time_t last_crawler_check = 0;",
-        "  1554      useconds_t next_juggles[MAX_NUMBER_OF_SLAB_CLASSES] = {0};",
-        "  1555      useconds_t backoff_juggles[MAX_NUMBER_OF_SLAB_CLASSES] = {0};"
+        "   730      logger_set_flags();",
+        "   731  }",
+        "   732  ",
+        "   733  /* Reads a particular worker thread's available bipbuf bytes. Parses each log",
+        "   734   * entry into the watcher buffers.",
+        "   735   */",
+        "   736> static int logger_thread_read(logger *l, struct logger_stats *ls) {",
+        "   737      unsigned int size;",
+        "   738      unsigned int pos = 0;",
+        "   739      unsigned char *data;",
+        "   740      char scratch[LOGGER_PARSE_SCRATCH];",
+        "   741      logentry *e;",
+        "   742      pthread_mutex_lock(&l->mutex);"
       ],
       "verdict": "?",
       "rationale": ""
@@ -3900,12 +3693,12 @@
       "rationale": ""
     },
     {
-      "id": "416665907cd2",
+      "id": "ad402afb3270",
       "rule": "FL061",
-      "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:4486",
-      "function": "_mc_meta_load_cb",
-      "mechanism": "Hot function '_mc_meta_load_cb' exhibits centralized dispatcher pattern: 17 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
+      "_stratum_severity": "High",
+      "site": "/home/ousef/lshaz/memcached-fork/storage.c:500",
+      "function": "storage_write",
+      "mechanism": "Hot function 'storage_write' exhibits centralized dispatcher pattern: 12 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
       "claims": [
         {
           "effect": "I-cache and BTB footprint from wide fan-out",
@@ -3927,64 +3720,6 @@
         },
         {
           "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "callees": "17",
-        "function": "_mc_meta_load_cb",
-        "has_loop": "yes",
-        "switch_cases": "17",
-        "virtual_calls": "0"
-      },
-      "context": [
-        "  4480  // backend)",
-        "  4481  #define RESTART_REQUIRED_META 16",
-        "  4482  ",
-        "  4483  // With this callback we make a decision on if the current configuration",
-        "  4484  // matches up enough to allow reusing the cache.",
-        "  4485  // We also re-load important runtime information.",
-        "  4486> static int _mc_meta_load_cb(const char *tag, void *ctx, void *data) {",
-        "  4487      struct _mc_meta_data *meta = (struct _mc_meta_data *)data;",
-        "  4488      char *key;",
-        "  4489      char *val;",
-        "  4490      int reuse_mmap = 0;",
-        "  4491      meta->process_started = 0;",
-        "  4492      meta->time_delta = 0;"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "cb4742f0ad0a",
-      "rule": "FL061",
-      "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/slabs_mover.c:601",
-      "function": "slab_rebalance_thread",
-      "mechanism": "Hot function 'slab_rebalance_thread' exhibits centralized dispatcher pattern: 12 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
-      "claims": [
-        {
-          "effect": "I-cache and BTB footprint from wide fan-out",
-          "precondition": "a hot function with many real (non-builtin) call targets",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect target misprediction across polymorphic sites",
-          "precondition": "three or more virtual dispatch sites",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the fan-out is re-walked on every iteration",
-          "precondition": "the dispatch sits inside a loop",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
           "precondition": "hotness established by profile or declaration, not inferred from shape alone",
           "established": false,
           "gating": true
@@ -3992,83 +3727,25 @@
       ],
       "evidence": {
         "callees": "12",
-        "function": "slab_rebalance_thread",
+        "function": "storage_write",
         "has_loop": "yes",
         "switch_cases": "0",
         "virtual_calls": "0"
       },
       "context": [
-        "   595  }",
-        "   596  ",
-        "   597  /* Slab mover thread.",
-        "   598   * Sits waiting for a condition to jump off and shovel some memory about",
-        "   599   */",
-        "   600  // TODO: add back the \"max busy loops\" and bail the page move",
-        "   601> static void *slab_rebalance_thread(void *arg) {",
-        "   602      struct slab_rebal_thread *t = arg;",
-        "   603      struct slab_rebalance *r = &t->rebal;",
-        "   604      int backoff_timer = 1;",
-        "   605      int backoff_max = 1000;",
-        "   606      int algo_backoff = 0;",
-        "   607      // create logger in thread for setspecific"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "ec3c3c9bedc2",
-      "rule": "FL061",
-      "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/storage.c:599",
-      "function": "storage_write_thread",
-      "mechanism": "Hot function 'storage_write_thread' exhibits centralized dispatcher pattern: 11 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
-      "claims": [
-        {
-          "effect": "I-cache and BTB footprint from wide fan-out",
-          "precondition": "a hot function with many real (non-builtin) call targets",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect target misprediction across polymorphic sites",
-          "precondition": "three or more virtual dispatch sites",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the fan-out is re-walked on every iteration",
-          "precondition": "the dispatch sits inside a loop",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "callees": "11",
-        "function": "storage_write_thread",
-        "has_loop": "yes",
-        "switch_cases": "0",
-        "virtual_calls": "0"
-      },
-      "context": [
-        "   593  }",
-        "   594  ",
-        "   595  static pthread_t storage_write_tid;",
-        "   596  static pthread_mutex_t storage_write_plock;",
-        "   597  #define WRITE_SLEEP_MIN 200",
-        "   598  ",
-        "   599> static void *storage_write_thread(void *arg) {",
-        "   600      void *storage = arg;",
-        "   601      // NOTE: ignoring overflow since that would take years of uptime in a",
-        "   602      // specific load pattern of never going to sleep.",
-        "   603      unsigned int backoff[MAX_NUMBER_OF_SLAB_CLASSES] = {0};",
-        "   604      unsigned int counter = 0;",
-        "   605      useconds_t to_sleep = WRITE_SLEEP_MIN;"
+        "   494  }",
+        "   495  ",
+        "   496  /*",
+        "   497   * WRITE FLUSH THREAD",
+        "   498   */",
+        "   499  ",
+        "   500> static int storage_write(void *storage, const int clsid, const int item_age) {",
+        "   501      int did_moves = 0;",
+        "   502      struct lru_pull_tail_return it_info;",
+        "   503  ",
+        "   504      it_info.it = NULL;",
+        "   505      lru_pull_tail(clsid, COLD_LRU, 0, LRU_PULL_RETURN_ITEM, 0, &it_info);",
+        "   506      /* Item is locked, and we have a reference to it. */"
       ],
       "verdict": "?",
       "rationale": ""
@@ -4076,7 +3753,7 @@
     {
       "id": "dd190be34b69",
       "rule": "FL061",
-      "_stratum_severity": "Informational",
+      "_stratum_severity": "High",
       "site": "/home/ousef/lshaz/memcached-fork/storage.c:933",
       "function": "storage_compact_readback",
       "mechanism": "Hot function 'storage_compact_readback' exhibits centralized dispatcher pattern: 16 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
@@ -4132,12 +3809,12 @@
       "rationale": ""
     },
     {
-      "id": "6f0a709cd3c7",
+      "id": "bc6bf95f8a2c",
       "rule": "FL061",
       "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/storage.c:1087",
-      "function": "storage_compact_thread",
-      "mechanism": "Hot function 'storage_compact_thread' exhibits centralized dispatcher pattern: 19 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
+      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:3990",
+      "function": "usage",
+      "mechanism": "Hot function 'usage' exhibits centralized dispatcher pattern: 9 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
       "claims": [
         {
           "effect": "I-cache and BTB footprint from wide fan-out",
@@ -4154,48 +3831,164 @@
         {
           "effect": "the fan-out is re-walked on every iteration",
           "precondition": "the dispatch sits inside a loop",
-          "established": true,
+          "established": false,
           "gating": false
         },
         {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
+          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
           "precondition": "hotness established by profile or declaration, not inferred from shape alone",
           "established": false,
           "gating": true
         }
       ],
       "evidence": {
-        "callees": "19",
-        "function": "storage_compact_thread",
-        "has_loop": "yes",
+        "callees": "9",
+        "function": "usage",
+        "has_loop": "no",
         "switch_cases": "0",
         "virtual_calls": "0"
       },
       "context": [
-        "  1081      pthread_mutex_unlock(&wrap->lock);",
-        "  1082  }",
-        "  1083  ",
-        "  1084  // TODO: hoist the storage bits from lru_maintainer_thread in here.",
-        "  1085  // would be nice if they could avoid hammering the same locks though?",
-        "  1086  // I guess it's only COLD. that's probably fine.",
-        "  1087> static void *storage_compact_thread(void *arg) {",
-        "  1088      void *storage = arg;",
-        "  1089      bool compacting = false;",
-        "  1090      uint64_t page_version = 0;",
-        "  1091      uint64_t page_size = 0;",
-        "  1092      uint32_t page_offset = 0;",
-        "  1093      uint32_t page_id = 0;"
+        "  3984          printf(\"Default value of [%s] has changed.\"",
+        "  3985              \" Modify the help text and default value check.\\n\", param);",
+        "  3986          exit(EXIT_FAILURE);",
+        "  3987      }",
+        "  3988  }",
+        "  3989  ",
+        "  3990> static void usage(void) {",
+        "  3991      printf(PACKAGE \" \" VERSION \"\\n\");",
+        "  3992      printf(\"-p, --port=<num>          TCP port to listen on (default: %d)\\n\"",
+        "  3993             \"-U, --udp-port=<num>      UDP port to listen on (default: %d, off)\\n\",",
+        "  3994             settings.port, settings.udpport);",
+        "  3995  #ifndef DISABLE_UNIX_SOCKET",
+        "  3996      printf(\"-s, --unix-socket=<file>  UNIX socket to listen on (disables network support)\\n\");"
       ],
       "verdict": "?",
       "rationale": ""
     },
     {
-      "id": "2e26f124733d",
+      "id": "ba257210e720",
       "rule": "FL061",
       "_stratum_severity": "Informational",
-      "site": "/home/ousef/lshaz/memcached-fork/timedrun.c:18",
-      "function": "wait_for_process",
-      "mechanism": "Hot function 'wait_for_process' exhibits centralized dispatcher pattern: 12 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
+      "site": "/home/ousef/lshaz/memcached-fork/slabs_mover.c:384",
+      "function": "slab_rebalance_move",
+      "mechanism": "Hot function 'slab_rebalance_move' exhibits centralized dispatcher pattern: 14 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
+      "claims": [
+        {
+          "effect": "I-cache and BTB footprint from wide fan-out",
+          "precondition": "a hot function with many real (non-builtin) call targets",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "indirect target misprediction across polymorphic sites",
+          "precondition": "three or more virtual dispatch sites",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "the fan-out is re-walked on every iteration",
+          "precondition": "the dispatch sits inside a loop",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
+          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
+          "established": false,
+          "gating": true
+        }
+      ],
+      "evidence": {
+        "callees": "14",
+        "function": "slab_rebalance_move",
+        "has_loop": "no",
+        "switch_cases": "8",
+        "virtual_calls": "0"
+      },
+      "context": [
+        "   378  ",
+        "   379  // try to free up a chunk of memory, if not already free.",
+        "   380  // if we have memory available outside of the source page, rescue any valid",
+        "   381  // items.",
+        "   382  // we still attempt to move data even if no memory is available for a rescue,",
+        "   383  // in case the item is already free, expired, busy, etc.",
+        "   384> static int slab_rebalance_move(struct slab_rebal_thread *t) {",
+        "   385      uint32_t was_busy = t->rebal.busy_items;",
+        "   386      struct _locked_st cbarg;",
+        "   387      memset(&cbarg, 0, sizeof(cbarg));",
+        "   388  ",
+        "   389      // the offset to check if completed or not",
+        "   390      int offset = ((char*)t->rebal.slab_pos-(char*)t->rebal.slab_start)/(t->rebal.cls_size);"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
+      "id": "644e5e049bc8",
+      "rule": "FL061",
+      "_stratum_severity": "Informational",
+      "site": "/home/ousef/lshaz/memcached-fork/testapp.c:1231",
+      "function": "validate_response_header",
+      "mechanism": "Hot function 'validate_response_header' exhibits centralized dispatcher pattern: 33 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
+      "claims": [
+        {
+          "effect": "I-cache and BTB footprint from wide fan-out",
+          "precondition": "a hot function with many real (non-builtin) call targets",
+          "established": true,
+          "gating": false
+        },
+        {
+          "effect": "indirect target misprediction across polymorphic sites",
+          "precondition": "three or more virtual dispatch sites",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "the fan-out is re-walked on every iteration",
+          "precondition": "the dispatch sits inside a loop",
+          "established": false,
+          "gating": false
+        },
+        {
+          "effect": "this code runs often enough for the cost to recur (inferred-shallow)",
+          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
+          "established": false,
+          "gating": true
+        }
+      ],
+      "evidence": {
+        "callees": "33",
+        "function": "validate_response_header",
+        "has_loop": "no",
+        "switch_cases": "22",
+        "virtual_calls": "0"
+      },
+      "context": [
+        "  1225      off_t key_offset = sizeof(protocol_binary_request_no_extras) + 20;",
+        "  1226  ",
+        "  1227      memcpy(buf + key_offset, key, keylen);",
+        "  1228      return key_offset + keylen;",
+        "  1229  }",
+        "  1230  ",
+        "  1231> static void validate_response_header(protocol_binary_response_no_extras *response,",
+        "  1232                                       uint8_t cmd, uint16_t status)",
+        "  1233  {",
+        "  1234      assert(response->message.header.response.magic == PROTOCOL_BINARY_RES);",
+        "  1235      assert(response->message.header.response.opcode == cmd);",
+        "  1236      assert(response->message.header.response.datatype == PROTOCOL_BINARY_RAW_BYTES);",
+        "  1237      assert(response->message.header.response.status == status);"
+      ],
+      "verdict": "?",
+      "rationale": ""
+    },
+    {
+      "id": "07cbcec2591b",
+      "rule": "FL061",
+      "_stratum_severity": "Medium",
+      "site": "/home/ousef/lshaz/memcached-fork/crawler.c:514",
+      "function": "item_crawl_hash",
+      "mechanism": "Hot function 'item_crawl_hash' exhibits centralized dispatcher pattern: 11 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
       "claims": [
         {
           "effect": "I-cache and BTB footprint from wide fan-out",
@@ -4223,26 +4016,26 @@
         }
       ],
       "evidence": {
-        "callees": "12",
-        "function": "wait_for_process",
+        "callees": "11",
+        "function": "item_crawl_hash",
         "has_loop": "yes",
-        "switch_cases": "3",
+        "switch_cases": "0",
         "virtual_calls": "0"
       },
       "context": [
-        "    12  ",
-        "    13  static void signal_handler(int which)",
-        "    14  {",
-        "    15      caught_sig = which;",
-        "    16  }",
-        "    17  ",
-        "    18> static int wait_for_process(pid_t pid)",
-        "    19  {",
-        "    20      int rv = EX_SOFTWARE;",
-        "    21      int status = 0;",
-        "    22      int i = 0;",
-        "    23      struct sigaction sig_handler;",
-        "    24  "
+        "   508      if (active_crawler_mod.mod->doneclass != NULL)",
+        "   509          active_crawler_mod.mod->doneclass(&active_crawler_mod, i);",
+        "   510  }",
+        "   511  ",
+        "   512  // ensure we build the buffer a little bit to cut down on poll/write syscalls.",
+        "   513  #define MIN_ITEMS_PER_WRITE 16",
+        "   514> static void item_crawl_hash(void) {",
+        "   515      // get iterator from assoc. can hang for a long time.",
+        "   516      // - blocks hash expansion",
+        "   517      void *iter = assoc_get_iterator();",
+        "   518      int crawls_persleep = settings.crawls_persleep;",
+        "   519      item *it = NULL;",
+        "   520      int items = 0;"
       ],
       "verdict": "?",
       "rationale": ""
@@ -4301,180 +4094,6 @@
         "   614                  enum protocol bproto) {",
         "   615      conn *c;",
         "   616  "
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "805f6223db30",
-      "rule": "FL061",
-      "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:1079",
-      "function": "resp_free",
-      "mechanism": "Hot function 'resp_free' exhibits centralized dispatcher pattern: 8 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
-      "claims": [
-        {
-          "effect": "I-cache and BTB footprint from wide fan-out",
-          "precondition": "a hot function with many real (non-builtin) call targets",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect target misprediction across polymorphic sites",
-          "precondition": "three or more virtual dispatch sites",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the fan-out is re-walked on every iteration",
-          "precondition": "the dispatch sits inside a loop",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "callees": "8",
-        "function": "resp_free",
-        "has_loop": "no",
-        "switch_cases": "0",
-        "virtual_calls": "0"
-      },
-      "context": [
-        "  1073          }",
-        "  1074      }",
-        "  1075  ",
-        "  1076      return resp;",
-        "  1077  }",
-        "  1078  ",
-        "  1079> void resp_free(LIBEVENT_THREAD *th, mc_resp *resp) {",
-        "  1080      mc_resp_bundle *b = resp->bundle;",
-        "  1081  ",
-        "  1082      resp->free = true;",
-        "  1083      b->refcount--;",
-        "  1084      if (b->refcount == 0) {",
-        "  1085          if (b == th->open_bundle && b->next == 0) {"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "7d8ca3d66067",
-      "rule": "FL061",
-      "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:3833",
-      "function": "server_socket_unix",
-      "mechanism": "Hot function 'server_socket_unix' exhibits centralized dispatcher pattern: 16 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
-      "claims": [
-        {
-          "effect": "I-cache and BTB footprint from wide fan-out",
-          "precondition": "a hot function with many real (non-builtin) call targets",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect target misprediction across polymorphic sites",
-          "precondition": "three or more virtual dispatch sites",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the fan-out is re-walked on every iteration",
-          "precondition": "the dispatch sits inside a loop",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "callees": "16",
-        "function": "server_socket_unix",
-        "has_loop": "no",
-        "switch_cases": "0",
-        "virtual_calls": "0"
-      },
-      "context": [
-        "  3827          close(sfd);",
-        "  3828          return -1;",
-        "  3829      }",
-        "  3830      return sfd;",
-        "  3831  }",
-        "  3832  ",
-        "  3833> static int server_socket_unix(const char *path, int access_mask) {",
-        "  3834      int sfd;",
-        "  3835      struct linger ling = {0, 0};",
-        "  3836      struct sockaddr_un addr;",
-        "  3837      struct stat tstat;",
-        "  3838      int flags =1;",
-        "  3839      int old_umask;"
-      ],
-      "verdict": "?",
-      "rationale": ""
-    },
-    {
-      "id": "b53e26e4311d",
-      "rule": "FL061",
-      "_stratum_severity": "Medium",
-      "site": "/home/ousef/lshaz/memcached-fork/memcached.c:3919",
-      "function": "clock_handler",
-      "mechanism": "Hot function 'clock_handler' exhibits centralized dispatcher pattern: 8 call sites (high fan-out). Single-point fan-out serializes all processing, pressures I-cache with large dispatch body, and creates BTB contention from multiple indirect targets. [Assumes: dispatcher handles high fan-in from multiple callers at runtime]",
-      "claims": [
-        {
-          "effect": "I-cache and BTB footprint from wide fan-out",
-          "precondition": "a hot function with many real (non-builtin) call targets",
-          "established": true,
-          "gating": false
-        },
-        {
-          "effect": "indirect target misprediction across polymorphic sites",
-          "precondition": "three or more virtual dispatch sites",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "the fan-out is re-walked on every iteration",
-          "precondition": "the dispatch sits inside a loop",
-          "established": false,
-          "gating": false
-        },
-        {
-          "effect": "this code runs often enough for the cost to recur (inferred-deep)",
-          "precondition": "hotness established by profile or declaration, not inferred from shape alone",
-          "established": false,
-          "gating": true
-        }
-      ],
-      "evidence": {
-        "callees": "8",
-        "function": "clock_handler",
-        "has_loop": "no",
-        "switch_cases": "0",
-        "virtual_calls": "0"
-      },
-      "context": [
-        "  3913  #endif",
-        "  3914  ",
-        "  3915  /* libevent uses a monotonic clock when available for event scheduling. Aside",
-        "  3916   * from jitter, simply ticking our internal timer here is accurate enough.",
-        "  3917   * Note that users who are setting explicit dates for expiration times *must*",
-        "  3918   * ensure their clocks are correct before starting memcached. */",
-        "  3919> static void clock_handler(const evutil_socket_t fd, const short which, void *arg) {",
-        "  3920      struct timeval t = {.tv_sec = 1, .tv_usec = 0};",
-        "  3921      static bool initialized = false;",
-        "  3922  ",
-        "  3923      if (initialized) {",
-        "  3924          /* only delete the event if it's actually there. */",
-        "  3925          evtimer_del(&clockevent);"
       ],
       "verdict": "?",
       "rationale": ""
@@ -4614,5 +4233,6 @@
       "verdict": "?",
       "rationale": ""
     }
-  ]
+  ],
+  "scope": "Critical/High strata for FL001 and FL002 only. Scope declared before adjudication: these are the grades a desk acts on. Other strata left unjudged and visible as such."
 }
