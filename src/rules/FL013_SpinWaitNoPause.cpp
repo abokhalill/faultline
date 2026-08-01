@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/core/Rule.h"
+#include "lshaz/analysis/ConfiguredAtomics.h"
 #include "lshaz/core/RuleRegistry.h"
 #include "lshaz/core/HotPathOracle.h"
 #include "lshaz/analysis/EscapeAnalysis.h"
@@ -22,7 +23,13 @@ namespace {
 
 // Does this expression read an atomic (std::atomic member call, C11
 // _Atomic lvalue, __atomic_load builtin) or a volatile lvalue?
-bool isAtomicObjType(clang::QualType QT) {
+bool isAtomicObjType(clang::QualType QT,
+                     const std::vector<std::string> &cfgAtomics) {
+    // Before canonicalization: an opaque wrapper's spelling is all there is.
+    // A kernel-style `while (atomic_read(&lock))` spin was invisible here
+    // even with atomic_type_names set, because only CacheLineMap consumed it.
+    if (isConfiguredAtomic(QT, cfgAtomics))
+        return true;
     QT = QT.getCanonicalType().getNonReferenceType();
     if (QT->isAtomicType())
         return true;
@@ -37,6 +44,10 @@ bool isAtomicObjType(clang::QualType QT) {
 
 class PollReadFinder : public clang::RecursiveASTVisitor<PollReadFinder> {
 public:
+    const std::vector<std::string> &cfgAtomics;
+    explicit PollReadFinder(const std::vector<std::string> &a)
+        : cfgAtomics(a) {}
+
     bool found = false;
     bool casForm = false;
     // TAS spin (`while (lock.test_and_set())`) is doubly wrong: no
@@ -51,7 +62,7 @@ public:
         if (!MD)
             return true;
         const auto *obj = E->getImplicitObjectArgument();
-        if (!obj || !isAtomicObjType(obj->getType()))
+        if (!obj || !isAtomicObjType(obj->getType(), cfgAtomics))
             return true;
 
         // `while (flag)` desugars to a conversion-operator member call
@@ -80,7 +91,7 @@ public:
         if (E->getNumArgs() < 1)
             return true;
         const auto *lhs = E->getArg(0);
-        if (!isAtomicObjType(lhs->getType()))
+        if (!isAtomicObjType(lhs->getType(), cfgAtomics))
             return true;
         found = true;
         noteVar(lhs->IgnoreImplicit());
@@ -250,6 +261,9 @@ unsigned countStmts(const clang::Stmt *S) {
 
 class SpinLoopVisitor : public clang::RecursiveASTVisitor<SpinLoopVisitor> {
 public:
+    const std::vector<std::string> *cfgAtomics = nullptr;
+    inline static const std::vector<std::string> kNoAtomics{};
+
     std::vector<SpinSite> sites;
     const std::vector<std::string> *relaxPatterns = nullptr;
 
@@ -276,7 +290,7 @@ private:
         if (bodyStmts > kMaxSpinBodyStmts)
             return;
 
-        PollReadFinder poll;
+        PollReadFinder poll(cfgAtomics ? *cfgAtomics : kNoAtomics);
         if (cond)
             poll.TraverseStmt(const_cast<clang::Expr *>(cond));
         // do { ... } while (!cas) keeps the poll in the condition; a
@@ -336,6 +350,7 @@ public:
 
         SpinLoopVisitor visitor;
         visitor.relaxPatterns = &Cfg.relaxFunctionPatterns;
+        visitor.cfgAtomics = &Cfg.atomicTypeNames;
         visitor.TraverseStmt(FD->getBody());
         if (visitor.sites.empty())
             return;

@@ -141,6 +141,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     // This eliminates the ASTContext pointer-reuse cache invalidation
     // bug that caused FL040 non-determinism across forked children.
     EscapeAnalysis escape(Ctx);
+    escape.setAtomicTypeNames(config_.atomicTypeNames);
     escape.scanTranslationUnit(TU);
 
     // Concurrency is a call-graph property, so it is injected rather than

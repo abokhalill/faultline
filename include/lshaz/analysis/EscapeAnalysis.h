@@ -6,6 +6,7 @@
 #include <clang/AST/Expr.h>
 #include <clang/AST/Type.h>
 
+#include "lshaz/analysis/ConfiguredAtomics.h"
 #include "lshaz/analysis/EscapeSummary.h"
 #include "lshaz/analysis/ThreadRoleSummary.h"
 
@@ -83,6 +84,12 @@ public:
     bool isGlobalSharedMutable(const clang::VarDecl *VD) const;
 
     bool isAtomicType(clang::QualType QT) const;
+
+    // Opaque atomic wrappers named in config. Injected rather than passed
+    // through every call so no rule can silently skip the option.
+    void setAtomicTypeNames(std::vector<std::string> names) {
+        atomicTypeNames_ = std::move(names);
+    }
     bool isSyncType(clang::QualType QT) const;
 
     bool hasSharedOwnershipMembers(const clang::RecordDecl *RD) const;
@@ -198,6 +205,7 @@ private:
     // that is the striped-counter shape.
     std::unordered_set<const clang::FunctionDecl *> threadEntries_;
     std::unordered_set<const clang::FunctionDecl *> poolRoleWriters_;
+    std::vector<std::string> atomicTypeNames_;
     std::set<std::string> globalInstanceTypes_;
     bool hasThreadEntryWriters(const clang::RecordDecl *RD) const;
 

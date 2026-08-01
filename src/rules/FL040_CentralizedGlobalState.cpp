@@ -44,12 +44,12 @@ public:
 
         clang::QualType QT = VD->getType();
         bool hasAtomics = false;
-        bool isRecord = false;
 
-        if (const auto *RD = QT->getAsCXXRecordDecl()) {
-            isRecord = true;
+        // getAsRecordDecl, not getAsCXXRecordDecl: the latter is null for a
+        // C struct, so a C global holding _Atomic fields was graded High
+        // instead of Critical with its concurrency claim unestablished.
+        if (const auto *RD = QT->getAsRecordDecl())
             hasAtomics = escape.hasAtomicMembers(RD);
-        }
 
         // Also flag bare atomic globals.
         if (escape.isAtomicType(QT))

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/EscapeAnalysis.h"
 
+#include "lshaz/analysis/ConfiguredAtomics.h"
 #include "lshaz/analysis/TypeUtil.h"
 #include "lshaz/analysis/SymbolNames.h"
 
@@ -49,6 +50,13 @@ bool isQualifiedNameOneOf(const clang::CXXRecordDecl *RD,
 
 bool EscapeAnalysis::isAtomicType(clang::QualType QT) const {
     QT = peelArrays(QT);
+
+    // Opaque wrappers named in config (atomic_t, ngx_atomic_t). Checked
+    // first: the point of the option is that these types carry no other
+    // evidence. Without it hasAtomicMembers, and so FL040 and FL060, were
+    // blind on exactly the C codebases the option exists for.
+    if (isConfiguredAtomic(QT, atomicTypeNames_))
+        return true;
 
     // C11 _Atomic qualifier.
     if (QT.getCanonicalType()->isAtomicType())
