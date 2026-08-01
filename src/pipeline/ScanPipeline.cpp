@@ -384,6 +384,8 @@ std::string serializeShardResult(int exitCode,
             buf += ",\"v\":" + std::to_string(sig.hasVolatile ? 1 : 0);
             buf += ",\"p\":" + std::to_string(sig.hasPublication ? 1 : 0);
             buf += ",\"tw\":" + std::to_string(sig.hasThreadWriters ? 1 : 0);
+            buf += ",\"gi\":" + std::to_string(sig.hasGlobalInstance ? 1 : 0);
+            buf += ",\"tb\":" + std::to_string(sig.hasThreadBorneWriter ? 1 : 0);
             buf += ",\"l\":" + std::to_string(sig.hasDeliberateLayout ? 1 : 0);
             buf += ",\"n\":" + std::to_string(sig.accessorCount);
             buf += '}';
@@ -760,6 +762,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     else if (sk == "v") sig.hasVolatile = val != 0;
                     else if (sk == "p") sig.hasPublication = val != 0;
                     else if (sk == "tw") sig.hasThreadWriters = val != 0;
+                    else if (sk == "gi") sig.hasGlobalInstance = val != 0;
+                    else if (sk == "tb") sig.hasThreadBorneWriter = val != 0;
                     else if (sk == "l") sig.hasDeliberateLayout = val != 0;
                     else if (sk == "n") sig.accessorCount = static_cast<unsigned>(val);
                     ipc::expect(json, i, ',');
@@ -1642,6 +1646,53 @@ static unsigned synthesizeUnappliedMitigation(
 
 // Cross-TU escape suppression using aggregated EscapeSummary.
 // For each diagnostic with thread_escape evidence, look up the type in the
+// Two cores can only fight over a cache line if they reach the same object.
+// A rule cannot decide that: hasGlobalInstance is a per-TU fact, the record
+// lives in a header and its global lives in one .c, so at rule time the
+// answer is false almost everywhere it matters.
+static unsigned applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
+                                         const EscapeSummary &summary) {
+    unsigned capped = 0;
+    for (auto &d : diagnostics) {
+        if (d.suppressed) continue;
+        // Rules whose whole claim is cross-core contention on one object.
+        if (d.ruleID != "FL002" && d.ruleID != "FL041") continue;
+        auto it = d.structuralEvidence.find("type_name");
+        if (it == d.structuralEvidence.end() || it->second.empty()) continue;
+        // ';'-separated: a compound may name several types. Any one of them
+        // being genuinely shared leaves the finding alone.
+        bool anyShared = false, anyKnown = false;
+        const std::string &ts = it->second;
+        for (size_t start = 0; start < ts.size();) {
+            size_t end = ts.find(';', start);
+            std::string t = ts.substr(start, end == std::string::npos
+                                                 ? std::string::npos
+                                                 : end - start);
+            if (!t.empty()) {
+                auto sit = summary.find(t);
+                if (sit != summary.end()) {
+                    anyKnown = true;
+                    if (sit->second.hasSharingRoute()) anyShared = true;
+                }
+            }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+        // Absent from the summary means unanalyzed, not disproven.
+        if (!anyKnown || anyShared) continue;
+
+        d.mechanismClaims.push_back(
+            {"two threads reach the same instance",
+             "some TU shows a shared instance and a thread-borne writer",
+             false, Severity::Medium, /*gating=*/true});
+        d.escalations.push_back(
+            "no TU showed a thread reaching a shared instance of this type: "
+            "co-location is real, cross-core contention is not established");
+        ++capped;
+    }
+    return capped;
+}
+
 // global summary. If no TU provided structural or publication escape evidence,
 // suppress.
 static unsigned applyCrossTUEscapeSuppression(
@@ -2347,6 +2398,13 @@ ScanResult ScanPipeline::run(
         if (crossTUSuppressed > 0)
             report("cross_tu", std::to_string(crossTUSuppressed) +
                    " finding(s) suppressed (no cross-TU escape evidence)");
+
+        unsigned unshared = applySharingRouteVerdict(result.diagnostics,
+                                                     result.escapeSummary);
+        if (unshared > 0)
+            report("cross_tu", std::to_string(unshared) +
+                   " sharing finding(s) capped (no shared instance any TU "
+                   "reached)");
     }
 
     // Thread-role reduce: verdicts from the merged facts. Runs on the

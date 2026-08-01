@@ -921,6 +921,8 @@ EscapeSummary EscapeAnalysis::buildEscapeSummary(
         sig.hasVolatile    |= hasVolatileMembers(RD);
         sig.hasPublication |= hasPublicationEvidence(RD);
         sig.hasThreadWriters |= hasThreadEntryWriters(RD);
+        sig.hasGlobalInstance |= hasGlobalInstance(RD);
+        sig.hasThreadBorneWriter |= anyWriterOnThread(RD);
 
         auto it = typeAccessorCounts_.find(
             static_cast<const clang::RecordDecl *>(canon));

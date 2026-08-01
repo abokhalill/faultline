@@ -23,6 +23,13 @@ struct TypeEscapeSignals {
     // file-scope object written directly from two thread bodies never
     // does, and is invisible without this.
     bool hasThreadWriters = false;
+    // A file-scope instance exists in SOME TU. Per-TU this is nearly
+    // useless -- the record lives in a header and the global lives in one
+    // .c -- which is why the instance question has to be answered here
+    // rather than at rule time.
+    bool hasGlobalInstance = false;
+    // Some TU saw a thread-borne writer touch it.
+    bool hasThreadBorneWriter = false;
     // Explicit line alignment or trailing pad-to-line: the author reasons
     // in cache lines. Feeds the FL092 precedent join; a codebase-level
     // "the mitigation idiom is known here" index.
@@ -37,6 +44,8 @@ struct TypeEscapeSignals {
         hasVolatile    |= other.hasVolatile;
         hasPublication |= other.hasPublication;
         hasThreadWriters |= other.hasThreadWriters;
+        hasGlobalInstance |= other.hasGlobalInstance;
+        hasThreadBorneWriter |= other.hasThreadBorneWriter;
         hasDeliberateLayout |= other.hasDeliberateLayout;
         accessorCount  += other.accessorCount;
     }
@@ -44,6 +53,13 @@ struct TypeEscapeSignals {
     // Structural signals only — no TU-specific publication evidence.
     bool hasStructuralEscape() const {
         return hasAtomics || hasSyncPrims || hasSharedOwner || hasVolatile;
+    }
+
+    // Two cores can reach one object: a shared instance somewhere, and a
+    // thread that touches it. Answerable only after every TU has reported.
+    bool hasSharingRoute() const {
+        return hasPublication || hasThreadWriters ||
+               (hasGlobalInstance && hasThreadBorneWriter);
     }
 
     bool hasAnyEscape() const {
