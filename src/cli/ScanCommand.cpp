@@ -545,6 +545,20 @@ int runScanCommand(int argc, const char **argv) {
                    "  hot_file_patterns/hot_function_patterns in "
                    "lshaz.config.yaml, or\n"
                    "  __attribute__((hot)) on the entry points.\n";
+        // Inference seeds on entry points, so a library scanned on its own
+        // has nothing to seed from. Saying "0.4% hot" without saying why
+        // invites reading thin coverage as a clean codebase.
+        else if (cov.functionsSeen > 1000 &&
+                 cov.functionsHot * 100 < cov.functionsSeen)
+            llvm::errs()
+                << "lshaz: WARNING only " << cov.functionsHot << " of "
+                << cov.functionsSeen << " function(s) are on a known hot "
+                   "path, so hot-path rule\n"
+                   "  coverage is thin. Hotness is inferred from entry "
+                   "points (main, thread bodies);\n"
+                   "  a library scanned without its application has none. "
+                   "Supply --perf-profile or\n"
+                   "  hot_function_patterns to measure rather than infer.\n";
 
         // Which rules produced nothing. "Looked and found nothing" and
         // "never ran" are the same output otherwise, and that ambiguity is

@@ -178,23 +178,16 @@ void HotPathOracle::inferFromCodeShape(const CallGraph &cg) {
     std::unordered_map<const clang::FunctionDecl *, unsigned> depth;
     std::vector<const clang::FunctionDecl *> work;
 
+    // Seeds are entries only. A function's own loop nesting says it is
+    // expensive per call; it says nothing about being called often, and
+    // conflating the two marks every initializer hot.
     for (const auto *fn : cg.functions()) {
         const std::string qn = fn->getQualifiedNameAsString();
-        const bool isEntry = fn->isMain() || entryNames.count(qn) ||
-                             entryNames.count(fn->getNameAsString());
-        unsigned d = 0;
-        // Entries repeat by construction even when the loop is elsewhere.
-        if (isEntry) d = 1;
-        // A body-local loop seeds only when nested. One flat loop is the
-        // weakest signal there is — roughly half of all C functions have
-        // one — and calling that hot would make the label meaningless.
-        // Nesting is multiplicative repetition, which is the claim.
-        if (unsigned own = cg.ownLoopDepth(fn); own >= 2)
-            d = std::max(d, own);
-        if (d == 0)
-            continue;
-        depth[fn] = d;
-        work.push_back(fn);
+        if (fn->isMain() || entryNames.count(qn) ||
+            entryNames.count(fn->getNameAsString())) {
+            depth[fn] = 0;
+            work.push_back(fn);
+        }
     }
     if (work.empty())
         return;
@@ -222,8 +215,11 @@ void HotPathOracle::inferFromCodeShape(const CallGraph &cg) {
 
     for (const auto &[fn, d] : depth) {
         if (d == 0) continue;   // reachable but never repeated: not hot
-        record(fn, d >= 2 ? HotnessSource::InferredDeep
-                          : HotnessSource::InferredShallow);
+        // Own loop nesting is cost per call. It only sharpens the grade
+        // once repetition is already established by the path in.
+        const unsigned graded = d + (cg.ownLoopDepth(fn) >= 2 ? 1u : 0u);
+        record(fn, graded >= 2 ? HotnessSource::InferredDeep
+                               : HotnessSource::InferredShallow);
     }
 }
 
