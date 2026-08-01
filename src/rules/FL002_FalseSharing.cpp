@@ -120,6 +120,12 @@ public:
         const bool anyAtomics = hasAtomicPairs || map.totalAtomicFields() > 0;
         if (!anyAtomics && wev != kMultiWriter)
             return;
+        // Not gated on in-TU writes when atomics are present: write evidence
+        // is per-TU, so a header-defined struct written from another TU shows
+        // none. An atomic field is a declaration of intent to share and is
+        // the signal that survives that blindness. Requiring writes here
+        // trades this rule's FP class for a cross-TU false-negative class,
+        // which is the worse trade (verify: fl002_unwritten, mitigated_*).
 
         // Refcount-only structs: single atomic refcount field sharing a line
         // with immutable data.  No real false sharing.
