@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <cstdlib>
 #include "lshaz/core/Config.h"
 
 #include <llvm/Support/YAMLParser.h>
@@ -96,6 +97,18 @@ Config Config::loadFromFile(const std::string &path) {
             cfg.cacheLineSpanWarn = 128;
         if (cfg.cacheLineSpanCrit == def.cacheLineSpanCrit)
             cfg.cacheLineSpanCrit = 256;
+    }
+
+    // cacheLineBytes is a divisor in every layout computation. Zero crashed
+    // each TU.
+    auto isPow2 = [](uint64_t v) { return v && (v & (v - 1)) == 0; };
+    if (!isPow2(cfg.cacheLineBytes) || cfg.cacheLineBytes < 8 ||
+        cfg.cacheLineBytes > 4096) {
+        llvm::errs() << "lshaz: FATAL: cache_line_bytes is "
+                     << cfg.cacheLineBytes
+                     << "; expected a power of two in [8, 4096]. Every layout "
+                        "computation divides by it.\n";
+        std::exit(3);
     }
 
     return cfg;
