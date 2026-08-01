@@ -321,9 +321,33 @@ void EscapeAnalysis::markPublished(clang::QualType QT) {
         publishedTypes_.insert(std::move(k));
 }
 
-void EscapeAnalysis::markGlobalInstance(clang::QualType QT) {
-    if (std::string k = recordKeyOf(QT); !k.empty())
-        globalInstanceTypes_.insert(std::move(k));
+void EscapeAnalysis::markGlobalInstance(clang::QualType QT,
+                                        const std::string &varName) {
+    std::string k = recordKeyOf(QT);
+    if (k.empty())
+        return;
+    // The linker name is what a runtime trace reports, and the type name is
+    // what a finding reports. Carrying both is what lets the two be joined
+    // without re-deriving it from DWARF.
+    if (!varName.empty())
+        globalInstanceNames_[k].insert(varName);
+    globalInstanceTypes_.insert(std::move(k));
+}
+
+std::string EscapeAnalysis::globalInstanceNames(
+        const clang::RecordDecl *RD) const {
+    if (!RD)
+        return {};
+    auto it = globalInstanceNames_.find(
+        RD->getCanonicalDecl()->getQualifiedNameAsString());
+    if (it == globalInstanceNames_.end())
+        return {};
+    std::string out;
+    for (const auto &n : it->second) {
+        if (!out.empty()) out += ';';
+        out += n;
+    }
+    return out;
 }
 
 bool EscapeAnalysis::hasStandingWrites(const clang::RecordDecl *RD) const {
@@ -444,7 +468,7 @@ void EscapeAnalysis::scanTranslationUnit(const clang::TranslationUnitDecl *TU) {
     // them made "is a global" indistinguishable from "is shared".
     for (const auto *VD : globals) {
         if (isGlobalSharedMutable(VD))
-            markGlobalInstance(VD->getType());
+            markGlobalInstance(VD->getType(), VD->getNameAsString());
     }
 
     // Pass 2: thread-creation call sites across all function bodies.

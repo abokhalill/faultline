@@ -295,6 +295,9 @@ public:
             {"atomics", map.totalAtomicFields() > 0 ? "yes" : "no"},
             {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
             {"pair_fields", pairFields},
+            // Linker names of this type's global instances: the key a
+            // runtime write-attribution trace is reported under.
+            {"global_instances", escape.globalInstanceNames(RD)},
         };
 
         diag.mitigation =

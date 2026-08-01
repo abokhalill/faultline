@@ -11,6 +11,8 @@
 #include "lshaz/analysis/ThreadRoleSummary.h"
 
 #include <cstdint>
+#include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -106,7 +108,12 @@ public:
     // from publication: one is "there is a single shared object", the other
     // is "a thread reaches it". Conflating them made every global look
     // shared and every C struct look neither.
-    void markGlobalInstance(clang::QualType QT);
+    void markGlobalInstance(clang::QualType QT,
+                            const std::string &varName = {});
+    // ';'-separated linker names of this type's global instances,
+    // so a runtime trace keyed on symbols can be joined to findings
+    // keyed on types.
+    std::string globalInstanceNames(const clang::RecordDecl *RD) const;
     void markThreadEntry(const clang::Expr *E);
 
     // Build per-type escape summary for cross-TU aggregation.
@@ -218,6 +225,7 @@ private:
     std::unordered_set<const clang::FunctionDecl *> poolRoleWriters_;
     std::vector<std::string> atomicTypeNames_;
     std::set<std::string> globalInstanceTypes_;
+    std::map<std::string, std::set<std::string>> globalInstanceNames_;
     bool hasThreadEntryWriters(const clang::RecordDecl *RD) const;
 
     // Which functions write each global, so rules can ask whether the

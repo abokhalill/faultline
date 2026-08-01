@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <link.h>
 
 #define GRANULE 8u
 #define LINE_BYTES 64u
@@ -90,25 +91,26 @@ static void note_write(uintptr_t addr, unsigned size) {
 
 static int popcount64(uint64_t v) { return __builtin_popcountll(v); }
 
+// First callback is always the main executable.
+static int first_object_bias(struct dl_phdr_info *info, size_t sz, void *out) {
+    (void)sz;
+    *(unsigned long long *)out = (unsigned long long)info->dlpi_addr;
+    return 1; // stop
+}
+
 static void dump(void) {
     const char *path = getenv("LSHAZ_WATTR_OUT");
     FILE *f = path ? fopen(path, "w") : stderr;
     if (!f) f = stderr;
 
-    // Runtime addresses are ASLR'd; the join needs the bias to reach the
-    // link-time symbol table. First executable mapping of the main binary.
+    // Runtime addresses are ASLR'd; the join needs the relocation bias to
+    // reach nm's link-time addresses. dl_iterate_phdr's first entry is the
+    // main executable and dlpi_addr IS the bias -- exactly, by definition.
+    // Reading /proc/self/maps for the first executable mapping is off by
+    // whatever read-only segment precedes it, which silently misresolved
+    // every symbol by a page.
     unsigned long long base = 0;
-    FILE *m = fopen("/proc/self/maps", "r");
-    if (m) {
-        char line[512];
-        while (fgets(line, sizeof line, m)) {
-            unsigned long long lo, hi;
-            char perms[8];
-            if (sscanf(line, "%llx-%llx %7s", &lo, &hi, perms) == 3 &&
-                perms[2] == 'x') { base = lo; break; }
-        }
-        fclose(m);
-    }
+    dl_iterate_phdr(first_object_bias, &base);
     fprintf(f, "# base\t%llx\n", base);
 
     // Group granules by line so the same-granule / different-granule
