@@ -753,6 +753,40 @@ void testConfiguredAtomicWrapperIsSeen() {
         });
 }
 
+// Sharing and a handoff are indistinguishable by writer count: both are
+// written from several functions, one of them thread-borne. What separates
+// them is how the writer reaches the object. A queued request object has
+// one owner at any instant however many threads touch it, and grading it
+// as contended was the dominant FL002 false positive.
+void testStandingVersusHandedWrites() {
+    std::cerr << "test: standing writes distinguish sharing from handoff\n";
+    const std::string src = R"cpp(
+        struct Shared { long hits; long misses; };
+        struct Handed { long len; long off; };
+        static Shared g_shared;
+        void bumpShared(int hit) {
+            if (hit) g_shared.hits++; else g_shared.misses++;
+        }
+        void fillHanded(Handed *h, long n) { h->len = n; h->off = 0; }
+    )cpp";
+
+    withRecord(src, "Shared",
+        [&](const clang::CXXRecordDecl *RD, clang::ASTContext &Ctx) {
+            lshaz::EscapeAnalysis ea(Ctx);
+            ea.scanTranslationUnit(Ctx.getTranslationUnitDecl());
+            check(ea.hasStandingWrites(RD),
+                  "a named global object is written by standing access");
+        });
+
+    withRecord(src, "Handed",
+        [&](const clang::CXXRecordDecl *RD, clang::ASTContext &Ctx) {
+            lshaz::EscapeAnalysis ea(Ctx);
+            ea.scanTranslationUnit(Ctx.getTranslationUnitDecl());
+            check(!ea.hasStandingWrites(RD),
+                  "an object written only through a parameter is handed over");
+        });
+}
+
 void testThreadRoleStdThreadEntry() {
     std::cerr << "test: std::thread constructor entry detection\n";
     const std::string src = R"cpp(
@@ -869,6 +903,7 @@ int main() {
     testThreadRoleSpawnerWrapper();
     testPoolRoleMultiplicity();
     testConfiguredAtomicWrapperIsSeen();
+    testStandingVersusHandedWrites();
     testThreadRoleStdThreadEntry();
     testThreadRoleLambdaEntry();
 

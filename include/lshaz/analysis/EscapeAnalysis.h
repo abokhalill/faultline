@@ -164,6 +164,11 @@ public:
     bool hasGlobalInstance(const clang::RecordDecl *RD) const;
     bool anyWriterOnThread(const clang::RecordDecl *RD) const;
 
+    // Some field of this record is written through a fixed, nameable object
+    // rather than one passed in. Necessary for false sharing: a handed-over
+    // object has one owner at a time however many threads touch it.
+    bool hasStandingWrites(const clang::RecordDecl *RD) const;
+
     // Snapshot per-field writer sets as names ("Type::field" -> writer
     // functions) into the TU's thread-role facts. Same key convention as
     // buildEscapeSummary: canonical qualified names.
@@ -172,6 +177,12 @@ public:
     // Public so the TU-scan visitor (anonymous namespace) can populate it.
     struct FieldWriteRecord {
         unsigned sites = 0;
+        // Writes reaching a fixed object by name (standing shared access)
+        // versus writes to whatever the caller handed in (ownership moves
+        // with the object). A queue produces the second; a global counter
+        // block produces the first. Writer counts cannot tell them apart.
+        unsigned standingSites = 0;
+        unsigned handedSites   = 0;
         std::unordered_set<const clang::FunctionDecl *> writers;
     };
 

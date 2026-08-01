@@ -30,6 +30,9 @@ struct TypeEscapeSignals {
     bool hasGlobalInstance = false;
     // Some TU saw a thread-borne writer touch it.
     bool hasThreadBorneWriter = false;
+    // Some TU writes a field through a fixed nameable object rather than
+    // one passed in. A handed-over object has one owner at a time.
+    bool hasStandingWrites = false;
     // Explicit line alignment or trailing pad-to-line: the author reasons
     // in cache lines. Feeds the FL092 precedent join; a codebase-level
     // "the mitigation idiom is known here" index.
@@ -46,6 +49,7 @@ struct TypeEscapeSignals {
         hasThreadWriters |= other.hasThreadWriters;
         hasGlobalInstance |= other.hasGlobalInstance;
         hasThreadBorneWriter |= other.hasThreadBorneWriter;
+        hasStandingWrites |= other.hasStandingWrites;
         hasDeliberateLayout |= other.hasDeliberateLayout;
         accessorCount  += other.accessorCount;
     }
@@ -58,6 +62,12 @@ struct TypeEscapeSignals {
     // Two cores can reach one object: a shared instance somewhere, and a
     // thread that touches it. Answerable only after every TU has reported.
     bool hasSharingRoute() const {
+        // Standing access is the conjunct that separates sharing from a
+        // handoff. Without it, a request object queued between a producer
+        // and a consumer looks identical to a shared counter block: both
+        // are written from several functions, one of them thread-borne.
+        if (!hasStandingWrites)
+            return false;
         return hasPublication || hasThreadWriters ||
                (hasGlobalInstance && hasThreadBorneWriter);
     }

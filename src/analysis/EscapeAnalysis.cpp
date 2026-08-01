@@ -326,6 +326,18 @@ void EscapeAnalysis::markGlobalInstance(clang::QualType QT) {
         globalInstanceTypes_.insert(std::move(k));
 }
 
+bool EscapeAnalysis::hasStandingWrites(const clang::RecordDecl *RD) const {
+    if (!RD)
+        return false;
+    for (const auto *field : RD->fields()) {
+        auto it = fieldWrites_.find(
+            llvm::dyn_cast_or_null<clang::FieldDecl>(field->getCanonicalDecl()));
+        if (it != fieldWrites_.end() && it->second.standingSites > 0)
+            return true;
+    }
+    return false;
+}
+
 bool EscapeAnalysis::hasGlobalInstance(const clang::RecordDecl *RD) const {
     if (!RD || globalInstanceTypes_.empty())
         return false;
@@ -738,10 +750,51 @@ private:
                 ++rec.sites;
                 if (currentFn)
                     rec.writers.insert(currentFn->getCanonicalDecl());
+                // How the writer reached the object is what separates
+                // sharing from a handoff. `g_stats.hits++` reaches a fixed
+                // object every thread can name; `io->len = n` operates on
+                // whatever this call was handed, and a queue hands each
+                // request to one owner at a time. Both look identical to a
+                // writer count, which is why per-request objects graded as
+                // contended.
+                if (rootsAtGlobal(ME->getBase()))
+                    rec.standingSites++;
+                else
+                    rec.handedSites++;
             }
             // Member access on a global: g.field = x counts as write to g.
             recordWrite(ME->getBase());
         }
+    }
+
+    // Walk a base expression to its root declaration: global storage means
+    // standing access, a parameter means the object arrived from elsewhere.
+    // A local is neither -- it is this thread's own object.
+    static bool rootsAtGlobal(const clang::Expr *E) {
+        while (E) {
+            E = E->IgnoreParenImpCasts();
+            if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E)) {
+                E = UO->getSubExpr();
+                continue;
+            }
+            if (const auto *ASE =
+                    llvm::dyn_cast<clang::ArraySubscriptExpr>(E)) {
+                E = ASE->getBase();
+                continue;
+            }
+            if (const auto *ME2 = llvm::dyn_cast<clang::MemberExpr>(E)) {
+                E = ME2->getBase();
+                continue;
+            }
+            if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(E)) {
+                const auto *VD =
+                    llvm::dyn_cast<clang::VarDecl>(DRE->getDecl());
+                return VD && VD->hasGlobalStorage() &&
+                       !VD->getTLSKind();
+            }
+            return false;
+        }
+        return false;
     }
 };
 
@@ -923,6 +976,7 @@ EscapeSummary EscapeAnalysis::buildEscapeSummary(
         sig.hasThreadWriters |= hasThreadEntryWriters(RD);
         sig.hasGlobalInstance |= hasGlobalInstance(RD);
         sig.hasThreadBorneWriter |= anyWriterOnThread(RD);
+        sig.hasStandingWrites |= hasStandingWrites(RD);
 
         auto it = typeAccessorCounts_.find(
             static_cast<const clang::RecordDecl *>(canon));
