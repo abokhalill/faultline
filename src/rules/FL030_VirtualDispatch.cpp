@@ -99,6 +99,8 @@ public:
     std::string_view getTitle() const override { return "Virtual Dispatch in Hot Path"; }
     Severity getBaseSeverity() const override { return Severity::High; }
 
+    bool requiresHotPath() const override { return true; }
+
     std::string_view getHardwareMechanism() const override {
         return "Indirect branch via vtable pointer. BTB (Branch Target Buffer) "
                "lookup required. Misprediction causes full pipeline flush "

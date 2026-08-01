@@ -6,6 +6,7 @@
 
 #include "lshaz/analysis/ThreadRoleSummary.h"
 
+#include <map>
 #include <set>
 #include <string>
 #include <tuple>
@@ -40,6 +41,14 @@ public:
         const std::unordered_set<const clang::FunctionDecl *> &roots,
         unsigned maxDepth = 8) const;
 
+    // Max loop nesting at any call site of Callee inside Caller. 0 means
+    // every call site is straight-line: entered once per entry to Caller.
+    unsigned callSiteLoopDepth(const clang::FunctionDecl *Caller,
+                               const clang::FunctionDecl *Callee) const;
+
+    // Every function with a body seen in this TU.
+    std::vector<const clang::FunctionDecl *> functions() const;
+
     size_t numFunctions() const { return calleeMap_.size(); }
     size_t numEdges() const { return edgeCount_; }
 
@@ -55,6 +64,10 @@ public:
     void snapshotForThreadRoles(ThreadRoleSummary &out) const;
 
 private:
+    // (caller, callee) -> max loop depth over that pair's call sites.
+    std::map<std::pair<const clang::FunctionDecl *,
+                       const clang::FunctionDecl *>, unsigned> edgeLoopDepth_;
+
     void processFunction(const clang::FunctionDecl *FD);
     void resolveSpawnerEntries();
 

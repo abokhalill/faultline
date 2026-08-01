@@ -142,6 +142,8 @@ public:
     std::string_view getTitle() const override { return "Heap Allocation in Hot Path"; }
     Severity getBaseSeverity() const override { return Severity::Critical; }
 
+    bool requiresHotPath() const override { return true; }
+
     std::string_view getHardwareMechanism() const override {
         return "Allocator lock contention (glibc malloc arena locks). "
                "TLB pressure from new page mappings. "

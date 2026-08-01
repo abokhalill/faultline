@@ -83,6 +83,51 @@ public:
     std::vector<LambdaRec> lambdas;
     llvm::SmallPtrSet<const clang::LambdaExpr *, 4> entryLambdas;
 
+    // Max loop nesting at any call site of each callee within this caller.
+    // Repetition is what makes a miss steady-state rather than one-off, so
+    // this is the structural signal hotness is derived from.
+    std::unordered_map<const clang::FunctionDecl *, unsigned> calleeLoopDepth;
+    unsigned loopDepth = 0;
+
+    template <typename Node, typename Base>
+    bool traverseLoop(Node *N, Base base) {
+        ++loopDepth;
+        bool r = (this->*base)(N);
+        --loopDepth;
+        return r;
+    }
+    bool TraverseForStmt(clang::ForStmt *S) {
+        return traverseLoop(S, &CallEdgeVisitor::baseTraverseFor);
+    }
+    bool TraverseWhileStmt(clang::WhileStmt *S) {
+        return traverseLoop(S, &CallEdgeVisitor::baseTraverseWhile);
+    }
+    bool TraverseDoStmt(clang::DoStmt *S) {
+        return traverseLoop(S, &CallEdgeVisitor::baseTraverseDo);
+    }
+    bool TraverseCXXForRangeStmt(clang::CXXForRangeStmt *S) {
+        return traverseLoop(S, &CallEdgeVisitor::baseTraverseForRange);
+    }
+    bool baseTraverseFor(clang::ForStmt *S) {
+        return clang::RecursiveASTVisitor<CallEdgeVisitor>::TraverseForStmt(S);
+    }
+    bool baseTraverseWhile(clang::WhileStmt *S) {
+        return clang::RecursiveASTVisitor<CallEdgeVisitor>::TraverseWhileStmt(S);
+    }
+    bool baseTraverseDo(clang::DoStmt *S) {
+        return clang::RecursiveASTVisitor<CallEdgeVisitor>::TraverseDoStmt(S);
+    }
+    bool baseTraverseForRange(clang::CXXForRangeStmt *S) {
+        return clang::RecursiveASTVisitor<CallEdgeVisitor>::
+            TraverseCXXForRangeStmt(S);
+    }
+
+    void noteEdge(const clang::FunctionDecl *callee) {
+        callees.insert(callee);
+        auto &d = calleeLoopDepth[callee];
+        d = std::max(d, loopDepth);
+    }
+
     bool TraverseLambdaExpr(clang::LambdaExpr *LE) {
         // Capture initializers evaluate in the enclosing frame.
         for (auto *init : LE->capture_inits())
@@ -97,7 +142,7 @@ public:
         const auto *Callee = CE->getDirectCallee();
         if (!Callee)
             return true;
-        callees.insert(Callee->getCanonicalDecl());
+        noteEdge(Callee->getCanonicalDecl());
 
         for (unsigned i = 0; i < CE->getNumArgs(); ++i)
             if (const auto *FD = entryArgToFunction(CE->getArg(i)))
@@ -124,7 +169,7 @@ public:
         const auto *CD = CE->getConstructor();
         if (!CD)
             return true;
-        callees.insert(CD->getCanonicalDecl());
+        noteEdge(CD->getCanonicalDecl());
 
         // std::thread t(fn, args...) / std::jthread.
         const auto *RD = CD->getParent();
@@ -229,6 +274,9 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
     for (const auto *callee : visitor.callees) {
         targets.insert(callee);
         callerMap_[callee].insert(canon);
+        auto it = visitor.calleeLoopDepth.find(callee);
+        if (it != visitor.calleeLoopDepth.end())
+            edgeLoopDepth_[{canon, callee}] = it->second;
         ++edgeCount_;
     }
     for (const auto *entry : visitor.threadEntries)
@@ -326,6 +374,24 @@ CallGraph::transitiveCallees(
     }
 
     return visited;
+}
+
+} // namespace lshaz
+
+namespace lshaz {
+
+unsigned CallGraph::callSiteLoopDepth(const clang::FunctionDecl *Caller,
+                                      const clang::FunctionDecl *Callee) const {
+    auto it = edgeLoopDepth_.find({Caller, Callee});
+    return it == edgeLoopDepth_.end() ? 0u : it->second;
+}
+
+std::vector<const clang::FunctionDecl *> CallGraph::functions() const {
+    std::vector<const clang::FunctionDecl *> out;
+    out.reserve(calleeMap_.size());
+    for (const auto &[fn, _] : calleeMap_)
+        out.push_back(fn);
+    return out;
 }
 
 } // namespace lshaz

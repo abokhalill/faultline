@@ -24,6 +24,8 @@ public:
     std::string_view getTitle() const override { return "Large Stack Frame"; }
     Severity getBaseSeverity() const override { return Severity::Medium; }
 
+    bool requiresHotPath() const override { return true; }
+
     std::string_view getHardwareMechanism() const override {
         return "TLB pressure from stack spanning multiple pages. "
                "L1D cache pressure from large working set. "

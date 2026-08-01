@@ -46,6 +46,10 @@ struct Config {
     std::string outputFile;             // empty = stdout
 
     // Hot path patterns (fnmatch-style)
+    // Derive hotness from loop-depth reachability when no attribute,
+    // config pattern or profile supplies it. Without this, an
+    // unconfigured scan leaves every hot-path rule inert.
+    bool inferHotPaths = true;
     std::vector<std::string> hotFunctionPatterns;
     std::vector<std::string> hotFilePatterns;
 

@@ -146,6 +146,8 @@ public:
     std::string_view getTitle() const override { return "TLB Pressure"; }
     Severity getBaseSeverity() const override { return Severity::Medium; }
 
+    bool requiresHotPath() const override { return true; }
+
     std::string_view getHardwareMechanism() const override {
         return "A working set spanning more base pages than the dTLB "
                "covers (~64 L1 / ~1-2K L2 entries at 4KB) turns strided "

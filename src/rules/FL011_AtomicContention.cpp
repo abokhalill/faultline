@@ -256,6 +256,8 @@ public:
     std::string_view getTitle() const override { return "Atomic Contention Hotspot"; }
     Severity getBaseSeverity() const override { return Severity::Critical; }
 
+    bool requiresHotPath() const override { return true; }
+
     std::string_view getHardwareMechanism() const override {
         return "Cache line ownership thrashing via MESI RFO (Read-For-Ownership). "
                "Each atomic write from a different core forces exclusive ownership "

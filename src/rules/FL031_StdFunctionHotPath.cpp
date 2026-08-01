@@ -134,6 +134,8 @@ public:
     std::string_view getTitle() const override { return "std::function in Hot Path"; }
     Severity getBaseSeverity() const override { return Severity::High; }
 
+    bool requiresHotPath() const override { return true; }
+
     std::string_view getHardwareMechanism() const override {
         return "std::function uses type-erased callable storage. "
                "Invocation requires indirect call (BTB pressure). "

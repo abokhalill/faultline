@@ -11,6 +11,8 @@
 
 #include <fnmatch.h>
 
+#include <vector>
+
 namespace lshaz {
 
 HotPathOracle::HotPathOracle(const Config &cfg) : config_(cfg) {}
@@ -29,13 +31,69 @@ bool HotPathOracle::isFunctionHot(const clang::FunctionDecl *FD) const {
     if (hotCache_.count(canon))
         return true;
 
-    if (hasHotAnnotation(FD) || matchesConfigPattern(FD) ||
-        matchesProfileFunction(FD)) {
-        hotCache_.insert(canon);
+    if (matchesProfileFunction(FD)) {
+        record(canon, HotnessSource::Profiled);
+        return true;
+    }
+    if (hasHotAnnotation(FD) || matchesConfigPattern(FD)) {
+        record(canon, HotnessSource::Declared);
         return true;
     }
 
     return false;
+}
+
+void HotPathOracle::record(const clang::FunctionDecl *FD,
+                           HotnessSource src) const {
+    hotCache_.insert(FD);
+    auto &cur = sources_[FD];
+    if (src > cur) cur = src;   // strongest evidence wins
+}
+
+HotnessSource HotPathOracle::hotnessSource(
+        const clang::FunctionDecl *FD) const {
+    if (!FD) return HotnessSource::None;
+    auto it = sources_.find(FD->getCanonicalDecl());
+    return it == sources_.end() ? HotnessSource::None : it->second;
+}
+
+const char *hotnessSourceName(HotnessSource s) {
+    switch (s) {
+        case HotnessSource::Profiled:        return "profile";
+        case HotnessSource::Declared:        return "declared";
+        case HotnessSource::InferredDeep:    return "inferred-deep";
+        case HotnessSource::InferredShallow: return "inferred-shallow";
+        case HotnessSource::None:            break;
+    }
+    return "none";
+}
+
+Severity hotnessSupportedSeverity(HotnessSource s, Severity base) {
+    auto demote = [](Severity v, unsigned steps) {
+        int r = static_cast<int>(v) - static_cast<int>(steps);
+        return r < static_cast<int>(Severity::Informational)
+                   ? Severity::Informational
+                   : static_cast<Severity>(r);
+    };
+    switch (s) {
+        // An operator naming the path, or a profile that saw it execute,
+        // imposes no bound: whatever the rule graded, including escalations
+        // above its own base, stands. Returning `base` here would silently
+        // cap every escalation.
+        case HotnessSource::Profiled:
+        case HotnessSource::Declared:
+            return Severity::Critical;
+        // Nested loops or recursion: repetition is structurally certain,
+        // its magnitude is not.
+        case HotnessSource::InferredDeep:
+            return demote(base, 1);
+        // One loop level from an entry. Enough to look, not to assert cost.
+        case HotnessSource::InferredShallow:
+            return demote(base, 2);
+        case HotnessSource::None:
+            break;
+    }
+    return Severity::Informational;
 }
 
 void HotPathOracle::loadProfileHotFunctions(
@@ -60,7 +118,7 @@ bool HotPathOracle::matchesProfileFunction(
 
 void HotPathOracle::markHot(const clang::FunctionDecl *FD) {
     if (FD)
-        hotCache_.insert(FD->getCanonicalDecl());
+        record(FD->getCanonicalDecl(), HotnessSource::Declared);
 }
 
 bool HotPathOracle::hasHotAnnotation(const clang::FunctionDecl *FD) const {
@@ -107,8 +165,56 @@ void HotPathOracle::propagateViaCallGraph(const CallGraph &cg,
         return;
 
     auto reachable = cg.transitiveCallees(roots, maxDepth);
-    for (const auto *fn : reachable)
-        hotCache_.insert(fn);
+    for (const auto *fn : reachable) {
+        // Reached from a declared/profiled root: inherits that standing.
+        record(fn, HotnessSource::Declared);
+    }
+}
+
+void HotPathOracle::inferFromCodeShape(const CallGraph &cg) {
+    // Seeds: functions this TU hands to a thread primitive, plus main. A
+    // thread body is a steady-state loop by construction in server code.
+    const auto &entryNames = cg.threadEntryNames();
+    std::unordered_map<const clang::FunctionDecl *, unsigned> depth;
+    std::vector<const clang::FunctionDecl *> work;
+
+    for (const auto *fn : cg.functions()) {
+        const std::string qn = fn->getQualifiedNameAsString();
+        if (fn->isMain() || entryNames.count(qn) ||
+            entryNames.count(fn->getNameAsString())) {
+            depth[fn] = 0;
+            work.push_back(fn);
+        }
+    }
+    if (work.empty())
+        return;
+
+    // Relax to a fixed point. Values are bounded by kMaxDepth and only
+    // increase, so a cycle (recursion) settles instead of diverging.
+    constexpr unsigned kMaxDepth = 4;
+    while (!work.empty()) {
+        const auto *caller = work.back();
+        work.pop_back();
+        const unsigned d = depth[caller];
+        for (const auto *callee : cg.callees(caller)) {
+            unsigned nd = d + cg.callSiteLoopDepth(caller, callee);
+            // A call into an already-hot region is repetition even without a
+            // loop here: recursion re-enters the same body.
+            if (callee == caller && nd == d) nd = d + 1;
+            if (nd > kMaxDepth) nd = kMaxDepth;
+            auto it = depth.find(callee);
+            if (it != depth.end() && it->second >= nd)
+                continue;
+            depth[callee] = nd;
+            work.push_back(callee);
+        }
+    }
+
+    for (const auto &[fn, d] : depth) {
+        if (d == 0) continue;   // reachable but never repeated: not hot
+        record(fn, d >= 2 ? HotnessSource::InferredDeep
+                          : HotnessSource::InferredShallow);
+    }
 }
 
 } // namespace lshaz

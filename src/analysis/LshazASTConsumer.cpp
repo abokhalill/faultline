@@ -117,6 +117,10 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     CallGraph cg(Ctx);
     cg.buildFromTU(TU);
     oracle_.propagateViaCallGraph(cg);
+    // After propagation: an explicit signal must not be downgraded to an
+    // inference, and record() keeps the strongest source anyway.
+    if (config_.inferHotPaths)
+        oracle_.inferFromCodeShape(cg);
 
     // Counted after propagation, since that is when hotness is final.
     // Reported so a scan that examined a fraction of a codebase cannot be
@@ -144,10 +148,33 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     const auto &rules = RuleRegistry::instance().rules();
 
     for (auto *D : decls) {
+        const auto *FD = llvm::dyn_cast<clang::FunctionDecl>(D);
+        const HotnessSource hs =
+            FD ? oracle_.hotnessSource(FD) : HotnessSource::None;
+
         for (const auto &rule : rules) {
             if (disabled.count(std::string(rule->getID())))
                 continue;
+            const size_t before = diagnostics_.size();
             rule->analyze(D, Ctx, oracle_, config_, escape, diagnostics_);
+            if (!rule->requiresHotPath() || hs == HotnessSource::None)
+                continue;
+            // Attached here rather than in each rule so a new hot-path rule
+            // cannot forget it: the ceiling is a property of how hotness was
+            // evidenced, not of the individual mechanism.
+            for (size_t i = before; i < diagnostics_.size(); ++i) {
+                diagnostics_[i].mechanismClaims.push_back(
+                    {std::string("this code runs often enough for the cost to "
+                                 "recur (") + hotnessSourceName(hs) + ")",
+                     "hotness established by profile or declaration, not "
+                     "inferred from shape alone",
+                     hs >= HotnessSource::Declared,
+                     // Bound the grade the rule actually assigned, not the
+                     // rule's base: rules escalate above base on evidence,
+                     // and capping at base would erase those escalations.
+                     hotnessSupportedSeverity(hs, diagnostics_[i].severity),
+                     /*gating=*/true});
+            }
         }
     }
 

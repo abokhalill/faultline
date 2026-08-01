@@ -28,6 +28,12 @@ public:
     virtual Severity getBaseSeverity() const = 0;
     virtual std::string_view getHardwareMechanism() const = 0;
 
+    // True when the rule's mechanism only bites if the code runs often, so
+    // its severity is bounded by how well hotness is evidenced. Structural
+    // rules (a struct spans two lines whether or not anyone touches it)
+    // leave this false and keep their full grade.
+    virtual bool requiresHotPath() const { return false; }
+
     virtual void analyze(const clang::Decl *D,
                          clang::ASTContext &Ctx,
                          const HotPathOracle &Oracle,

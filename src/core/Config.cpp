@@ -36,6 +36,7 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("branch_depth_warn",      cfg.branchDepthWarn);
         io.mapOptional("json_output",            cfg.jsonOutput);
         io.mapOptional("output_file",            cfg.outputFile);
+        io.mapOptional("infer_hot_paths",        cfg.inferHotPaths);
         io.mapOptional("hot_function_patterns",  cfg.hotFunctionPatterns);
         io.mapOptional("hot_file_patterns",      cfg.hotFilePatterns);
         io.mapOptional("vendor_path_patterns",   cfg.vendorPathPatterns);

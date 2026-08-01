@@ -88,6 +88,7 @@ void emitDiagnostic(std::ostringstream &os, const Diagnostic &d) {
             os << "\n        {\"effect\": \"" << escape(c.effect)
                << "\", \"precondition\": \"" << escape(c.precondition)
                << "\", \"established\": " << (c.established ? "true" : "false")
+               << ", \"gating\": " << (c.gating ? "true" : "false")
                << ", \"supports\": \"" << severityToString(c.supports)
                << "\"}";
             if (j + 1 < d.mechanismClaims.size()) os << ",";

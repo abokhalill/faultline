@@ -100,6 +100,8 @@ public:
     std::string_view getTitle() const override { return "Deep Conditional Tree in Hot Path"; }
     Severity getBaseSeverity() const override { return Severity::Medium; }
 
+    bool requiresHotPath() const override { return true; }
+
     std::string_view getHardwareMechanism() const override {
         return "Deeply nested conditionals increase branch misprediction "
                "surface. Each unpredictable branch costs ~14-20 cycles "

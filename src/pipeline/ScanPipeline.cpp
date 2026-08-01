@@ -363,7 +363,8 @@ std::string serializeShardResult(int exitCode,
             if (j) buf += ',';
             buf += "{\"e\":\"" + esc(c.effect) + "\",\"p\":\"" +
                    esc(c.precondition) + "\",\"k\":" +
-                   std::to_string(c.established ? 1 : 0) + ",\"s\":\"" +
+                   std::to_string(c.established ? 1 : 0) + ",\"g\":" +
+                   std::to_string(c.gating ? 1 : 0) + ",\"s\":\"" +
                    std::string(severityToString(c.supports)) + "\"}";
         }
         buf += "]}";
@@ -672,6 +673,7 @@ static Diagnostic parseDiag(const std::string &s, size_t &i) {
                     if (ck == "e")      c.effect = parseStr(s, i);
                     else if (ck == "p") c.precondition = parseStr(s, i);
                     else if (ck == "k") c.established = parseNum(s, i) != 0;
+                    else if (ck == "g") c.gating = parseNum(s, i) != 0;
                     else if (ck == "s") c.supports = toSeverity(parseStr(s, i));
                     else skipValue(s, i);
                     expect(s, i, ',');

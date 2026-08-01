@@ -88,6 +88,8 @@ public:
     std::string_view getTitle() const override { return "Centralized Dispatcher Bottleneck"; }
     Severity getBaseSeverity() const override { return Severity::High; }
 
+    bool requiresHotPath() const override { return true; }
+
     std::string_view getHardwareMechanism() const override {
         return "Single-point fan-out dispatcher serializes all message processing "
                "through one function. Under load, this creates: instruction cache "

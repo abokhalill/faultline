@@ -58,6 +58,13 @@ struct MechanismClaim {
     std::string precondition;  // what must hold for it to happen
     bool        established = false;
     Severity    supports    = Severity::Informational;
+
+    // Ordinary claims are alternatives: any one established mechanism can
+    // carry the finding, so they combine with max. A gating claim is a
+    // conjunct — hotness is the example, since no mechanism costs anything
+    // in code that never runs — so it caps the result whether or not it is
+    // established. Combining a cap with max would silently do nothing.
+    bool        gating      = false;
 };
 
 struct Diagnostic {
@@ -88,10 +95,20 @@ struct Diagnostic {
         if (mechanismClaims.empty())
             return Severity::Critical;
         Severity best = Severity::Informational;
-        for (const auto &c : mechanismClaims)
-            if (c.established && c.supports > best)
-                best = c.supports;
-        return best;
+        Severity cap  = Severity::Critical;
+        bool anyMechanism = false;
+        for (const auto &c : mechanismClaims) {
+            if (c.gating) {
+                if (c.supports < cap) cap = c.supports;
+                continue;
+            }
+            anyMechanism = true;
+            if (c.established && c.supports > best) best = c.supports;
+        }
+        // All-gating is a degenerate set: nothing asserted a mechanism, so
+        // the cap is the whole statement rather than a bound on one.
+        if (!anyMechanism) best = cap;
+        return best < cap ? best : cap;
     }
 
     // Serialize structuralEvidence to "key=value; ..." for output/logging.

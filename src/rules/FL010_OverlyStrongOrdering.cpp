@@ -348,6 +348,8 @@ public:
     std::string_view getTitle() const override { return "Overly Strong Atomic Ordering"; }
     Severity getBaseSeverity() const override { return Severity::High; }
 
+    bool requiresHotPath() const override { return true; }
+
     std::string_view getHardwareMechanism() const override {
         return "On x86-64 TSO: seq_cst stores lower to XCHG (implicit LOCK, "
                "store buffer drain). seq_cst loads lower to plain MOV (no "
