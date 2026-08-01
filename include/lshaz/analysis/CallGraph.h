@@ -46,6 +46,10 @@ public:
     unsigned callSiteLoopDepth(const clang::FunctionDecl *Caller,
                                const clang::FunctionDecl *Callee) const;
 
+    // Deepest loop nesting inside this function's own body. A leaf that
+    // sweeps an array repeats without calling anything.
+    unsigned ownLoopDepth(const clang::FunctionDecl *FD) const;
+
     // Every function with a body seen in this TU.
     std::vector<const clang::FunctionDecl *> functions() const;
 
@@ -67,6 +71,7 @@ private:
     // (caller, callee) -> max loop depth over that pair's call sites.
     std::map<std::pair<const clang::FunctionDecl *,
                        const clang::FunctionDecl *>, unsigned> edgeLoopDepth_;
+    std::unordered_map<const clang::FunctionDecl *, unsigned> ownLoopDepth_;
 
     void processFunction(const clang::FunctionDecl *FD);
     void resolveSpawnerEntries();

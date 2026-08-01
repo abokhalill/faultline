@@ -88,10 +88,15 @@ public:
     // this is the structural signal hotness is derived from.
     std::unordered_map<const clang::FunctionDecl *, unsigned> calleeLoopDepth;
     unsigned loopDepth = 0;
+    // Deepest loop nesting anywhere in this body, call or not. A leaf that
+    // sweeps an array repeats on its own; crediting only call sites scored
+    // it zero, which is backwards.
+    unsigned ownLoopDepth = 0;
 
     template <typename Node, typename Base>
     bool traverseLoop(Node *N, Base base) {
         ++loopDepth;
+        if (loopDepth > ownLoopDepth) ownLoopDepth = loopDepth;
         bool r = (this->*base)(N);
         --loopDepth;
         return r;
@@ -270,6 +275,8 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
     CallEdgeVisitor visitor;
     visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
 
+    ownLoopDepth_[canon] = visitor.ownLoopDepth;
+
     auto &targets = calleeMap_[canon];
     for (const auto *callee : visitor.callees) {
         targets.insert(callee);
@@ -384,6 +391,11 @@ unsigned CallGraph::callSiteLoopDepth(const clang::FunctionDecl *Caller,
                                       const clang::FunctionDecl *Callee) const {
     auto it = edgeLoopDepth_.find({Caller, Callee});
     return it == edgeLoopDepth_.end() ? 0u : it->second;
+}
+
+unsigned CallGraph::ownLoopDepth(const clang::FunctionDecl *FD) const {
+    auto it = ownLoopDepth_.find(FD);
+    return it == ownLoopDepth_.end() ? 0u : it->second;
 }
 
 std::vector<const clang::FunctionDecl *> CallGraph::functions() const {

@@ -180,11 +180,21 @@ void HotPathOracle::inferFromCodeShape(const CallGraph &cg) {
 
     for (const auto *fn : cg.functions()) {
         const std::string qn = fn->getQualifiedNameAsString();
-        if (fn->isMain() || entryNames.count(qn) ||
-            entryNames.count(fn->getNameAsString())) {
-            depth[fn] = 0;
-            work.push_back(fn);
-        }
+        const bool isEntry = fn->isMain() || entryNames.count(qn) ||
+                             entryNames.count(fn->getNameAsString());
+        unsigned d = 0;
+        // Entries repeat by construction even when the loop is elsewhere.
+        if (isEntry) d = 1;
+        // A body-local loop seeds only when nested. One flat loop is the
+        // weakest signal there is — roughly half of all C functions have
+        // one — and calling that hot would make the label meaningless.
+        // Nesting is multiplicative repetition, which is the claim.
+        if (unsigned own = cg.ownLoopDepth(fn); own >= 2)
+            d = std::max(d, own);
+        if (d == 0)
+            continue;
+        depth[fn] = d;
+        work.push_back(fn);
     }
     if (work.empty())
         return;
