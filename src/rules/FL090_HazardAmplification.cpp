@@ -50,7 +50,7 @@ public:
         bool hasAtomics   = map.totalAtomicFields() > 0;
         bool escapeBeyondAtomics =
             ev.hasSyncPrims || ev.hasSharedOwner || ev.hasVolatile ||
-            ev.hasPublication || ev.hasThreadWriters;
+            ev.hasSharingRoute;
 
         // A single atomic occupies one line at runtime however many buckets
         // alignment uncertainty smears it across. Amplification needs the RFO

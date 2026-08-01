@@ -143,6 +143,17 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     EscapeAnalysis escape(Ctx);
     escape.scanTranslationUnit(TU);
 
+    // Concurrency is a call-graph property, so it is injected rather than
+    // rediscovered: which writers run on several threads at once decides
+    // whether co-located fields can actually be written from two cores.
+    {
+        std::unordered_set<const clang::FunctionDecl *> pool;
+        for (const auto *fn : cg.functions())
+            if (cg.runsOnManyThreads(fn))
+                pool.insert(fn);
+        escape.setPoolRoleFunctions(std::move(pool));
+    }
+
     // Second pass: run enabled rules.
     size_t diagsBefore = diagnostics_.size();
     const auto &rules = RuleRegistry::instance().rules();

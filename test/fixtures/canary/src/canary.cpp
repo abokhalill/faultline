@@ -20,6 +20,34 @@ struct alignas(64) SharedRegistry {
 };
 static SharedRegistry g_registry;
 
+// FL090 — hazard amplification: atomics on distinct lines of one shared
+// object, written from thread bodies. hft_core cannot canary this rule:
+// it spawns no threads at all, so amplification has no mechanism there and
+// firing on it was evidence-free.
+struct AmplifiedCounters {
+    std::atomic<uint64_t> head{0};
+    uint64_t pad_a[7];
+    std::atomic<uint64_t> tail{0};
+    uint64_t pad_b[7];
+    std::atomic<uint64_t> drops{0};
+    uint64_t pad_c[7];
+};
+static AmplifiedCounters g_amplified;
+
+// FL002 — the thread-pool shape: one shared object, two adjacent plain
+// counters, ONE writer function run by every pool thread. Requiring two
+// distinct writer *functions* rejected this, which is backwards: two
+// *cores* is the requirement, and a pool already has them.
+struct PoolCounters {
+    uint64_t hits;
+    uint64_t misses;
+};
+static PoolCounters g_pool_counters;
+static void record_pool_event(int hit) {
+    if (hit) g_pool_counters.hits++;
+    else     g_pool_counters.misses++;
+}
+
 // FL003 — striped per-thread array: one slot per thread, packed several to
 // a line, written under a thread-index.
 static uint64_t g_thread_bytes[64];
@@ -60,6 +88,10 @@ void dispatch(int opcode, uint64_t v) {
 
 static void worker(int id) {
     for (int i = 0; i < 1000; ++i) {
+        record_pool_event(i & 1);
+        g_amplified.head.fetch_add(1);
+        g_amplified.tail.fetch_add(1);
+        g_amplified.drops.fetch_add(id & 1);
         account(id, static_cast<uint64_t>(i));
         dispatch(i & 7, static_cast<uint64_t>(i));
     }

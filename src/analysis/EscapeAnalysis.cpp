@@ -154,9 +154,19 @@ EscapeVerdict EscapeAnalysis::escapeVerdict(const clang::RecordDecl *RD) const {
         ctx_.getTranslationUnitDecl());
     v.hasPublication = hasPublicationEvidence(RD);
     v.hasThreadWriters = hasThreadEntryWriters(RD);
+    v.hasGlobalInstance = hasGlobalInstance(RD);
+
+    // Two cores can write one line only if they reach the same object. That
+    // needs a shared instance AND a thread that touches it, either an
+    // address crossing a thread boundary, or a file-scope object whose
+    // writers run on threads. Stated once here because three rules were
+    // each re-deriving it, and each got a different answer.
+    v.hasSharingRoute = v.hasPublication || v.hasThreadWriters ||
+                        (v.hasGlobalInstance && anyWriterOnThread(RD));
 
     v.escapes = v.hasAtomics || v.hasSyncPrims || v.hasSharedOwner ||
-                v.hasVolatile || v.hasPublication || v.hasThreadWriters;
+                v.hasVolatile || v.hasPublication || v.hasThreadWriters ||
+                v.hasGlobalInstance;
 
     // Accessor count: how many functions in this TU touch the type?
     if (const auto *canon = llvm::dyn_cast<clang::RecordDecl>(RD->getCanonicalDecl())) {
@@ -241,6 +251,27 @@ void EscapeAnalysis::markThreadEntry(const clang::Expr *E) {
             threadEntries_.insert(FD->getCanonicalDecl());
 }
 
+// Any writer of any field runs on a thread -- entry itself, or a pool role.
+// Deliberately drops hasThreadEntryWriters' ">= 2 writer functions" clause:
+// one function running on N pool threads already puts two cores on the line,
+// and requiring a second function is what hid the thread-pool shape.
+bool EscapeAnalysis::anyWriterOnThread(const clang::RecordDecl *RD) const {
+    if (!RD || (threadEntries_.empty() && poolRoleWriters_.empty()))
+        return false;
+    for (const auto *field : RD->fields()) {
+        auto it = fieldWrites_.find(
+            llvm::dyn_cast_or_null<clang::FieldDecl>(field->getCanonicalDecl()));
+        if (it == fieldWrites_.end())
+            continue;
+        for (const auto *w : it->second.writers) {
+            const auto *c = w->getCanonicalDecl();
+            if (threadEntries_.count(c) || poolRoleWriters_.count(c))
+                return true;
+        }
+    }
+    return false;
+}
+
 // Shared because two functions write it and at least one of them runs on a
 // spawned thread. Weaker than publication about *when* the writes overlap,
 // which is why it moves confidence rather than severity downstream.
@@ -263,15 +294,36 @@ bool EscapeAnalysis::hasThreadEntryWriters(const clang::RecordDecl *RD) const {
     return onThread && writers.size() >= 2;
 }
 
-void EscapeAnalysis::markPublished(clang::QualType QT) {
-    QT = QT.getCanonicalType().getNonReferenceType();
-    // Strip pointer/reference layers.
+namespace {
+// getAsCXXRecordDecl() is null for a C struct, so any caller using it
+// silently skipped all of C, which is most of what the tool is aimed at.
+std::string recordKeyOf(clang::QualType QT) {
+    QT = peelArrays(QT.getCanonicalType().getNonReferenceType());
     while (QT->isPointerType() || QT->isReferenceType())
-        QT = QT->getPointeeType().getCanonicalType();
-    if (const auto *RD = QT->getAsCXXRecordDecl()) {
+        QT = peelArrays(QT->getPointeeType().getCanonicalType());
+    if (const auto *RD = QT->getAsRecordDecl())
         if (const auto *canon = RD->getCanonicalDecl())
-            publishedTypes_.insert(canon->getQualifiedNameAsString());
-    }
+            return canon->getQualifiedNameAsString();
+    return {};
+}
+} // namespace
+
+void EscapeAnalysis::markPublished(clang::QualType QT) {
+    if (std::string k = recordKeyOf(QT); !k.empty())
+        publishedTypes_.insert(std::move(k));
+}
+
+void EscapeAnalysis::markGlobalInstance(clang::QualType QT) {
+    if (std::string k = recordKeyOf(QT); !k.empty())
+        globalInstanceTypes_.insert(std::move(k));
+}
+
+bool EscapeAnalysis::hasGlobalInstance(const clang::RecordDecl *RD) const {
+    if (!RD || globalInstanceTypes_.empty())
+        return false;
+    const auto *canon = RD->getCanonicalDecl();
+    return canon && globalInstanceTypes_.count(
+                        canon->getQualifiedNameAsString()) > 0;
 }
 
 namespace {
@@ -364,10 +416,15 @@ void EscapeAnalysis::scanTranslationUnit(const clang::TranslationUnitDecl *TU) {
         };
     walk(TU);
 
-    // Pass 1: global/static mutable variable types.
+    // Pass 1: global/static mutable variable types. Kept separate from
+    // pass 2 because they answer different questions. A file-scope instance
+    // means threads that reach it reach the *same object* -- necessary for
+    // false sharing, since per-request instances never collide. It does not
+    // by itself mean any thread reaches it; that is pass 2's job. Merging
+    // them made "is a global" indistinguishable from "is shared".
     for (const auto *VD : globals) {
         if (isGlobalSharedMutable(VD))
-            markPublished(VD->getType());
+            markGlobalInstance(VD->getType());
     }
 
     // Pass 2: thread-creation call sites across all function bodies.
@@ -748,7 +805,30 @@ bool EscapeAnalysis::pairHasDistinctWriters(const clang::FieldDecl *A,
     const auto &wb = ib->second.writers;
     if (wa.size() > 1 || wb.size() > 1)
         return true;
-    return !wa.empty() && !wb.empty() && *wa.begin() != *wb.begin();
+    if (!wa.empty() && !wb.empty() && *wa.begin() != *wb.begin())
+        return true;
+    for (const auto *w : wa)
+        if (poolRoleWriters_.count(w)) return true;
+    for (const auto *w : wb)
+        if (poolRoleWriters_.count(w)) return true;
+    return false;
+}
+
+void EscapeAnalysis::setPoolRoleFunctions(
+        std::unordered_set<const clang::FunctionDecl *> fns) {
+    poolRoleWriters_ = std::move(fns);
+}
+
+bool EscapeAnalysis::fieldHasPoolWriter(const clang::FieldDecl *FD) const {
+    if (!FD || poolRoleWriters_.empty())
+        return false;
+    auto it = fieldWrites_.find(
+        llvm::cast<clang::FieldDecl>(FD->getCanonicalDecl()));
+    if (it == fieldWrites_.end())
+        return false;
+    for (const auto *w : it->second.writers)
+        if (poolRoleWriters_.count(w)) return true;
+    return false;
 }
 
 void EscapeAnalysis::appendFieldWriterNames(ThreadRoleSummary &out) const {

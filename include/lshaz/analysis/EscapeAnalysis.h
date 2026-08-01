@@ -40,6 +40,14 @@ struct EscapeVerdict {
     // Publication needs an address to cross a thread boundary; a file-scope
     // object written directly from two thread bodies never does.
     bool hasThreadWriters = false;
+    // A file-scope instance of this type exists: threads reaching it reach
+    // the SAME object. Necessary for false sharing (per-request instances
+    // never collide) but not sufficient -- some thread must actually reach
+    // it, which is hasPublication/hasThreadWriters.
+    bool hasGlobalInstance = false;
+    // Threads can reach the SAME object: shared instance plus a thread that
+    // touches it. The precondition false sharing actually needs.
+    bool hasSharingRoute = false;
 
     unsigned accessorCount = 0; // distinct functions touching this type in TU
 
@@ -87,6 +95,11 @@ public:
 
     // Mark a type as published to a cross-thread context.
     void markPublished(clang::QualType QT);
+    // Mark a type as having a file-scope instance. Deliberately distinct
+    // from publication: one is "there is a single shared object", the other
+    // is "a thread reaches it". Conflating them made every global look
+    // shared and every C struct look neither.
+    void markGlobalInstance(clang::QualType QT);
     void markThreadEntry(const clang::Expr *E);
 
     // Build per-type escape summary for cross-TU aggregation.
@@ -134,6 +147,16 @@ public:
     bool pairHasDistinctWriters(const clang::FieldDecl *A,
                                 const clang::FieldDecl *B) const;
 
+    // Functions that run on several threads at once (reachable from a thread
+    // entry spawned in a loop or from multiple sites). Injected after the
+    // call graph is built, since concurrency is a call-graph property.
+    void setPoolRoleFunctions(
+        std::unordered_set<const clang::FunctionDecl *> fns);
+    bool fieldHasPoolWriter(const clang::FieldDecl *FD) const;
+
+    bool hasGlobalInstance(const clang::RecordDecl *RD) const;
+    bool anyWriterOnThread(const clang::RecordDecl *RD) const;
+
     // Snapshot per-field writer sets as names ("Type::field" -> writer
     // functions) into the TU's thread-role facts. Same key convention as
     // buildEscapeSummary: canonical qualified names.
@@ -174,6 +197,8 @@ private:
     // bodies is shared without any address ever being passed anywhere, and
     // that is the striped-counter shape.
     std::unordered_set<const clang::FunctionDecl *> threadEntries_;
+    std::unordered_set<const clang::FunctionDecl *> poolRoleWriters_;
+    std::set<std::string> globalInstanceTypes_;
     bool hasThreadEntryWriters(const clang::RecordDecl *RD) const;
 
     // Which functions write each global, so rules can ask whether the

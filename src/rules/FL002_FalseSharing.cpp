@@ -310,6 +310,14 @@ public:
              "multi-writer intent",
              hasAtomicPairs || wev == kMultiWriter,
              deliberateLayout ? Severity::Medium : Severity::Critical},
+            // Deliberately NOT gated on ev.hasSharingRoute, twice measured:
+            // it demotes stats_state (the one adjudicated TP) while keeping
+            // every FP. hasGlobalInstance is a per-TU fact and the record
+            // lives in a header, so the TU defining the global is not the TU
+            // most findings come from. The instance gate is right, but it
+            // has to be a reduce-phase verdict over the escape summary, not
+            // a rule-time query. FL090 can use it because it needs only the
+            // weaker "some route exists" form.
         };
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));

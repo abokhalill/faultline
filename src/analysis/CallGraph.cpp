@@ -64,6 +64,9 @@ class CallEdgeVisitor
 public:
     std::unordered_set<const clang::FunctionDecl *> callees;
     std::unordered_set<const clang::FunctionDecl *> threadEntries;
+    // Entries whose role runs on more than one thread at once.
+    std::unordered_set<const clang::FunctionDecl *> poolEntries;
+    std::unordered_set<const clang::FunctionDecl *> spawnSites;
     // The fn-slot argument was a parameter of the enclosing function: the
     // enclosing function is a spawner wrapper (memcached's create_worker),
     // and function literals at that argument position of its call sites
@@ -189,7 +192,13 @@ public:
 private:
     bool addEntry(const clang::Expr *arg) {
         if (const auto *FD = entryArgToFunction(arg)) {
-            threadEntries.insert(FD->getCanonicalDecl());
+            const auto *canon = FD->getCanonicalDecl();
+            threadEntries.insert(canon);
+            // Spawned inside a loop, or from more than one site: the role has
+            // many live instances. One writer function then suffices for two
+            // cores to contend, which is the whole thread-pool shape.
+            if (loopDepth > 0 || !spawnSites.insert(canon).second)
+                poolEntries.insert(canon);
             return true;
         }
         return false;
@@ -265,6 +274,12 @@ void CallGraph::buildFromTU(const clang::TranslationUnitDecl *TU) {
 
     visit(const_cast<clang::TranslationUnitDecl *>(TU));
     resolveSpawnerEntries();
+
+    // Everything a pool entry reaches also runs on many threads at once.
+    if (!poolEntryDecls_.empty()) {
+        poolReachable_ = transitiveCallees(poolEntryDecls_);
+        poolReachable_.insert(poolEntryDecls_.begin(), poolEntryDecls_.end());
+    }
 }
 
 void CallGraph::processFunction(const clang::FunctionDecl *FD) {
@@ -288,6 +303,8 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
     }
     for (const auto *entry : visitor.threadEntries)
         threadEntries_.insert(threadRoleNodeName(entry, ctx_));
+    for (const auto *entry : visitor.poolEntries)
+        poolEntryDecls_.insert(entry);
     if (visitor.spawnerParamIdx >= 0)
         spawnerParams_[canon] =
             static_cast<unsigned>(visitor.spawnerParamIdx);
@@ -323,8 +340,21 @@ void CallGraph::resolveSpawnerEntries() {
         return;
     for (const auto &[callee, argIdx, fn] : pendingLiteralFnArgs_) {
         auto it = spawnerParams_.find(callee);
-        if (it != spawnerParams_.end() && it->second == argIdx)
-            threadEntries_.insert(threadRoleNodeName(fn, ctx_));
+        if (it == spawnerParams_.end() || it->second != argIdx)
+            continue;
+        threadEntries_.insert(threadRoleNodeName(fn, ctx_));
+
+        // The loop is around the *wrapper* call, not the pthread_create
+        // inside it, so multiplicity has to be read one level out. Missing
+        // this made every pool spawned through a helper -- memcached's
+        // create_worker, and most production thread pools -- look
+        // single-instance.
+        const auto &cs = callers(callee);
+        bool repeated = cs.size() >= 2;
+        for (const auto *c : cs)
+            if (callSiteLoopDepth(c, callee) > 0) { repeated = true; break; }
+        if (repeated)
+            poolEntryDecls_.insert(fn->getCanonicalDecl());
     }
 }
 

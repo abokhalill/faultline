@@ -50,6 +50,14 @@ public:
     // sweeps an array repeats without calling anything.
     unsigned ownLoopDepth(const clang::FunctionDecl *FD) const;
 
+    // True when this function runs on several threads simultaneously: it is
+    // reachable from a thread entry spawned in a loop or from more than one
+    // site. Contention needs two cores, not two functions.
+    bool runsOnManyThreads(const clang::FunctionDecl *FD) const {
+        return FD && poolReachable_.count(FD->getCanonicalDecl()) > 0;
+    }
+    bool hasPoolRoles() const { return !poolReachable_.empty(); }
+
     // Every function with a body seen in this TU.
     std::vector<const clang::FunctionDecl *> functions() const;
 
@@ -72,6 +80,8 @@ private:
     std::map<std::pair<const clang::FunctionDecl *,
                        const clang::FunctionDecl *>, unsigned> edgeLoopDepth_;
     std::unordered_map<const clang::FunctionDecl *, unsigned> ownLoopDepth_;
+    std::unordered_set<const clang::FunctionDecl *> poolEntryDecls_;
+    std::unordered_set<const clang::FunctionDecl *> poolReachable_;
 
     void processFunction(const clang::FunctionDecl *FD);
     void resolveSpawnerEntries();
