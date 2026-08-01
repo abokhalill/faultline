@@ -665,6 +665,94 @@ void testThreadRoleSpawnerWrapper() {
           "the wrapper itself is not an entry");
 }
 
+// Contention needs two cores, not two writer functions. A pool running one
+// writer already has them, so multiplicity has to be visible -- and the loop
+// is normally around the *wrapper*, not the pthread_create inside it.
+void testPoolRoleMultiplicity() {
+    std::cerr << "test: loop-spawned thread entries are pool roles\n";
+    const std::string src = R"cpp(
+        typedef unsigned long pthread_t;
+        extern "C" int pthread_create(pthread_t*, const void*,
+                                      void *(*)(void*), void*);
+        static void create_worker(void *(*func)(void *), void *arg) {
+            pthread_t t;
+            pthread_create(&t, nullptr, func, arg);
+        }
+        void *poolWorker(void *) { return nullptr; }
+        void *loneWorker(void *) { return nullptr; }
+        void bump();
+        void *poolCallee(void *) { bump(); return nullptr; }
+        void spawnPool() {
+            for (int i = 0; i < 4; ++i) create_worker(poolWorker, nullptr);
+        }
+        void spawnOne() {
+            pthread_t t;
+            pthread_create(&t, nullptr, loneWorker, nullptr);
+        }
+    )cpp";
+
+    auto AST = clang::tooling::buildASTFromCode(src, "test_input.cpp",
+        std::make_shared<clang::PCHContainerOperations>());
+    if (!AST) {
+        std::cerr << "  FAIL: AST parse failed\n";
+        ++failures;
+        return;
+    }
+    auto &Ctx = AST->getASTContext();
+    lshaz::CallGraph cg(Ctx);
+    cg.buildFromTU(Ctx.getTranslationUnitDecl());
+
+    class FnFinder : public clang::RecursiveASTVisitor<FnFinder> {
+    public:
+        std::map<std::string, const clang::FunctionDecl *> fns;
+        bool VisitFunctionDecl(clang::FunctionDecl *FD) {
+            if (FD->getIdentifier()) fns[FD->getNameAsString()] = FD;
+            return true;
+        }
+    } finder;
+    finder.TraverseDecl(Ctx.getTranslationUnitDecl());
+
+    check(cg.runsOnManyThreads(finder.fns["poolWorker"]),
+          "entry spawned in a loop through a wrapper is a pool role");
+    check(!cg.runsOnManyThreads(finder.fns["loneWorker"]),
+          "entry spawned once is not a pool role");
+}
+
+// atomic_type_names is documented as THE remedy for codebases that wrap
+// atomics in an opaque struct. It reached only rules that constructed a
+// CacheLineMap, so five others stayed blind on exactly those codebases.
+// The wrapper here is deliberately plain: no _Atomic, no volatile, and a
+// name without "atomic" in it, so nothing but the configuration can see it
+// and the test cannot pass for an unrelated reason.
+void testConfiguredAtomicWrapperIsSeen() {
+    std::cerr << "test: config-named atomic wrappers reach escape analysis\n";
+    const std::string src = R"cpp(
+        typedef struct { long counter; } refcnt_t;
+        struct ShardStats { refcnt_t hits; refcnt_t misses; long pad[6]; };
+        struct Plain { long a; long b; };
+    )cpp";
+
+    withRecord(src, "ShardStats",
+        [](const clang::CXXRecordDecl *RD, clang::ASTContext &Ctx) {
+            lshaz::EscapeAnalysis bare(Ctx);
+            check(!bare.hasAtomicMembers(RD),
+                  "unconfigured: opaque wrapper is invisible, as documented");
+
+            lshaz::EscapeAnalysis configured(Ctx);
+            configured.setAtomicTypeNames({"refcnt_t"});
+            check(configured.hasAtomicMembers(RD),
+                  "configured: opaque wrapper is recognised as atomic");
+        });
+
+    withRecord(src, "Plain",
+        [](const clang::CXXRecordDecl *RD, clang::ASTContext &Ctx) {
+            lshaz::EscapeAnalysis configured(Ctx);
+            configured.setAtomicTypeNames({"refcnt_t"});
+            check(!configured.hasAtomicMembers(RD),
+                  "configured: an unrelated record is not swept up");
+        });
+}
+
 void testThreadRoleStdThreadEntry() {
     std::cerr << "test: std::thread constructor entry detection\n";
     const std::string src = R"cpp(
@@ -779,6 +867,8 @@ int main() {
     testCacheLineAlignedBucketing();
     testThreadRoleFactCollection();
     testThreadRoleSpawnerWrapper();
+    testPoolRoleMultiplicity();
+    testConfiguredAtomicWrapperIsSeen();
     testThreadRoleStdThreadEntry();
     testThreadRoleLambdaEntry();
 
