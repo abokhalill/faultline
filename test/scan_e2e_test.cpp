@@ -664,6 +664,17 @@ void testLostShardIsNotACleanScan(const std::string &bin,
     check(summary(clean.err) != summary(killed.err),
           "a lost shard is distinguishable from a clean scan");
 
+    // Records are written per TU, so a shard that dies partway still hands
+    // back what it finished. Without that, one fatal TU discards every TU the
+    // shard already completed — the difference between 3/4 and 2/4 here was
+    // 354/354 and 0/354 on rocksdb.
+    auto midKill = run("LSHAZ_FAULT_KILL_SHARD=0:1 " + scan);
+    check(contains(summary(midKill.err), "3/4") &&
+          contains(summary(midKill.err), "1 failed"),
+          "a mid-shard death loses only the TU it died on");
+    check(contains(midKill.err, "1 recovered"),
+          "stderr reports how much of the dead shard was recovered");
+
     // Same accounting, different cause. A cap too low to analyze anything is
     // the controllable stand-in for the TU that would otherwise OOM the host,
     // and the reason must name the cap so the operator knows which knob moved.

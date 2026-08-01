@@ -45,6 +45,7 @@
 #include <vector>
 
 #include <csignal>
+#include <cstring>
 #include <new>
 #include <sys/resource.h>
 #include <sys/types.h>
@@ -291,7 +292,8 @@ std::string serializeShardResult(int exitCode,
                                   const EscapeSummary &escapeSummary,
                                   const ThreadRoleSummary &threadRoles,
                                   const StripedArraySummary &striped,
-                                  const ScanCoverage &coverage) {
+                                  const ScanCoverage &coverage,
+                                  const std::string &src = {}) {
     auto esc = [](const std::string &s) -> std::string {
         std::string out;
         out.reserve(s.size() + 4);
@@ -310,7 +312,9 @@ std::string serializeShardResult(int exitCode,
 
     std::string buf;
     buf.reserve(4096);
-    buf += "{\"exitCode\":";
+    buf += "{";
+    if (!src.empty()) { buf += "\"src\":\""; buf += esc(src); buf += "\","; }
+    buf += "\"exitCode\":";
     buf += std::to_string(exitCode);
     buf += ",\"failedTUs\":[";
     for (size_t i = 0; i < failedTUs.size(); ++i) {
@@ -493,6 +497,7 @@ unsigned resolveShardMemoryLimitMB(unsigned requested, unsigned jobs) {
 }
 
 struct ShardIPC {
+    std::string src;   // TU this record covers; empty in whole-shard form
     int exitCode = -1;
     std::vector<FailedTU> failedTUs;
     std::vector<Diagnostic> diagnostics;
@@ -692,7 +697,9 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
         if (i >= json.size() || json[i] == '}') break;
         std::string key = ipc::parseStr(json, i);
         ipc::expect(json, i, ':');
-        if (key == "exitCode") {
+        if (key == "src") {
+            out.src = ipc::parseStr(json, i);
+        } else if (key == "exitCode") {
             out.exitCode = static_cast<int>(ipc::parseNum(json, i));
         } else if (key == "failedTUs") {
             ipc::expect(json, i, '[');
@@ -1969,13 +1976,22 @@ ScanResult ScanPipeline::run(
                 // demand. This makes the death deterministic. Announced on
                 // stderr so an injected run can never be mistaken for a real
                 // one; unset, it costs one getenv per shard.
+                // "<shard>" kills before any TU; "<shard>:<n>" kills after n
+                // TUs, which is what exercises partial recovery.
+                unsigned faultShard = ~0u, faultAfterTUs = 0;
                 if (const char *f = ::getenv("LSHAZ_FAULT_KILL_SHARD")) {
-                    if (static_cast<unsigned>(atoi(f)) == j) {
-                        llvm::errs() << "lshaz: FAULT INJECTION active, "
-                                        "killing shard " << j << "\n";
-                        ::raise(SIGKILL);
-                    }
+                    faultShard = static_cast<unsigned>(atoi(f));
+                    if (const char *colon = ::strchr(f, ':'))
+                        faultAfterTUs = static_cast<unsigned>(atoi(colon + 1));
                 }
+                auto maybeFault = [&](unsigned done) {
+                    if (faultShard != j || done != faultAfterTUs) return;
+                    llvm::errs() << "lshaz: FAULT INJECTION active, killing "
+                                    "shard " << j << " after " << done
+                                 << " TU(s)\n";
+                    ::raise(SIGKILL);
+                };
+                maybeFault(0);
 
                 if (shardMemoryLimitMB != 0) {
                     struct rlimit rl;
@@ -2003,49 +2019,12 @@ ScanResult ScanPipeline::run(
                     });
                 }
                 llvm::CrashRecoveryContext::Enable();
-                std::vector<Diagnostic> childDiags;
-                std::vector<FailedTU> childFailed;
-                EscapeSummary childEscape;
-                ThreadRoleSummary childThreadRoles;
-                StripedArraySummary childStriped;
-                ScanCoverage childCoverage;
-                int childRet = 0;
 
-                for (const auto &src : shards[j]) {
-                    std::vector<std::string> singleTU = {src};
-                    std::vector<Diagnostic> tuDiags;
-                    LshazActionFactory factory(
-                        request.config, tuDiags, profileHotFuncs);
-
-                    llvm::CrashRecoveryContext CRC;
-                    bool ok = CRC.RunSafely([&]() {
-                        clang::tooling::ClangTool tool(compDB, singleTU);
-                        addResourceDirAdjuster(tool, compDB, src);
-                        int ret = tool.run(&factory);
-                        if (ret != 0) childRet = ret;
-                    });
-                    if (!ok) {
-                        FailedTU ftu;
-                        ftu.file = src;
-                        ftu.error = "process crash during analysis";
-                        childFailed.push_back(ftu);
-                    } else {
-                        auto &ff = factory.failedTUs();
-                        childFailed.insert(childFailed.end(),
-                            ff.begin(), ff.end());
-                    }
-                    childDiags.insert(childDiags.end(),
-                        std::make_move_iterator(tuDiags.begin()),
-                        std::make_move_iterator(tuDiags.end()));
-                    mergeEscapeSummaries(childEscape, factory.escapeSummary());
-                    childThreadRoles.merge(factory.threadRoles());
-                    mergeStripedArrays(childStriped, factory.stripedArrays());
-                    childCoverage.merge(factory.coverage());
-                }
-
-                std::string json = serializeShardResult(
-                    childRet, childFailed, childDiags, childEscape,
-                    childThreadRoles, childStriped, childCoverage);
+                // One record per TU, flushed as it completes. Writing only at
+                // the end meant a single fatal TU discarded every TU the shard
+                // had already finished — one crash cost 354/354 on rocksdb.
+                // Records are newline-delimited so a torn tail is discardable
+                // and the parent can name exactly which TUs went unreached.
                 std::error_code ec;
                 llvm::raw_fd_ostream out(std::string(ipcPath), ec);
                 if (ec) {
@@ -2057,14 +2036,51 @@ ScanResult ScanPipeline::run(
                                  << ": " << ec.message() << "\n";
                     _exit(kShardIPCWriteFailed);
                 }
-                out << json;
-                out.close();
-                if (out.has_error()) {
-                    llvm::errs() << "lshaz: shard " << j
-                                 << " failed writing IPC to " << ipcPath
-                                 << ": " << out.error().message() << "\n";
-                    _exit(kShardIPCWriteFailed);
+
+                int childRet = 0;
+                unsigned tusDone = 0;
+                for (const auto &src : shards[j]) {
+                    std::vector<std::string> singleTU = {src};
+                    std::vector<Diagnostic> tuDiags;
+                    std::vector<FailedTU> tuFailed;
+                    LshazActionFactory factory(
+                        request.config, tuDiags, profileHotFuncs);
+
+                    int tuRet = 0;
+                    llvm::CrashRecoveryContext CRC;
+                    bool ok = CRC.RunSafely([&]() {
+                        clang::tooling::ClangTool tool(compDB, singleTU);
+                        addResourceDirAdjuster(tool, compDB, src);
+                        int ret = tool.run(&factory);
+                        if (ret != 0) tuRet = ret;
+                    });
+                    if (!ok) {
+                        FailedTU ftu;
+                        ftu.file = src;
+                        ftu.error = "process crash during analysis";
+                        tuFailed.push_back(ftu);
+                    } else {
+                        auto &ff = factory.failedTUs();
+                        tuFailed.insert(tuFailed.end(), ff.begin(), ff.end());
+                    }
+                    if (tuRet != 0) childRet = tuRet;
+
+                    out << serializeShardResult(
+                               tuRet, tuFailed, tuDiags,
+                               factory.escapeSummary(), factory.threadRoles(),
+                               factory.stripedArrays(), factory.coverage(), src)
+                        << "\n";
+                    out.flush();
+                    if (out.has_error()) {
+                        llvm::errs() << "lshaz: shard " << j
+                                     << " failed writing IPC to " << ipcPath
+                                     << ": " << out.error().message() << "\n";
+                        _exit(kShardIPCWriteFailed);
+                    }
+                    maybeFault(++tusDone);
                 }
+
+                out.close();
                 _exit(childRet != 0 ? 1 : 0);
             }
 
@@ -2098,40 +2114,72 @@ ScanResult ScanPipeline::run(
                              "lower --jobs)";
             }
 
-            if (lostReason.empty()) {
+            // Records land one per line as each TU finishes, so a shard that
+            // died still hands back everything it completed. Whatever is
+            // missing is named individually rather than condemning the shard.
+            std::unordered_set<std::string> covered;
+            {
                 auto buf = llvm::MemoryBuffer::getFile(child.ipcPath);
-                ShardIPC shard;
                 if (!buf) {
-                    lostReason = "left no IPC file: " + buf.getError().message();
-                } else if (!deserializeShardResult((*buf)->getBuffer().str(),
-                                                   shard)) {
-                    lostReason = "wrote unparseable IPC";
+                    if (lostReason.empty())
+                        lostReason = "left no IPC file: " +
+                                     buf.getError().message();
                 } else {
-                    if (shard.exitCode != 0) toolRet = shard.exitCode;
-                    result.diagnostics.insert(result.diagnostics.end(),
-                        std::make_move_iterator(shard.diagnostics.begin()),
-                        std::make_move_iterator(shard.diagnostics.end()));
-                    failedTUsDetailed.insert(failedTUsDetailed.end(),
-                        shard.failedTUs.begin(), shard.failedTUs.end());
-                    mergeEscapeSummaries(result.escapeSummary,
-                        shard.escapeSummary);
-                    result.threadRoleFacts.merge(shard.threadRoles);
-                    mergeStripedArrays(result.stripedArrays, shard.striped);
-                    result.coverage.merge(shard.coverage);
+                    llvm::StringRef body = (*buf)->getBuffer();
+                    size_t nl;
+                    while ((nl = body.find('\n')) != llvm::StringRef::npos) {
+                        llvm::StringRef line = body.take_front(nl);
+                        body = body.drop_front(nl + 1);
+                        if (line.empty()) continue;
+                        ShardIPC rec;
+                        if (!deserializeShardResult(line.str(), rec)) {
+                            if (lostReason.empty())
+                                lostReason = "wrote unparseable IPC";
+                            continue;
+                        }
+                        if (!rec.src.empty()) covered.insert(rec.src);
+                        if (rec.exitCode != 0) toolRet = rec.exitCode;
+                        result.diagnostics.insert(result.diagnostics.end(),
+                            std::make_move_iterator(rec.diagnostics.begin()),
+                            std::make_move_iterator(rec.diagnostics.end()));
+                        failedTUsDetailed.insert(failedTUsDetailed.end(),
+                            rec.failedTUs.begin(), rec.failedTUs.end());
+                        mergeEscapeSummaries(result.escapeSummary,
+                                             rec.escapeSummary);
+                        result.threadRoleFacts.merge(rec.threadRoles);
+                        mergeStripedArrays(result.stripedArrays, rec.striped);
+                        result.coverage.merge(rec.coverage);
+                    }
+                    // A tail without its newline is a torn write, not a record.
+                    if (!body.empty() && lostReason.empty())
+                        lostReason = "IPC ends mid-record";
                 }
             }
 
-            if (!lostReason.empty()) {
-                llvm::errs() << "lshaz: shard " << child.shardIdx << " ("
-                             << shards[child.shardIdx].size() << " TU(s)) "
-                             << lostReason
-                             << "; its translation units are unanalyzed\n";
-                for (const auto &src : shards[child.shardIdx]) {
+            std::vector<std::string> unreached;
+            for (const auto &src : shards[child.shardIdx])
+                if (!covered.count(src)) unreached.push_back(src);
+
+            if (!unreached.empty()) {
+                if (lostReason.empty())
+                    lostReason = "exited without reporting every TU";
+                llvm::errs() << "lshaz: shard " << child.shardIdx << ": "
+                             << lostReason << "; " << unreached.size() << " of "
+                             << shards[child.shardIdx].size()
+                             << " TU(s) unanalyzed ("
+                             << covered.size() << " recovered)\n";
+                for (const auto &src : unreached) {
                     FailedTU ftu;
                     ftu.file = src;
                     ftu.error = "shard lost: " + lostReason;
                     failedTUsDetailed.push_back(ftu);
                 }
+                toolRet = 1;
+            } else if (!lostReason.empty()) {
+                // Every TU reported, but the shard still ended badly. Say so.
+                llvm::errs() << "lshaz: shard " << child.shardIdx << ": "
+                             << lostReason
+                             << "; all TU(s) recovered nonetheless\n";
                 toolRet = 1;
             }
             llvm::sys::fs::remove(child.ipcPath);
