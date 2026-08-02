@@ -27,6 +27,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <link.h>
+#include <sys/mman.h>
 
 #define GRANULE 8u
 #define LINE_BYTES 64u
@@ -42,7 +43,11 @@ struct slot {
     _Atomic uint64_t  tids;  // bitmask of writing threads
     _Atomic uint64_t  count;
 };
-static struct slot g_table[TABLE_SIZE];
+// mmap'd, not static. ~50MB of tables in BSS shifts the target's own data
+// layout -- and this instrument exists to measure data layout, so perturbing
+// it is disqualifying. Observed: two adjacent globals that shared a line
+// stopped sharing one once the tables were linked in.
+static struct slot *g_table;
 static _Atomic uint64_t g_next_tid = 0;
 static _Atomic uint64_t g_dropped  = 0;
 static __thread int t_tid = -1;
@@ -63,6 +68,7 @@ static inline uint32_t hash_addr(uintptr_t a) {
 }
 
 static void note_write(uintptr_t addr, unsigned size) {
+    if (!g_table) return;   // pre-__tsan_init static initialisers
     const uint64_t bit = 1ull << my_tid();
     uintptr_t g   = addr & ~(uintptr_t)(GRANULE - 1);
     uintptr_t end = addr + size;
@@ -105,12 +111,12 @@ struct alloc_rec {
     uint64_t  size;
     void     *ra;
 };
-static struct alloc_rec g_allocs[MAX_ALLOCS];
+static struct alloc_rec *g_allocs;
 static _Atomic uint64_t g_alloc_n = 0;
 static _Atomic uint64_t g_alloc_overflow = 0;
 
 static void note_alloc(void *p, size_t n, void *ra) {
-    if (!p) return;
+    if (!p || !g_allocs) return;
     uint64_t i = atomic_fetch_add_explicit(&g_alloc_n, 1,
                                            memory_order_relaxed);
     if (i >= MAX_ALLOCS) {
@@ -122,34 +128,39 @@ static void note_alloc(void *p, size_t n, void *ra) {
     g_allocs[i].ra   = ra;
 }
 
-extern void *__real_malloc(size_t);
-extern void *__real_calloc(size_t, size_t);
-extern void *__real_realloc(void *, size_t);
-extern void  __real_free(void *);
-
-void *__wrap_malloc(size_t n) {
-    void *p = __real_malloc(n);
-    note_alloc(p, n, __builtin_return_address(0));
-    return p;
+// The __wrap_* hooks live in lshaz_wattr_heap.c so that linking the core
+// does not force every caller to pass four --wrap flags. Heap attribution is
+// opt-in; without it, heap lines are reported unattributed rather than
+// misattributed.
+void lshaz_wattr_note_alloc(void *p, size_t n, void *ra) {
+    note_alloc(p, n, ra);
 }
-void *__wrap_calloc(size_t a, size_t b) {
-    void *p = __real_calloc(a, b);
-    note_alloc(p, a * b, __builtin_return_address(0));
-    return p;
-}
-void *__wrap_realloc(void *q, size_t n) {
-    void *p = __real_realloc(q, n);
-    note_alloc(p, n, __builtin_return_address(0));
-    return p;
-}
-void __wrap_free(void *p) { __real_free(p); }
 
 static int popcount64(uint64_t v) { return __builtin_popcountll(v); }
 
-// First callback is always the main executable.
+struct image_extent {
+    unsigned long long bias, lo, hi;
+};
+
+// First callback is always the main executable. The loaded extent matters as
+// much as the bias: without it a heap or stack address, once the bias is
+// subtracted, lands on an arbitrary number that can fall inside some
+// symbol's range and be confidently misattributed to it.
 static int first_object_bias(struct dl_phdr_info *info, size_t sz, void *out) {
     (void)sz;
-    *(unsigned long long *)out = (unsigned long long)info->dlpi_addr;
+    struct image_extent *e = out;
+    e->bias = (unsigned long long)info->dlpi_addr;
+    e->lo = ~0ull;
+    e->hi = 0;
+    for (int i = 0; i < info->dlpi_phnum; ++i) {
+        const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+        if (ph->p_type != PT_LOAD)
+            continue;
+        unsigned long long lo = (unsigned long long)(info->dlpi_addr +
+                                                     ph->p_vaddr);
+        if (lo < e->lo) e->lo = lo;
+        if (lo + ph->p_memsz > e->hi) e->hi = lo + ph->p_memsz;
+    }
     return 1; // stop
 }
 
@@ -164,9 +175,10 @@ static void dump(void) {
     // Reading /proc/self/maps for the first executable mapping is off by
     // whatever read-only segment precedes it, which silently misresolved
     // every symbol by a page.
-    unsigned long long base = 0;
-    dl_iterate_phdr(first_object_bias, &base);
-    fprintf(f, "# base\t%llx\n", base);
+    struct image_extent img = {0, 0, 0};
+    dl_iterate_phdr(first_object_bias, &img);
+    fprintf(f, "# base\t%llx\n", img.bias);
+    fprintf(f, "# image\t%llx\t%llx\n", img.lo, img.hi);
 
     // Group granules by line so the same-granule / different-granule
     // distinction can be made, which is the whole point.
@@ -213,8 +225,19 @@ static void dump(void) {
 void __tsan_init(void) {
     static _Atomic int once = 0;
     int expect = 0;
-    if (atomic_compare_exchange_strong(&once, &expect, 1))
-        atexit(dump);
+    if (!atomic_compare_exchange_strong(&once, &expect, 1))
+        return;
+    g_table = mmap(NULL, sizeof(struct slot) * (size_t)TABLE_SIZE,
+                   PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                   -1, 0);
+    g_allocs = mmap(NULL, sizeof(struct alloc_rec) * (size_t)MAX_ALLOCS,
+                    PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                    -1, 0);
+    if (g_table == MAP_FAILED || g_allocs == MAP_FAILED) {
+        fprintf(stderr, "lshaz_wattr: FATAL: cannot map tables\n");
+        _exit(3);
+    }
+    atexit(dump);
 }
 
 #define WRITE_N(N)                                                      \

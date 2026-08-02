@@ -21,6 +21,29 @@ import sys
 LINE = 64
 
 
+_site_cache = {}
+
+
+def site_name(ra_hex, bias, binary):
+    """Return address -> file:line. The bias must come off first: addr2line
+    speaks link-time addresses and the trace records runtime ones."""
+    key = (ra_hex, bias)
+    if key in _site_cache:
+        return _site_cache[key]
+    out = ra_hex
+    try:
+        link_addr = int(ra_hex, 16) - bias
+        r = subprocess.run(["addr2line", "-e", binary, "-f", "-s",
+                            hex(link_addr)], capture_output=True, text=True)
+        lines = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+        if len(lines) >= 2 and lines[1] != "??:0":
+            out = f"{lines[0]} {lines[1]}"
+    except Exception:
+        pass
+    _site_cache[key] = out
+    return out
+
+
 def load_symbols(binary):
     """Link-time (addr, size, name) for data symbols, sorted by address."""
     out = subprocess.run(["nm", "-S", "--defined-only", binary],
@@ -60,12 +83,17 @@ def main():
     trace, binary = sys.argv[1], sys.argv[2]
 
     base = 0
+    img_lo, img_hi = 0, 0
     rows = []
     allocs = []
     with open(trace) as fh:
         for ln in fh:
             if ln.startswith("# base"):
                 base = int(ln.split()[-1], 16)
+                continue
+            if ln.startswith("# image"):
+                _, lo, hi = ln.split("\t")
+                img_lo, img_hi = int(lo, 16), int(hi, 16)
                 continue
             if ln.startswith("@\t"):
                 _, b, sz, ra = ln.split("\t")
@@ -93,7 +121,14 @@ def main():
         # no symbol, and that is the handoff case.
         names = []
         for off in sorted(granules):
-            n, _o = resolve(syms, (line + off) - base)
+            a = line + off
+            # Only image addresses may be resolved against the symbol table.
+            # Subtracting the bias from a heap or stack address yields a
+            # number that can land inside some symbol's range and be
+            # confidently misattributed -- which it was.
+            if not (img_lo <= a < img_hi):
+                continue
+            n, _o = resolve(syms, a - base)
             if n and n not in names:
                 names.append(n)
         if not names:
@@ -101,16 +136,24 @@ def main():
             # Several matches mean the address was recycled, so the object it
             # belonged to at write time is unknowable without timestamps --
             # reported as reuse rather than guessed at.
+            # Plain interval overlap. The earlier two-clause test missed any
+            # allocation that starts partway into the line, which is most of
+            # them: objects are not line-aligned.
             sites = set()
             for b, sz, ra in allocs:
-                if b > line + LINE:
+                if b >= line + LINE:
                     break
-                if b <= line < b + sz or b < line + LINE <= b + sz:
+                if b + sz > line:
                     sites.add(ra)
             if len(sites) == 1:
-                names = [f"heap@{sites.pop()}"]
+                names = [f"heap@{site_name(sites.pop(), base, binary)}"]
             elif len(sites) > 1:
                 names = [f"heap@POOL_REUSE({len(sites)} sites)"]
+            elif img_hi and not (img_lo <= line < img_hi):
+                # Outside the image and matching no allocation: a thread
+                # stack. Named rather than left <anon>, because "the object
+                # is per-thread" is a verdict, not a gap.
+                names = ["<stack-or-unattributed>"]
         name = "+".join(names) if names else None
         off = 0
         union = 0
