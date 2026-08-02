@@ -136,6 +136,11 @@ void lshaz_wattr_note_alloc(void *p, size_t n, void *ra) {
     note_alloc(p, n, ra);
 }
 
+// Exported for the atomic shims, which must record the write themselves.
+void lshaz_wattr_note_write(void *addr, unsigned size) {
+    note_write((uintptr_t)addr, size);
+}
+
 static int popcount64(uint64_t v) { return __builtin_popcountll(v); }
 
 struct image_extent {

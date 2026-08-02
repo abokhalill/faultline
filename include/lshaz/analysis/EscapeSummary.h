@@ -73,7 +73,13 @@ struct TypeEscapeSignals {
     }
 
     bool hasAnyEscape() const {
-        return hasStructuralEscape() || hasPublication || hasThreadWriters;
+        // hasGlobalInstance belongs here. Splitting it out of hasPublication
+        // and forgetting this suppressed every type whose only evidence is
+        // that a global instance exists -- which is most file-local hot
+        // structs in C. memcached's itemstats, 27k contended writes measured,
+        // fired when items.c was scanned alone and vanished in the corpus run.
+        return hasStructuralEscape() || hasPublication || hasThreadWriters ||
+               hasGlobalInstance;
     }
 };
 

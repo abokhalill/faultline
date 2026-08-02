@@ -31,7 +31,9 @@ def observed_by_symbol(trace, binary):
         for ln in fh:
             if ln.startswith("# base"):
                 base = int(ln.split()[-1], 16)
-            elif not ln.startswith("#"):
+            elif ln.startswith("@\t") or ln.startswith("#"):
+                continue        # allocation and header lines
+            else:
                 a, off, mask, n, w = ln.split("\t")
                 rows.append((int(a, 16), int(off), int(mask), int(w)))
 
