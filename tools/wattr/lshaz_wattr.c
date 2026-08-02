@@ -89,6 +89,61 @@ static void note_write(uintptr_t addr, unsigned size) {
     }
 }
 
+// ---- heap attribution ----
+//
+// Most contended objects are not globals, so a symbol-keyed trace cannot
+// see them. Recording each allocation's extent and call site lets a granule
+// be attributed to the site that produced the object.
+//
+// Records are kept after free rather than removed. An address reused by a
+// pool genuinely belongs to several objects over the run, and with no
+// timestamps that ambiguity cannot be resolved -- so it is surfaced as
+// POOL_REUSE instead of silently attributed to whichever record won.
+#define MAX_ALLOCS (1u << 20)
+struct alloc_rec {
+    uintptr_t base;
+    uint64_t  size;
+    void     *ra;
+};
+static struct alloc_rec g_allocs[MAX_ALLOCS];
+static _Atomic uint64_t g_alloc_n = 0;
+static _Atomic uint64_t g_alloc_overflow = 0;
+
+static void note_alloc(void *p, size_t n, void *ra) {
+    if (!p) return;
+    uint64_t i = atomic_fetch_add_explicit(&g_alloc_n, 1,
+                                           memory_order_relaxed);
+    if (i >= MAX_ALLOCS) {
+        atomic_fetch_add_explicit(&g_alloc_overflow, 1, memory_order_relaxed);
+        return;
+    }
+    g_allocs[i].base = (uintptr_t)p;
+    g_allocs[i].size = n;
+    g_allocs[i].ra   = ra;
+}
+
+extern void *__real_malloc(size_t);
+extern void *__real_calloc(size_t, size_t);
+extern void *__real_realloc(void *, size_t);
+extern void  __real_free(void *);
+
+void *__wrap_malloc(size_t n) {
+    void *p = __real_malloc(n);
+    note_alloc(p, n, __builtin_return_address(0));
+    return p;
+}
+void *__wrap_calloc(size_t a, size_t b) {
+    void *p = __real_calloc(a, b);
+    note_alloc(p, a * b, __builtin_return_address(0));
+    return p;
+}
+void *__wrap_realloc(void *q, size_t n) {
+    void *p = __real_realloc(q, n);
+    note_alloc(p, n, __builtin_return_address(0));
+    return p;
+}
+void __wrap_free(void *p) { __real_free(p); }
+
 static int popcount64(uint64_t v) { return __builtin_popcountll(v); }
 
 // First callback is always the main executable.
@@ -134,9 +189,23 @@ static void dump(void) {
         if (popcount64(m) > 1) ++lines_multi;
     }
     (void)lines_false;
-    fprintf(f, "# granules=%lu multi_writer_granules=%lu dropped=%llu\n",
+
+    // Allocation extents, so the reader can attribute a heap granule to the
+    // site that produced it. Emitted raw: resolving a return address to a
+    // source line needs the binary, which the reader has and this does not.
+    uint64_t an = atomic_load(&g_alloc_n);
+    if (an > MAX_ALLOCS) an = MAX_ALLOCS;
+    fprintf(f, "# alloc\tbase\tsize\tra\n");
+    for (uint64_t i = 0; i < an; ++i)
+        fprintf(f, "@\t%p\t%llu\t%p\n", (void *)g_allocs[i].base,
+                (unsigned long long)g_allocs[i].size, g_allocs[i].ra);
+
+    fprintf(f, "# granules=%lu multi_writer_granules=%lu dropped=%llu"
+               " allocs=%llu alloc_overflow=%llu\n",
             granules, lines_multi,
-            (unsigned long long)atomic_load(&g_dropped));
+            (unsigned long long)atomic_load(&g_dropped),
+            (unsigned long long)an,
+            (unsigned long long)atomic_load(&g_alloc_overflow));
     if (f != stderr) fclose(f);
 }
 
@@ -170,3 +239,18 @@ void __tsan_range_write(void *a, unsigned long n) {
     note_write((uintptr_t)a, (unsigned)n);
 }
 void __tsan_range_read(void *a, unsigned long n) { (void)a; (void)n; }
+
+// Clang rewrites memset/memcpy/memmove into these, so they must both do the
+// work and record the write. Missing them is a link error, not a silent gap.
+void *__tsan_memset(void *d, int c, unsigned long n) {
+    note_write((uintptr_t)d, (unsigned)n);
+    return memset(d, c, n);
+}
+void *__tsan_memcpy(void *d, const void *s, unsigned long n) {
+    note_write((uintptr_t)d, (unsigned)n);
+    return memcpy(d, s, n);
+}
+void *__tsan_memmove(void *d, const void *s, unsigned long n) {
+    note_write((uintptr_t)d, (unsigned)n);
+    return memmove(d, s, n);
+}

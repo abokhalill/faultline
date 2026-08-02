@@ -18,6 +18,9 @@ import subprocess
 import sys
 
 
+LINE = 64
+
+
 def load_symbols(binary):
     """Link-time (addr, size, name) for data symbols, sorted by address."""
     out = subprocess.run(["nm", "-S", "--defined-only", binary],
@@ -58,16 +61,22 @@ def main():
 
     base = 0
     rows = []
+    allocs = []
     with open(trace) as fh:
         for ln in fh:
             if ln.startswith("# base"):
                 base = int(ln.split()[-1], 16)
+                continue
+            if ln.startswith("@\t"):
+                _, b, sz, ra = ln.split("\t")
+                allocs.append((int(b, 16), int(sz), ra.strip()))
                 continue
             if ln.startswith("#"):
                 continue
             line, off, mask, ntids, writes = ln.split("\t")
             rows.append((int(line, 16), int(off), int(mask), int(ntids),
                          int(writes)))
+    allocs.sort()
 
     syms = load_symbols(binary)
     # Group by cache line, carrying each granule's writer set.
@@ -87,6 +96,21 @@ def main():
             n, _o = resolve(syms, (line + off) - base)
             if n and n not in names:
                 names.append(n)
+        if not names:
+            # Not a global: attribute to the allocation(s) covering the line.
+            # Several matches mean the address was recycled, so the object it
+            # belonged to at write time is unknowable without timestamps --
+            # reported as reuse rather than guessed at.
+            sites = set()
+            for b, sz, ra in allocs:
+                if b > line + LINE:
+                    break
+                if b <= line < b + sz or b < line + LINE <= b + sz:
+                    sites.add(ra)
+            if len(sites) == 1:
+                names = [f"heap@{sites.pop()}"]
+            elif len(sites) > 1:
+                names = [f"heap@POOL_REUSE({len(sites)} sites)"]
         name = "+".join(names) if names else None
         off = 0
         union = 0
