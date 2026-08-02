@@ -77,6 +77,24 @@ configure_file(${CMAKE_SOURCE_DIR}/src/hypothesis/PMUCalibration.cpp.in
 set_property(DIRECTORY APPEND PROPERTY
              CMAKE_CONFIGURE_DEPENDS ${LSHAZ_PMU_CALIB_TEMPLATE})
 
+# --- Rule maturity, derived from the evidence ledger ---
+# Generated at configure time so a rule cannot ship as mature without the
+# evidence to back it: editing a rule changes its source hash, which stales
+# its evidence and drops it out of the default-on set automatically.
+set(LSHAZ_RULE_TIERS_H ${CMAKE_BINARY_DIR}/generated/RuleTiers.h)
+execute_process(
+    COMMAND ${CMAKE_SOURCE_DIR}/tools/rule_tier.py --check
+            --emit-header ${LSHAZ_RULE_TIERS_H}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    RESULT_VARIABLE LSHAZ_TIER_RC
+    OUTPUT_VARIABLE LSHAZ_TIER_OUT)
+if(NOT LSHAZ_TIER_RC EQUAL 0)
+    message(FATAL_ERROR "evidence ledger is unreadable: ${LSHAZ_TIER_OUT}")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${CMAKE_SOURCE_DIR}/evidence/rules.yaml)
+include_directories(${CMAKE_BINARY_DIR}/generated)
+
 # --- Source files ---
 set(LSHAZ_SOURCES
     src/main.cpp

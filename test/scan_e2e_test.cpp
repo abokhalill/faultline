@@ -136,6 +136,41 @@ fs::path isolateFixture(const std::string &fixture, const std::string &suffix) {
     return tmp;
 }
 
+// A rule absent from the evidence ledger is invisible to the maturity
+// derivation and would silently ship as if unmeasured-but-unlisted. The
+// registry and the ledger must enumerate the same set, checked here rather
+// than trusted, because this is exactly how the mechanism-claim contract
+// almost became decorative.
+void testEveryRuleHasLedgerEntry(const std::string &bin) {
+    std::cerr << "test: every registered rule appears in the evidence ledger\n";
+    auto listed = run(bin + " explain --list");
+    std::set<std::string> registered, tiered;
+    for (size_t i = 0; (i = listed.out.find("FL", i)) != std::string::npos;
+         i += 2) {
+        if (i + 5 > listed.out.size()) break;
+        std::string id = listed.out.substr(i, 5);
+        if (std::isdigit((unsigned char)id[2]) &&
+            std::isdigit((unsigned char)id[3]) &&
+            std::isdigit((unsigned char)id[4]))
+            registered.insert(id);
+    }
+    check(registered.size() >= 15, "explain --list enumerates the registry");
+    // Every rule must carry a tier line; absence means it is not in the
+    // ledger and its maturity is undefined rather than experimental.
+    std::vector<std::string> missing;
+    for (const auto &id : registered)
+        if (listed.out.find(id + "  experimental") == std::string::npos &&
+            listed.out.find(id + "  measured") == std::string::npos &&
+            listed.out.find(id + "  confirmed") == std::string::npos)
+            missing.push_back(id);
+    if (!missing.empty()) {
+        std::cerr << "    rules with no ledger entry: ";
+        for (const auto &m : missing) std::cerr << m << " ";
+        std::cerr << "\n";
+    }
+    check(missing.empty(), "no rule is missing from the evidence ledger");
+}
+
 // Every registered rule must fire on some canary fixture.
 //
 // A rule that stops firing is a silent recall loss: output identical to a
@@ -839,6 +874,7 @@ int main() {
     testDirectCompileDBPath(bin, fixture);
 
     // Recall canary: registry completeness.
+    testEveryRuleHasLedgerEntry(bin);
     testEveryRuleHasCanary(bin, fixture, canaryPath());
     testMechanismClaimsBoundSeverity(bin, fixture, canaryPath());
 
