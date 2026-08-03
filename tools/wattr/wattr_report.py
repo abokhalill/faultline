@@ -19,6 +19,9 @@ import sys
 
 
 LINE = 64
+# Writes the quieter side must contribute before a shared line is worth
+# reporting. Below this the coherence cost is a rounding error.
+MIN_PRESSURE = 100
 
 
 _site_cache = {}
@@ -162,13 +165,31 @@ def main():
         multi_granule = any(bin(m).count("1") > 1 for m, _ in granules.values())
         distinct = bin(union).count("1")
 
+        # Two threads touching a line is not contention. Coherence traffic
+        # is bounded by the QUIETER side: a granule written 27,000 times by
+        # one thread and three times by another costs three invalidations,
+        # not 27,000. memcached's itemstats looks exactly like that, and
+        # grading it on thread count alone would have produced a confident
+        # patch for a non-problem.
+        #
+        # Per-thread write counts are not in the trace (that would need 64
+        # counters per granule). Grouping granules by their writer mask and
+        # taking the second-largest group's writes is the same quantity for
+        # the single-writer-per-granule shape that matters here.
+        by_mask = collections.defaultdict(int)
+        for m, w in granules.values():
+            by_mask[m] += w
+        totals = sorted(by_mask.values(), reverse=True)
+        pressure = totals[1] if len(totals) > 1 else 0
+
         if distinct <= 1:
             verdict = "PRIVATE"
-        elif len(granules) > 1 and not multi_granule:
-            # Several granules, each single-writer, different threads overall.
-            verdict = "FALSE_SHARING"
         elif multi_granule:
             verdict = "TRUE_SHARING"
+        elif len(granules) > 1 and pressure >= MIN_PRESSURE:
+            verdict = "FALSE_SHARING"
+        elif len(granules) > 1:
+            verdict = "COLD_SHARE"     # real, but too rare to cost anything
         else:
             verdict = "PRIVATE"
         verdicts.append({
@@ -178,6 +199,7 @@ def main():
             "granules": len(granules),
             "threads": distinct,
             "writes": sum(w for _, w in granules.values()),
+            "pressure": pressure,
             "verdict": verdict,
         })
 
@@ -188,12 +210,14 @@ def main():
     counts = collections.Counter(v["verdict"] for v in verdicts)
     print(f"{len(verdicts)} line(s): " +
           ", ".join(f"{k}={v}" for k, v in sorted(counts.items())) + "\n")
-    print(f"{'verdict':16} {'symbol':32} {'gran':>5} {'thr':>4} {'writes':>10}")
+    print(f"{'verdict':16} {'symbol':30} {'gran':>5} {'thr':>4} "
+          f"{'writes':>10} {'pressure':>9}")
     for v in sorted(verdicts, key=lambda x: -x["writes"]):
         if v["verdict"] == "PRIVATE":
             continue
-        print(f"{v['verdict']:16} {v['symbol'][:32]:32} "
-              f"{v['granules']:5} {v['threads']:4} {v['writes']:10}")
+        print(f"{v['verdict']:16} {v['symbol'][:30]:30} "
+              f"{v['granules']:5} {v['threads']:4} {v['writes']:10} "
+              f"{v['pressure']:9}")
     return 0
 
 
