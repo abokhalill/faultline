@@ -3,10 +3,10 @@
 // Validates JSON, SARIF, and CLI formatters produce deterministic,
 // schema-versioned output with all required fields. Standalone binary.
 
-#include "lshaz/core/Diagnostic.h"
-#include "lshaz/core/ExecutionMetadata.h"
-#include "lshaz/core/Version.h"
-#include "lshaz/output/OutputFormatter.h"
+#include "lshaz/core/diagnostic.h"
+#include "lshaz/core/execution_metadata.h"
+#include "lshaz/core/version.h"
+#include "lshaz/output/output_formatter.h"
 
 #include <cassert>
 #include <cmath>

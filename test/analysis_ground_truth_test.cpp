@@ -8,10 +8,10 @@
 // Any refactoring that silently changes field offset computation will
 // fail here before reaching production.
 
-#include "lshaz/analysis/CacheLineMap.h"
-#include "lshaz/analysis/CallGraph.h"
-#include "lshaz/analysis/EscapeAnalysis.h"
-#include "lshaz/analysis/ThreadRoleSummary.h"
+#include "lshaz/analysis/cache_line_map.h"
+#include "lshaz/analysis/call_graph.h"
+#include "lshaz/analysis/escape_analysis.h"
+#include "lshaz/analysis/thread_role_summary.h"
 
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/DeclCXX.h>

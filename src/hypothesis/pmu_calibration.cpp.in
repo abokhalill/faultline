@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// GENERATED at configure time from src/hypothesis/templates/pmu_calib.h.
+// Edit the template, not this file or its build output.
+#include "lshaz/hypothesis/pmu_calibration.h"
+
+namespace lshaz {
+
+const char *pmuCalibrationTemplate() {
+    return R"LSHAZ_TPL(@LSHAZ_PMU_CALIB_SRC@)LSHAZ_TPL";
+}
+
+} // namespace lshaz

@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "lshaz/core/rule_registry.h"
+
+#include <algorithm>
+
+namespace lshaz {
+
+RuleRegistry &RuleRegistry::instance() {
+    static RuleRegistry registry;
+    return registry;
+}
+
+void RuleRegistry::registerRule(std::unique_ptr<Rule> rule) {
+    rules_.push_back(std::move(rule));
+}
+
+const Rule *RuleRegistry::findByID(std::string_view id) const {
+    auto it = std::find_if(rules_.begin(), rules_.end(),
+                           [id](const auto &r) { return r->getID() == id; });
+    return (it != rules_.end()) ? it->get() : nullptr;
+}
+
+} // namespace lshaz

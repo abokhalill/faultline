@@ -5,13 +5,13 @@
 
 #include "pmu_calib.h"
 
-#include "lshaz/analysis/EscapeSummary.h"
-#include "lshaz/hypothesis/PMUCalibration.h"
-#include "lshaz/analysis/ThreadRoleSummary.h"
-#include "lshaz/core/Diagnostic.h"
-#include "lshaz/pipeline/CompileDBResolver.h"
-#include "lshaz/pipeline/RepoProvider.h"
-#include "lshaz/pipeline/SourceFilter.h"
+#include "lshaz/analysis/escape_summary.h"
+#include "lshaz/hypothesis/pmu_calibration.h"
+#include "lshaz/analysis/thread_role_summary.h"
+#include "lshaz/core/diagnostic.h"
+#include "lshaz/pipeline/compile_db_resolver.h"
+#include "lshaz/pipeline/repo_provider.h"
+#include "lshaz/pipeline/source_filter.h"
 
 #include <unistd.h>
 

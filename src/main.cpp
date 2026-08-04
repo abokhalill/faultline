@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "cli/DiffCommand.h"
-#include "cli/ExpCommand.h"
-#include "cli/ExplainCommand.h"
-#include "cli/FeedbackCommand.h"
-#include "cli/FixCommand.h"
-#include "cli/HypCommand.h"
-#include "cli/InitCommand.h"
-#include "cli/ScanCommand.h"
+#include "cli/diff_command.h"
+#include "cli/exp_command.h"
+#include "cli/explain_command.h"
+#include "cli/feedback_command.h"
+#include "cli/fix_command.h"
+#include "cli/hyp_command.h"
+#include "cli/init_command.h"
+#include "cli/scan_command.h"
 
-#include "lshaz/core/Version.h"
+#include "lshaz/core/version.h"
 
 #include <llvm/Support/raw_ostream.h>
 
