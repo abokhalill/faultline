@@ -7,11 +7,11 @@
 
 #include "lshaz/analysis/escape_summary.h"
 #include "lshaz/hypothesis/pmu_calibration.h"
-#include "lshaz/analysis/thread_role_summary.h"
+#include "lshaz/analysis/thread_role.h"
 #include "lshaz/core/diagnostic.h"
-#include "lshaz/pipeline/compile_db_resolver.h"
-#include "lshaz/pipeline/repo_provider.h"
-#include "lshaz/pipeline/source_filter.h"
+#include "lshaz/pipeline/compile_db.h"
+#include "lshaz/pipeline/repo.h"
+#include "lshaz/pipeline/filter.h"
 
 #include <unistd.h>
 

@@ -4,9 +4,9 @@
 // schema-versioned output with all required fields. Standalone binary.
 
 #include "lshaz/core/diagnostic.h"
-#include "lshaz/core/execution_metadata.h"
+#include "lshaz/core/metadata.h"
 #include "lshaz/core/version.h"
-#include "lshaz/output/output_formatter.h"
+#include "lshaz/output/formatter.h"
 
 #include <cassert>
 #include <cmath>

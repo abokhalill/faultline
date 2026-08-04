@@ -2,11 +2,11 @@
 #pragma once
 
 #include "lshaz/core/diagnostic.h"
-#include "lshaz/core/execution_metadata.h"
+#include "lshaz/core/metadata.h"
 #include "lshaz/analysis/escape_summary.h"
-#include "lshaz/analysis/thread_role_summary.h"
+#include "lshaz/analysis/thread_role.h"
 #include "lshaz/analysis/striped_array_summary.h"
-#include "lshaz/analysis/scan_coverage.h"
+#include "lshaz/analysis/coverage.h"
 
 #include <cstdint>
 #include <string>

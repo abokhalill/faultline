@@ -40,7 +40,7 @@ the rule object (see [Determinism](#determinism)).
 
 ### Supporting analyses
 
-**CacheLineMap** (`src/analysis/cache_line_map.cpp`) — exact field-to-line
+**CacheLineMap** (`src/analysis/cache_line.cpp`) — exact field-to-line
 mapping from `ASTRecordLayout`, including base subobjects and nested records.
 Key semantics:
 
@@ -69,7 +69,7 @@ Key semantics:
   pattern is downgraded (FL001) or suppressed (FL002) — COW/`shared_ptr`
   control blocks do not false-share.
 
-**EscapeAnalysis** (`src/analysis/escape_analysis.cpp`) — decides whether a
+**EscapeAnalysis** (`src/analysis/escape.cpp`) — decides whether a
 type may be accessed from multiple threads and quantifies expected contention.
 
 - *Escape signals* (eight): atomic members, sync-primitive members

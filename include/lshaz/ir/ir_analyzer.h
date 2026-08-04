@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include "lshaz/ir/ir_function_profile.h"
+#include "lshaz/ir/ir_profile.h"
 
 #include <llvm/IR/Module.h>
 

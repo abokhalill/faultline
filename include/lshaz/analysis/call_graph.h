@@ -4,7 +4,7 @@
 #include <clang/AST/ASTContext.h>
 #include <clang/AST/DeclCXX.h>
 
-#include "lshaz/analysis/thread_role_summary.h"
+#include "lshaz/analysis/thread_role.h"
 
 #include <map>
 #include <set>

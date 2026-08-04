@@ -81,73 +81,73 @@ set_property(DIRECTORY APPEND PROPERTY
 set(LSHAZ_SOURCES
     src/main.cpp
     src/core/diagnostic.cpp
-    src/core/source_location_resolver.cpp
+    src/core/source_location.cpp
     src/core/rule.cpp
-    src/core/rule_registry.cpp
+    src/core/registry.cpp
     src/core/severity.cpp
-    src/core/hot_path_oracle.cpp
+    src/core/hot_path.cpp
     src/core/config.cpp
-    src/core/diagnostic_dedup.cpp
-    src/core/diagnostic_interaction.cpp
-    src/core/perf_profile_parser.cpp
-    src/core/precision_budget.cpp
-    src/output/cli_output.cpp
-    src/output/json_output.cpp
-    src/output/sarif_output.cpp
-    src/output/clang_tidy_output.cpp
-    src/analysis/lshaz_action.cpp
-    src/analysis/lshaz_ast_consumer.cpp
-    src/analysis/struct_layout_visitor.cpp
-    src/analysis/escape_analysis.cpp
-    src/analysis/cache_line_map.cpp
+    src/core/dedup.cpp
+    src/core/interaction.cpp
+    src/core/perf_profile.cpp
+    src/core/precision.cpp
+    src/output/cli.cpp
+    src/output/json.cpp
+    src/output/sarif.cpp
+    src/output/clang_tidy.cpp
+    src/analysis/action.cpp
+    src/analysis/ast_consumer.cpp
+    src/analysis/struct_layout.cpp
+    src/analysis/escape.cpp
+    src/analysis/cache_line.cpp
     src/analysis/call_graph.cpp
-    src/analysis/thread_role_summary.cpp
+    src/analysis/thread_role.cpp
     src/analysis/striped_array_summary.cpp
-    src/analysis/striped_array_analysis.cpp
-    src/analysis/data_flow_analyzer.cpp
-    src/analysis/allocator_topology.cpp
-    src/analysis/numa_topology.cpp
-    src/rules/fl001_cache_line_spanning.cpp
-    src/rules/fl002_false_sharing.cpp
-    src/rules/fl020_heap_alloc_hot_path.cpp
-    src/rules/fl021_large_stack_frame.cpp
-    src/rules/fl030_virtual_dispatch.cpp
-    src/rules/fl031_std_function_hot_path.cpp
-    src/rules/fl010_overly_strong_ordering.cpp
-    src/rules/fl011_atomic_contention.cpp
-    src/rules/fl012_lock_hot_path.cpp
-    src/rules/fl013_spin_wait_no_pause.cpp
-    src/rules/fl040_centralized_global_state.cpp
-    src/rules/fl041_contended_queue.cpp
-    src/rules/fl050_deep_conditional_tree.cpp
-    src/rules/fl090_hazard_amplification.cpp
-    src/rules/fl060_numa_unfriendly.cpp
-    src/rules/fl070_tlb_pressure.cpp
-    src/rules/fl061_centralized_dispatcher.cpp
+    src/analysis/striped_array.cpp
+    src/analysis/data_flow.cpp
+    src/analysis/allocator.cpp
+    src/analysis/numa.cpp
+    src/rules/fl001.cpp
+    src/rules/fl002.cpp
+    src/rules/fl020.cpp
+    src/rules/fl021.cpp
+    src/rules/fl030.cpp
+    src/rules/fl031.cpp
+    src/rules/fl010.cpp
+    src/rules/fl011.cpp
+    src/rules/fl012.cpp
+    src/rules/fl013.cpp
+    src/rules/fl040.cpp
+    src/rules/fl041.cpp
+    src/rules/fl050.cpp
+    src/rules/fl090.cpp
+    src/rules/fl060.cpp
+    src/rules/fl070.cpp
+    src/rules/fl061.cpp
     src/ir/ir_analyzer.cpp
-    src/ir/diagnostic_refiner.cpp
-    src/hypothesis/hypothesis_template.cpp
-    src/hypothesis/hypothesis_constructor.cpp
-    src/hypothesis/measurement_plan.cpp
-    src/hypothesis/experiment_synthesizer.cpp
-    src/hypothesis/calibration_feedback.cpp
-    src/hypothesis/pmu_trace_feedback.cpp
-    src/hypothesis/interaction_model.cpp
+    src/ir/refiner.cpp
+    src/hypothesis/template.cpp
+    src/hypothesis/hypothesis.cpp
+    src/hypothesis/measurement.cpp
+    src/hypothesis/experiment.cpp
+    src/hypothesis/calibration.cpp
+    src/hypothesis/pmu_trace.cpp
+    src/hypothesis/interaction.cpp
     ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp
     src/pipeline/scan_pipeline.cpp
-    src/pipeline/absolute_path_compilation_database.cpp
-    src/pipeline/compile_db_resolver.cpp
-    src/pipeline/repo_provider.cpp
-    src/pipeline/source_filter.cpp
-    src/cli/scan_command.cpp
-    src/cli/explain_command.cpp
-    src/cli/init_command.cpp
-    src/cli/diff_command.cpp
-    src/cli/fix_command.cpp
-    src/cli/hyp_command.cpp
-    src/cli/exp_command.cpp
-    src/cli/feedback_command.cpp
-    src/cli/scan_result_parser.cpp
+    src/pipeline/abs_path_db.cpp
+    src/pipeline/compile_db.cpp
+    src/pipeline/repo.cpp
+    src/pipeline/filter.cpp
+    src/cli/scan.cpp
+    src/cli/explain.cpp
+    src/cli/init.cpp
+    src/cli/diff.cpp
+    src/cli/fix.cpp
+    src/cli/hyp.cpp
+    src/cli/exp.cpp
+    src/cli/feedback.cpp
+    src/cli/result_parser.cpp
 )
 
 add_executable(lshaz ${LSHAZ_SOURCES})
@@ -178,9 +178,9 @@ target_link_libraries(lshaz
 # --- Output contract tests ---
 add_executable(output_contract_test
     test/output_contract_test.cpp
-    src/output/json_output.cpp
-    src/output/sarif_output.cpp
-    src/output/cli_output.cpp
+    src/output/json.cpp
+    src/output/sarif.cpp
+    src/output/cli.cpp
     src/core/diagnostic.cpp
     src/core/severity.cpp
 )
@@ -189,10 +189,10 @@ target_link_libraries(output_contract_test PRIVATE ${LSHAZ_LLVM_LIBS})
 # --- Pipeline unit test ---
 add_executable(pipeline_unit_test
     test/pipeline_unit_test.cpp
-    src/pipeline/source_filter.cpp
-    src/pipeline/compile_db_resolver.cpp
-    src/pipeline/repo_provider.cpp
-    src/analysis/thread_role_summary.cpp
+    src/pipeline/filter.cpp
+    src/pipeline/compile_db.cpp
+    src/pipeline/repo.cpp
+    src/analysis/thread_role.cpp
     src/analysis/striped_array_summary.cpp
     ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp
 )
@@ -202,13 +202,13 @@ target_include_directories(pipeline_unit_test PRIVATE ${CMAKE_SOURCE_DIR}/src/hy
 # --- Analysis ground truth test ---
 add_executable(analysis_ground_truth_test
     test/analysis_ground_truth_test.cpp
-    src/analysis/cache_line_map.cpp
+    src/analysis/cache_line.cpp
     src/analysis/call_graph.cpp
-    src/analysis/escape_analysis.cpp
-    src/analysis/thread_role_summary.cpp
+    src/analysis/escape.cpp
+    src/analysis/thread_role.cpp
     src/analysis/striped_array_summary.cpp
-    src/analysis/striped_array_analysis.cpp
-    src/core/hot_path_oracle.cpp
+    src/analysis/striped_array.cpp
+    src/core/hot_path.cpp
     src/core/config.cpp
 )
 target_link_libraries(analysis_ground_truth_test PRIVATE

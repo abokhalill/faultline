@@ -70,50 +70,50 @@ of the bar — `md5sum` over timestamp-stripped JSON from `--jobs 1` and
 src/
   main.cpp                     # flat strcmp subcommand dispatch
   cli/                         # one file per subcommand
-    scan_command.cpp            #   scan (incl. single-file mode)
-    init_command.cpp            #   init — build-system detection, compile_commands.json
-    diff_command.cpp            #   diff — scan comparison / CI gate
-    fix_command.cpp             #   fix — mechanical remediation
-    explain_command.cpp         #   explain — rule mechanisms
-    hyp_command.cpp             #   hyp — hypothesis construction
-    exp_command.cpp             #   exp — experiment synthesis
-    feedback_command.cpp        #   feedback — verdict ingestion, statistics
-    scan_result_parser.cpp       #   scan-JSON parser shared by hyp/exp
+    scan.cpp            #   scan (incl. single-file mode)
+    init.cpp            #   init — build-system detection, compile_commands.json
+    diff.cpp            #   diff — scan comparison / CI gate
+    fix.cpp             #   fix — mechanical remediation
+    explain.cpp         #   explain — rule mechanisms
+    hyp.cpp             #   hyp — hypothesis construction
+    exp.cpp             #   exp — experiment synthesis
+    feedback.cpp        #   feedback — verdict ingestion, statistics
+    result_parser.cpp       #   scan-JSON parser shared by hyp/exp
   analysis/
-    lshaz_ast_consumer.cpp       # TU walk, rule dispatch, inline suppression
-    lshaz_action.cpp            # FrontendAction + factory
-    cache_line_map.cpp           # field→line mapping, pair co-residency, straddle semantics
-    escape_analysis.cpp         # escape signals, global/field write collection
-    struct_layout_visitor.cpp    # recursive layout walker
-    allocator_topology.cpp      # allocator contention classes
-    numa_topology.cpp           # first-touch placement inference
+    ast_consumer.cpp       # TU walk, rule dispatch, inline suppression
+    action.cpp            # FrontendAction + factory
+    cache_line.cpp           # field→line mapping, pair co-residency, straddle semantics
+    escape.cpp         # escape signals, global/field write collection
+    struct_layout.cpp    # recursive layout walker
+    allocator.cpp      # allocator contention classes
+    numa.cpp           # first-touch placement inference
     call_graph.cpp              # per-TU call graph
-    data_flow_analyzer.cpp       # intra-procedural taint (heap, atomic-feeds-branch)
+    data_flow.cpp       # intra-procedural taint (heap, atomic-feeds-branch)
   rules/                       # one file per FL0xx rule, stateless singletons
   pipeline/
     scan_pipeline.cpp           # orchestration: fork shards, IPC, merge, post-processing
-    compile_db_resolver.cpp      # compile_commands.json discovery
-    absolute_path_compilation_database.cpp
-    repo_provider.cpp           # remote URL cloning
-    source_filter.cpp           # include/exclude globs
+    compile_db.cpp      # compile_commands.json discovery
+    abs_path_db.cpp
+    repo.cpp           # remote URL cloning
+    filter.cpp           # include/exclude globs
   core/
-    diagnostic_dedup.cpp        # cross-TU dedup, survivor selection
-    diagnostic_interaction.cpp  # FL091 entity-keyed synthesis
+    dedup.cpp        # cross-TU dedup, survivor selection
+    interaction.cpp  # FL091 entity-keyed synthesis
     diagnostic.cpp             # diagnosticContentLess total order
-    hot_path_oracle.cpp          # hotness classification
-    rule_registry.cpp           # LSHAZ_REGISTER_RULE machinery
+    hot_path.cpp          # hotness classification
+    registry.cpp           # LSHAZ_REGISTER_RULE machinery
     config.cpp                 # YAML config
   ir/
     ir_analyzer.cpp             # LLVM IR facts per function
-    diagnostic_refiner.cpp      # confidence deltas from IR evidence
+    refiner.cpp      # confidence deltas from IR evidence
   hypothesis/
-    hypothesis_constructor.cpp  # diagnostic → LatencyHypothesis
-    hypothesis_template.cpp     # per-hazard-class templates
-    experiment_synthesizer.cpp  # kernel + bundle generation
-    measurement_plan.cpp        # PMU grouping, env setup scripts
-    calibration_feedback.cpp    # versioned store, label quality
-    pmu_trace_feedback.cpp       # production PMU ingestion
-    interaction_model.cpp       # FL091 eligibility matrix
+    hypothesis.cpp  # diagnostic → LatencyHypothesis
+    template.cpp     # per-hazard-class templates
+    experiment.cpp  # kernel + bundle generation
+    measurement.cpp        # PMU grouping, env setup scripts
+    calibration.cpp    # versioned store, label quality
+    pmu_trace.cpp       # production PMU ingestion
+    interaction.cpp       # FL091 eligibility matrix
   output/                      # JSON / SARIF / CLI / clang-tidy formatters
 
 include/lshaz/                 # public headers mirroring src/ structure
@@ -123,7 +123,7 @@ docs/                          # this documentation
 
 ## Adding a rule
 
-1. Create `src/rules/FLXXX_Yourrule.cpp` implementing the `Rule` interface:
+1. Create `src/rules/flXXX.cpp` implementing the `Rule` interface:
 
    ```cpp
    class FLXXX_YourRule : public Rule {

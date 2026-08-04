@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include "lshaz/analysis/thread_role_summary.h"
+#include "lshaz/analysis/thread_role.h"
 
 #include <algorithm>
 #include <cstdint>

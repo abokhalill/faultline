@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/call_graph.h"
-#include "lshaz/analysis/symbol_names.h"
+#include "lshaz/analysis/symbols.h"
 
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Expr.h>
