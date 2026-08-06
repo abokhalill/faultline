@@ -35,7 +35,9 @@ jobs:
       - name: Scan baseline (main)
         run: |
           git checkout ${{ github.event.pull_request.base.sha }}
-          lshaz scan . --no-ir --format json --output /tmp/baseline.json 2>/dev/null || true
+          # Baseline is best-effort: the base commit may predate lshaz
+          # support entirely. A missing baseline is handled by diff.
+          lshaz scan . --no-ir --format json --output /tmp/baseline.json || true
           git checkout ${{ github.event.pull_request.head.sha }}
 
       - name: Compute changed files
@@ -45,8 +47,17 @@ jobs:
 
       - name: Scan PR head (incremental)
         run: |
+          set +e
           lshaz scan . --no-ir --format json --output /tmp/head.json \
-            --changed-files /tmp/changed-files.txt 2>/dev/null || true
+            --changed-files /tmp/changed-files.txt
+          rc=$?
+          set -e
+          case $rc in
+            0|1) ;;
+            2) echo "::warning title=lshaz::Some translation units failed to compile; findings are incomplete" ;;
+            *) echo "::error title=lshaz::lshaz failed (exit $rc)"; exit $rc ;;
+          esac
+
 
       - name: Diff findings
         id: diff

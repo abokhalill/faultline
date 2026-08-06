@@ -35,7 +35,20 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run lshaz
-        run: lshaz scan . --no-ir --format sarif --output results.sarif 2>/dev/null || true
+        run: |
+          set +e
+          lshaz scan . --no-ir --format sarif --output results.sarif
+          rc=$?
+          set -e
+          # 0 clean, 1 findings. 2 means TUs failed to compile, so absent
+          # findings mean "not analyzed", not "not present" -- surface it
+          # rather than let a broken scan read as a clean one.
+          case $rc in
+            0|1) ;;
+            2) echo "::warning title=lshaz::Some translation units failed to compile; findings are incomplete" ;;
+            *) echo "::error title=lshaz::lshaz failed (exit $rc)"; exit $rc ;;
+          esac
+
 
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3

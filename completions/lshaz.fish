@@ -39,6 +39,8 @@ complete -c lshaz -n "__fish_seen_subcommand_from scan" -l pmu-priors -rF -d "PM
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l watch -d "Watch mode"
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l watch-interval -r -d "Watch poll seconds"
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l trust-build-system -d "Allow build system on cloned repos"
+complete -c lshaz -n "__fish_seen_subcommand_from scan" -l memory-limit-mb -r -d "Per-shard address-space cap (MiB)"
+complete -c lshaz -n "__fish_seen_subcommand_from scan" -l include-vendored -d "Analyze deps/, third_party/, vendor/ too"
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l changed-files -rF -d "Only scan TUs affected by listed files"
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l target-arch -r -a "x86-64 arm64 arm64-apple" -d "Target architecture"
 complete -c lshaz -n "__fish_seen_subcommand_from scan" -l help -d "Show help"

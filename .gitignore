@@ -13,3 +13,6 @@ compile_commands.json
 *.swo
 *~
 reports/
+/CMakeFiles/
+/CMakeCache.txt
+*.tsv

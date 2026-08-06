@@ -61,3 +61,4 @@ jobs:
           ./build/output_contract_test
           ./build/pipeline_unit_test
           ./build/scan_e2e_test
+          ./build/analysis_ground_truth_test

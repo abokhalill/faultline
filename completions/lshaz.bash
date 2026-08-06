@@ -64,7 +64,7 @@ _lshaz() {
                     ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=($(compgen -W "--compile-db --config --format --output --min-severity --min-evidence --no-ir --ir-opt --ir-jobs --ir-batch-size --no-ir-cache --jobs --max-files --include --exclude --perf-profile --hotness-threshold --allocator --calibration-store --pmu-trace --pmu-priors --watch --watch-interval --trust-build-system --changed-files --target-arch --help" -- "$cur"))
+                COMPREPLY=($(compgen -W "--compile-db --config --format --output --min-severity --min-evidence --no-ir --ir-opt --ir-jobs --ir-batch-size --no-ir-cache --jobs --max-files --include --exclude --perf-profile --hotness-threshold --allocator --calibration-store --pmu-trace --pmu-priors --watch --watch-interval --trust-build-system --changed-files --target-arch --memory-limit-mb --include-vendored --help" -- "$cur"))
             else
                 COMPREPLY=($(compgen -d -- "$cur"))
             fi

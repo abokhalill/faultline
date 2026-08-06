@@ -52,6 +52,8 @@ _lshaz() {
                         '--watch[Watch mode]' \
                         '--watch-interval[Watch poll interval]:seconds:' \
                         '--trust-build-system[Allow build system execution on cloned repos]' \
+                        '--memory-limit-mb[Per-shard address-space cap in MiB]:MiB:' \
+                        '--include-vendored[Analyze deps/, third_party/, vendor/ too]' \
                         '--changed-files[Only scan TUs affected by listed files]:file:_files' \
                         '--target-arch[Target architecture]:arch:(x86-64 arm64 arm64-apple)' \
                         '--help[Show help]' \
