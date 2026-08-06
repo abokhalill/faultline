@@ -31,6 +31,7 @@ Per-diagnostic fields:
 | `structuralEvidence` | String map of measured facts (`sizeof`, `atomic_pairs_same_line`, `type_name`, `global_write_count`, …). Keys vary by rule. |
 | `mitigation` | Specific remediation guidance |
 | `escalations` | Trace of every severity/confidence adjustment with its reason — aggravating evidence, demotions (deliberate layout, missing write evidence), IR confirmations, cross-TU merge notes. The audit trail for "why this severity". |
+| `mechanismClaims` | The rule's hardware argument, decomposed. Array of `{effect, precondition, established, gating, supports}`. Severity is clamped to what these establish, so a consumer can verify the grade rather than trust it. See below. |
 
 ## CLI format
 
@@ -78,13 +79,54 @@ cross-TU) follows them when applicable.
       "hardwareReasoning": "...",
       "structuralEvidence": { "sizeof": "16B", "atomics": "yes", "type_name": "Counters" },
       "mitigation": "...",
-      "escalations": ["atomic fields 'head' and 'tail' share line 0: ..."]
+      "escalations": ["atomic fields 'head' and 'tail' share line 0: ..."],
+      "mechanismClaims": [
+        {
+          "effect": "co-located mutable fields share a line",
+          "precondition": "two mutable fields co-resident under some base alignment",
+          "established": true,
+          "gating": false,
+          "supports": "Medium"
+        },
+        {
+          "effect": "MESI invalidation ping-pong between cores",
+          "precondition": "distinct writers reaching the pair, or atomics evidencing multi-writer intent",
+          "established": true,
+          "gating": false,
+          "supports": "Critical"
+        }
+      ]
     }
   ]
 }
 ```
 
-`metadata.totalTUs`, `failedTUCount`, and `failedTUs` describe parse health;
+### Reading `mechanismClaims`
+
+Each claim states an `effect` the hardware produces, the `precondition` that
+effect requires, whether that precondition was `established`, and the severity
+it `supports`.
+
+Combination is not uniform. Ordinary claims (`gating: false`) are
+**alternatives** — any one established mechanism can carry the finding, so
+they combine with `max`. A claim with `gating: true` is a **conjunct** and
+caps the result:
+
+```
+severity <= min( max(established ordinary claims), min(all gating claims) )
+```
+
+Hotness is the canonical gating claim: no mechanism costs anything in code
+that never runs.
+
+A consumer can therefore recompute the grade. If a claim is `established:
+false`, its effect was *not* shown and the finding does not rest on it — that
+is a statement about the evidence, not a defect in the rule. A rule's own
+entry condition is legitimately always established and supports only the
+floor grade.
+
+`metadata.totalTUs`, `failedTUCount`, `failedTUs`, and `failedTUErrors`
+describe parse health;
 `failedTUs` lists the failing file paths.
 
 ## SARIF 2.1.0 format

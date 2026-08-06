@@ -87,6 +87,39 @@ type may be accessed from multiple threads and quantifies expected contention.
   `ArrayType(element)`, so without peeling the atomic, sync and volatile
   checks all see an array and nothing else — arrays of atomics, the dominant
   striped-counter shape, were invisible to every rule gated on them.
+
+- *Sharing route* — escape means "threads can reach this type." False sharing
+  needs the stronger "two cores can reach the **same object**," which
+  `EscapeVerdict::hasSharingRoute` states once so that rules stop
+  re-deriving it and disagreeing:
+
+  ```
+  hasSharingRoute = hasPublication                       // address crossed a thread boundary
+                  || hasThreadWriters                    // >=2 writers, one thread-borne
+                  || (hasGlobalInstance && anyWriterOnThread)
+  ```
+
+  `hasGlobalInstance` (a file-scope instance of the type exists) is tracked
+  separately from `hasPublication`. Conflating them made every global look
+  published and, because `getAsCXXRecordDecl()` returns null for a C struct,
+  made publication evidence silently never fire on C at all.
+
+- *Standing versus handed-over writes* — the discriminator writer counts
+  cannot express. `g_stats.hits++` reaches a fixed object every thread can
+  name; `io->len = n` operates on whatever the caller passed in, and a queue
+  hands each request to one owner at a instant. Both look identical to a
+  writer count, which is why per-request objects graded as contended.
+  `recordWrite` classifies each field write by walking its base expression to
+  the root declaration: global storage means standing access, a parameter
+  means the object arrived from elsewhere.
+
+- *Pool roles* — contention needs two **cores**, not two functions. A thread
+  entry spawned inside a loop, or from more than one site, runs on several
+  threads at once, so a single writer function already puts two cores on the
+  line. Requiring two distinct writer functions rejected the commonest
+  thread-pool shape outright. The loop usually sits around a spawner wrapper
+  rather than the `pthread_create` itself, so multiplicity is read one level
+  out through spawner resolution.
 - *Write-site collection* (one traversal over all TU function bodies):
   - **Global write counts** per `VarDecl`, across all write forms — plain
     assignment, `++`/`--`, member writes through the global, C11/GNU atomic
@@ -133,12 +166,45 @@ allocations and atomic loads, then track uses — alloc-escapes,
 alloc-flows-to-loop, atomic-feeds-branch (CAS retry / spin-wait signature).
 Escalation input to FL010 and FL020.
 
-**HotPathOracle** — classifies functions hot via, in order:
-`__attribute__((hot))` / `[[clang::annotate("lshaz_hot")]]`; fnmatch globs
-from config (`hot_function_patterns`, `hot_file_patterns`); perf profile
-samples above `hotness_threshold_pct`; and transitive propagation over the
-call graph (a hot caller marks its callees hot). Lookups are keyed by
-canonical declaration.
+**HotPathOracle** — classifies functions hot and records *how*, because the
+strength of the signal bounds the finding's severity. Sources, strongest
+first (`HotnessSource`):
+
+| Source | Established by | Ceiling |
+|---|---|---|
+| `Profiled` | perf samples above `hotness_threshold_pct` | none |
+| `Declared` | `__attribute__((hot))`, `[[clang::annotate("lshaz_hot")]]`, config globs, or transitive propagation from such a root | none |
+| `InferredDeep` | nested loops or recursion on a path from an entry | one grade below the assigned severity |
+| `InferredShallow` | one loop level from an entry | two grades below |
+| `None` | — | rule does not fire |
+
+`record()` keeps the strongest source, so an inference can never downgrade an
+explicit signal.
+
+**Structural inference** (`inferFromCodeShape`, enabled by `infer_hot_paths`)
+exists because an unconfigured scan otherwise leaves every hot-path rule
+inert — memcached reported 0 hot of 2219 functions, rocksdb 0 of 1.4M.
+Repetition is what makes a cache miss steady-state, and a loop is where
+repetition is written down:
+
+```
+seeds:     thread entry points (from CallGraph) and main
+relax:     depth(callee) = max(depth(caller) + loopDepth(call site))
+recursion: self-edge counts as one level
+bound:     kMaxDepth = 4, so cycles settle rather than diverge
+grade:     own loop nesting >= 2 sharpens by one level
+```
+
+No project symbol is named, so the inference cannot overfit to one codebase.
+
+> **A function's own loop nesting is not a seed.** It establishes cost per
+> call, not call frequency, and the two are independent. Seeding on it marked
+> every initializer hot: memcached's `extstore_init` contains six loops, and
+> half the codebase graded hot, which makes the label meaningless.
+
+Inference is per-TU. A function looped over from another translation unit is
+invisible to it, so a library scanned without its application has thin
+coverage — reported explicitly rather than left to look like a clean result.
 
 ## Stage 2: IR refinement
 
@@ -228,18 +294,61 @@ In execution order:
 
 ## Evidence model
 
-Every diagnostic carries three orthogonal signals (see
+Every diagnostic carries four signals (see
 [output-formats.md](output-formats.md)): severity (worst-case impact),
-confidence ∈ [0,1] (belief the hazard is real here), and evidence tier
-(`Proven` — layout-guaranteed; `Likely` — strong structural signals;
-`Speculative`). Two grading principles apply tool-wide:
+confidence ∈ [0,1] (belief the hazard is real here), evidence tier
+(`proven` — layout-guaranteed; `likely` — strong structural signals;
+`speculative`), and **mechanism claims**.
+
+### Mechanism claims
+
+A rule does not assert a hazard as an opaque verdict. It decomposes its
+hardware argument into claims, each naming an effect, the precondition that
+effect requires, whether that precondition was established, and the severity
+it can support:
+
+```cpp
+struct MechanismClaim {
+    std::string effect;        // what the hardware does
+    std::string precondition;  // what must hold for it to happen
+    bool        established;
+    Severity    supports;
+    bool        gating;
+};
+```
+
+`Diagnostic::severitySupportedByClaims()` combines them, and the pipeline
+clamps each finding's severity to the result. A finding cannot be graded
+Critical on a mechanism whose precondition was never shown.
+
+**Ordinary claims are alternatives; gating claims are conjuncts.** Any one
+established mechanism can carry a finding, so ordinary claims combine with
+`max`. A gating claim caps the result instead:
+
+```
+result = min( max(established ordinary claims), min(all gating claims) )
+```
+
+Hotness is the canonical gating claim: no mechanism costs anything in code
+that never runs. This distinction is load-bearing rather than decorative — a
+cap combined with `max` is a no-op, which is exactly what the first
+implementation did.
+
+`scan_e2e_test` gates the contract shut: every emitted finding must declare
+its claims, and severity may never outrank an established one.
+
+### Grading principles
 
 - **Claims are downgraded to what the evidence supports.** Sub-line-aligned
-  records cannot prove co-residency → `Likely`, not `Proven`. No observed
+  records cannot prove co-residency → `likely`, not `proven`. No observed
   writers in the TU → "structural evidence only," capped severity.
 - **Mitigation intent is respected.** Explicit line alignment or pad-to-line
   layout caps FL001/FL002/FL090 at Medium with the reason stated. Compounds
   never outrank their mitigation-adjusted components.
+- **A claim being constant is not a defect.** A rule's own entry condition is
+  legitimately always true and supports only the floor grade. What matters is
+  that the claim is *computed*, which a gate cannot verify — see
+  `verify/claim_discrimination.py`.
 
 ## Determinism
 
@@ -266,8 +375,30 @@ is a hard invariant with specific machinery behind it:
   verdicts.
 - Locations are resolved via `getFileLoc()` so Clang `<scratch space>`
   token-paste artifacts map back to physical files.
+- The per-shard memory cap derives from **total** system memory, not
+  available. Available memory fluctuates with ambient load, so deriving from
+  it would make output depend on what else the machine was doing — a safety
+  valve must not breach the invariant it protects.
 
 The only run-varying output field is `metadata.timestamp`.
+
+### Shard accounting
+
+A shard is accounted for in exactly one way: its IPC parsed, or every
+translation unit it owned marked failed with a reason. Anything else converts
+a lost shard into silently missing coverage that reads identically to a clean
+scan.
+
+Four paths could previously drop a shard while exiting 0 — `fork()` failure,
+a child whose IPC write failed, a signalled child whose partial IPC still
+parsed, and unparseable IPC. All now report. Records are written one per TU
+and flushed as each completes, so a shard that dies mid-way surrenders only
+the translation unit it died on rather than everything it had finished.
+
+`LSHAZ_FAULT_KILL_SHARD=<shard>[:<n>]` kills a shard deterministically —
+before any TU, or after `n` of them — because the realistic trigger (the OOM
+killer) cannot be summoned on demand, and a silent-failure guard that cannot
+be made to fail is not a guard.
 
 ## Latency model
 

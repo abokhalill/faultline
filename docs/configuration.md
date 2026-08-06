@@ -32,12 +32,28 @@ json_output: false
 output_file: ""
 
 # Hot-path classification (fnmatch patterns; see Hot Path Annotation)
+infer_hot_paths: true         # derive hotness from loop depth when nothing
+                              # else supplies it; inferred hotness caps
+                              # severity (see architecture.md)
 hot_function_patterns: []     # e.g. ["*::onMarketData*", "hnsw_*"]
 hot_file_patterns: []         # e.g. ["*/hot_path/*"]
 
 # Perf-profile hotness (used with --perf-profile)
 perf_profile_path: ""
 hotness_threshold_pct: 1.0    # sample % above which a function is hot
+
+# Vendored code. Third-party trees are skipped by default: their hazards are
+# not yours to fix, and they dominate finding counts.
+skip_vendored: true           # a separate switch because LLVM's YAML reader
+                              # silently ignores an empty sequence, so an
+                              # empty vendor_path_patterns cannot mean "off"
+vendor_path_patterns: []      # defaults cover deps/, third_party/, vendor/
+
+# Thread-role attribution (fnmatch; see architecture.md)
+thread_entry_patterns: []     # worker roots when function-pointer dispatch
+                              # breaks call-graph reachability
+main_function_patterns: []    # additional main-thread roots
+relax_function_patterns: []   # FL013: project-specific cpu_relax()/pause()
 
 # Target model
 target_arch: "x86-64"         # x86-64 | arm64 | arm64-apple
@@ -123,6 +139,8 @@ cloned to a temp directory; build-system execution on clones requires
 | `-X` | `--exclude <pattern>` | Skip files matching pattern (repeatable) |
 | `-n` | `--max-files <N>` | Maximum translation units to analyze |
 | `-j` | `--jobs <N>` | Parallel AST worker **processes** (default: nproc). Output is byte-identical for any value. |
+| | `--memory-limit-mb <N>` | Per-shard address-space cap (`RLIMIT_AS`). Default derives from **total** memory divided by jobs, so the value cannot vary with ambient load. A shard that exceeds it fails loudly and names the knob, rather than the OOM killer taking the host down. |
+| | `--include-vendored` | Analyze `deps/`, `third_party/`, `vendor/` trees, which are skipped by default. |
 | `-r` | `--rule <ID>` | Run only the specified rule (repeatable) |
 | `-a` | `--target-arch <arch>` | `x86-64` (default), `arm64`, `arm64-apple` |
 | `-w` | `--watch` | Re-scan on file changes (`--watch-interval <N>`, default 2s) |

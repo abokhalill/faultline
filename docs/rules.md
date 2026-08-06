@@ -39,7 +39,60 @@ hot-path gate emit nothing without a hotness signal.
 
 ## Shared contracts
 
-Three behaviors apply across rules and are documented once:
+These behaviors apply across rules and are documented once.
+
+### Mechanism claims bound severity
+
+No rule asserts a hazard as an opaque verdict. Each decomposes its hardware
+argument into claims — an `effect`, the `precondition` that effect requires,
+whether that precondition was `established`, and the severity it `supports`.
+The pipeline clamps every finding to what its claims establish, so a rule
+cannot grade Critical on a mechanism it never showed.
+
+Ordinary claims are **alternatives** and combine with `max`: any one
+established mechanism carries the finding. A **gating** claim is a conjunct
+and caps the result instead. Hotness is the canonical gating claim, since no
+mechanism costs anything in code that never runs.
+
+`scan_e2e_test` fails if any emitted finding omits its claims, or if a
+severity outranks an established one.
+
+### Hot-path gating caps severity
+
+A rule marked "Yes" in the hot-path column fires only on functions with a
+hotness signal, and the strength of that signal bounds the grade:
+
+| Hotness source | Ceiling |
+|---|---|
+| Perf profile, or declared (`__attribute__((hot))`, config glob) | none |
+| Inferred from nested loops or recursion | one grade below |
+| Inferred from a single loop level | two grades below |
+
+Inferred hotness establishes *shape*, not execution. It justifies looking, not
+a grade implying measured cost.
+
+### Sharing needs a route to the same object
+
+Escape means threads can reach the *type*. False sharing needs two cores
+reaching the same *object*, which is stricter:
+
+```
+hasSharingRoute = hasPublication || hasThreadWriters
+                || (hasGlobalInstance && anyWriterOnThread)
+```
+
+Rules also distinguish **standing** writes (`g_stats.hits++` — a fixed object
+every thread can name) from **handed-over** writes (`io->len = n` — whatever
+the caller passed in). A queue hands each request to one owner at a time, so
+a per-request object is never falsely shared however many functions write it.
+Writer counts cannot express this difference; the base-expression root can.
+
+### Contention needs two cores, not two functions
+
+A thread entry spawned inside a loop, or from more than one call site, runs on
+several threads at once. One writer function is then sufficient for two cores
+to contend, so rules do not require two distinct writer functions when a pool
+role is involved — that requirement rejected the commonest thread-pool shape.
 
 ### Atomic operation coverage
 
@@ -699,6 +752,34 @@ mode-dependent dual-path functions (the same read/write helpers called
 inline on main or offloaded to a worker) do not produce escalations.
 
 ---
+
+## Scan-health diagnostics
+
+### B001 — Broken scan
+
+Not a hazard. B001 reports that the **scan itself was unsound**, so the
+absence of findings in the affected translation units means nothing.
+
+**Trigger.** The same header is missing from 3 or more TUs, detected by
+fingerprinting `fatal error: 'x.h' file not found` across per-TU failure
+reasons.
+
+**Cause.** Almost always a project that must be built before it can be
+scanned: generated headers from `configure_file`, a `custom_target`, or a
+protobuf/flatbuffer step that has not run. `compile_commands.json` exists and
+is valid, but the files it references do not yet.
+
+**Emission.** Location `<pipeline>:0`, severity Medium, confidence 1.0,
+evidence tier `speculative`. Evidence carries `missing_header` and
+`tu_count`. It deliberately bypasses severity and evidence filters — a
+report about a broken scan must not be filtered out by the flags used to
+narrow that scan — but is re-sorted afterwards so the ordering contract holds.
+
+**Action.** Build the project, then re-scan. Do not interpret a clean result
+alongside a B001 as clean.
+
+Related: exit code `2` means one or more TUs failed to compile at all, and
+`failedTUErrors` in the JSON output names the reason per file.
 
 ## Querying rules from the CLI
 
