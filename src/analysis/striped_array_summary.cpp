@@ -26,6 +26,13 @@ StripeVerdict gradeStripedArray(const StripedArraySite &s,
     }
     v.writerRoles = mask;
     v.multiRole = (mask == (ROLE_MAIN | ROLE_WORKER));
+    // Every writer on the main thread means no two cores ever write this
+    // array, whatever its subscript says.
+    //
+    // ROLE_WORKER alone is deliberately NOT included. A pool runs many
+    // threads in that one role, so a single-role mask there is consistent
+    // with heavy contention rather than evidence against it.
+    v.mainThreadOnly = (mask == ROLE_MAIN);
 
     v.frequency = static_cast<WriteFrequencyTier>(s.writerTier);
     return v;

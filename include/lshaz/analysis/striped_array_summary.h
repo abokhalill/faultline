@@ -142,6 +142,10 @@ struct StripeVerdict {
     uint8_t  writerRoles = ROLE_NONE;
     unsigned writerCount = 0;
     bool     multiRole   = false;   // writers provably span >=2 thread roles
+    // Every writer attributes to the main thread, so no two cores write this
+    // array however it is indexed. Distinct from "one known role": a worker
+    // pool is one role across many threads.
+    bool     mainThreadOnly = false;
     uint64_t slotsPerLine = 0;
     uint64_t contendedLines = 0;
     StripeMitigation mitigation = StripeMitigation::None;

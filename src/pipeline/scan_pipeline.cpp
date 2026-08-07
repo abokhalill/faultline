@@ -1398,6 +1398,12 @@ static unsigned emitStripedArrayFindings(
             continue;
         if (v.slotsPerLine < 2)
             continue;
+        // Writers all on the main thread: the slots are packed, but no two
+        // cores ever write them. The role join was previously consulted only
+        // in the direction that raises severity, so this shape reported High
+        // on the strength of its subscript alone.
+        if (v.mainThreadOnly)
+            continue;
         applyStripeROI(v, s, lineBytes, l1dSizeBytes, alignedOwnerAvailable);
 
         Diagnostic d;
@@ -2517,7 +2523,7 @@ ScanResult ScanPipeline::run(
     // A finding may not outrank the mechanism claims it established. Rules
     // declaring no claims are unconstrained; where a rule does declare them
     // this holds by construction at output, so the invariant cannot be
-    // reintroduced by a future rule the way it was by eleven past ones.
+    // reintroduced by a future rule the way it was by eleven past ones.4
     std::map<std::string, std::pair<unsigned, unsigned>> bindStats; // {bound, total}
     std::map<std::string, long> slackSum;
     for (auto &d : result.diagnostics) {
