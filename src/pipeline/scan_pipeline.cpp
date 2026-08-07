@@ -2518,18 +2518,41 @@ ScanResult ScanPipeline::run(
     // declaring no claims are unconstrained; where a rule does declare them
     // this holds by construction at output, so the invariant cannot be
     // reintroduced by a future rule the way it was by eleven past ones.
+    std::map<std::string, std::pair<unsigned, unsigned>> bindStats; // {bound, total}
+    std::map<std::string, long> slackSum;
     for (auto &d : result.diagnostics) {
         if (d.suppressed || d.mechanismClaims.empty())
             continue;
         Severity ceiling = d.severitySupportedByClaims();
+        auto &st = bindStats[d.ruleID];
+        ++st.second;
+        slackSum[d.ruleID] +=
+            static_cast<int>(d.severity) - static_cast<int>(ceiling);
         if (d.severity <= ceiling)
             continue;
+        ++st.first;
         d.escalations.push_back(
             "severity clamped from " + std::string(severityToString(d.severity)) +
             " to " + std::string(severityToString(ceiling)) +
             ": the effect justifying the higher grade has an unestablished "
             "precondition");
         d.severity = ceiling;
+    }
+    if (!bindStats.empty()) {
+        unsigned boundAll = 0, totalAll = 0;
+        std::string detail;
+        for (const auto &[rule, st] : bindStats) {
+            boundAll += st.first;
+            totalAll += st.second;
+            if (st.first == 0)
+                continue;   // silent rules are summarised, not enumerated
+            detail += (detail.empty() ? "" : " ") + rule + "=" +
+                      std::to_string(st.first) + "/" +
+                      std::to_string(st.second);
+        }
+        report("claims", std::to_string(boundAll) + "/" +
+               std::to_string(totalAll) + " finding(s) clamped by their claims" +
+               (detail.empty() ? " (no rule's lattice bound)" : "; " + detail));
     }
 
     // A finding outside the scanned tree is third-party by construction.

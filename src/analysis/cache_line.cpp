@@ -365,19 +365,25 @@ void dedupePairs(std::vector<CacheLineMap::SharedLinePair> &pairs) {
 
 } // anonymous namespace
 
+// Two fields co-reside if, under some base alignment the allocator may pick,
+// SOME byte of each lands on one line.
 bool CacheLineMap::canCoReside(const FieldLineEntry *a,
                                const FieldLineEntry *b) const {
-    uint64_t lo = std::min(a->offsetBytes, b->offsetBytes);
-    uint64_t hi = std::max(a->offsetBytes + std::max<uint64_t>(a->sizeBytes, 1),
-                           b->offsetBytes + std::max<uint64_t>(b->sizeBytes, 1));
-    if (hi - lo > cacheLineBytes_)
-        return false;
-    // step = recordAlign degenerates to the exact same-line test (s=0
-    // only) when the record is line-aligned.
-    uint64_t step = std::min(recordAlign_, cacheLineBytes_);
-    for (uint64_t s = 0; s < cacheLineBytes_; s += step)
-        if ((lo + s) / cacheLineBytes_ == (hi - 1 + s) / cacheLineBytes_)
+    const uint64_t L = cacheLineBytes_;
+    const uint64_t aSize = std::max<uint64_t>(a->sizeBytes, 1);
+    const uint64_t bSize = std::max<uint64_t>(b->sizeBytes, 1);
+
+    // step = recordAlign degenerates to the exact same-line test (s=0 only)
+    // when the record is line-aligned.
+    const uint64_t step = std::min(recordAlign_, L);
+    for (uint64_t s = 0; s < L; s += step) {
+        const uint64_t aLo = (a->offsetBytes + s) / L;
+        const uint64_t aHi = (a->offsetBytes + s + aSize - 1) / L;
+        const uint64_t bLo = (b->offsetBytes + s) / L;
+        const uint64_t bHi = (b->offsetBytes + s + bSize - 1) / L;
+        if (aLo <= bHi && bLo <= aHi)
             return true;
+    }
     return false;
 }
 
