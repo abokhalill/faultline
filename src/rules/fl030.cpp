@@ -102,10 +102,15 @@ public:
     bool requiresHotPath() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Indirect branch via vtable pointer. BTB (Branch Target Buffer) "
-               "lookup required. Misprediction causes full pipeline flush "
-               "(~14-20 cycle penalty on modern x86). Polymorphic call sites "
-               "with multiple targets degrade BTB hit rate.";
+        return "Indirect branch via vtable pointer, with two separable costs. "
+               "The inlining barrier is ~1ns and is always paid: the callee "
+               "cannot be specialised into the caller. Misprediction adds up "
+               "to ~8ns but only when the receiver type varies unpredictably; "
+               "a monomorphic site, or a predictable cycle over eight types, "
+               "costs the same as one type. Candidate-type count is not the "
+               "signal — the dynamic distribution is, and it is not visible "
+               "in the AST. Fixes differ: devirtualize (final, CRTP) for the "
+               "barrier, type-partition the data for the misprediction.";
     }
 
     void analyze(const clang::Decl *D,
@@ -133,9 +138,15 @@ public:
 
             if (site.inLoop) {
                 sev = Severity::Critical;
+                // Frequency, not per-call cost. A loop over a homogeneous
+                // container is the monomorphic case and the cheapest one
+                // measured (+0.99ns over a direct call); it does not pressure
+                // the BTB, which bench/btb_cost.c shows is flat to 4096
+                // targets. What a loop multiplies is how often the lost
+                // inline is paid.
                 escalations.push_back(
-                    "Virtual call inside loop: repeated indirect branch, "
-                    "BTB capacity pressure, sustained pipeline flush risk");
+                    "Virtual call inside loop: the per-call cost is paid every "
+                    "iteration, so the aggregate scales with trip count");
             }
 
             Diagnostic diag;
@@ -152,9 +163,13 @@ public:
             hw << "Virtual call to '" << site.className << "::" << site.methodName
                << "' in hot function '" << FD->getQualifiedNameAsString()
                << "'. Requires vtable pointer dereference (potential L1D miss "
-               << "if vtable is cold) followed by indirect branch. "
-               << "BTB misprediction flushes the entire pipeline. "
-               << "[Assumes: call site is polymorphic with multiple receiver types at runtime]";
+               << "if vtable is cold) followed by indirect branch. Measured "
+               << "cost splits in two: the lost inline is +0.99ns and is always "
+               << "paid; misprediction adds up to +8.1ns but only when the "
+               << "receiver type varies unpredictably. Monomorphic dispatch "
+               << "costs the same at 8 candidate types as at 1. "
+               << "[Requires, for the larger term: polymorphic and "
+               << "data-dependent receivers — not established statically]";
             diag.hardwareReasoning = hw.str();
 
             diag.structuralEvidence = {
@@ -172,12 +187,19 @@ public:
 
             diag.escalations = std::move(escalations);
             diag.mechanismClaims = {
-                {"indirect branch through the vtable pointer: a BTB entry, "
-                 "and a pipeline flush when the target mispredicts",
+                {"an inlining barrier: the callee cannot be specialised or "
+                 "folded into the caller, costing ~1ns per call",
                  "a virtual call on a hot path", true, Severity::High},
-                {"sustained BTB pressure from repeated indirect branches",
+                {"the barrier is paid once per iteration, so cost scales with "
+                 "trip count",
                  "the call sits inside a loop", site.inLoop != 0,
                  Severity::Critical},
+                {"receiver type varies unpredictably, mispredicting the "
+                 "indirect branch",
+                 "runtime evidence that this site is megamorphic",
+                 /*established=*/false,
+                 site.inLoop ? Severity::High : Severity::Medium,
+                 /*gating=*/true},
             };
             out.push_back(std::move(diag));
         }
