@@ -623,14 +623,17 @@ public:
     std::unordered_map<const clang::VarDecl *, unsigned> &loopCounts;
     FieldWrites &fieldWrites;
     GlobalWriters &globalWriters;
+    std::unordered_set<const clang::FunctionDecl *> &opaqueCallFns;
     const clang::FunctionDecl *currentFn = nullptr;
     unsigned loopDepth = 0;
 
     GlobalWriteVisitor(
         std::unordered_map<const clang::VarDecl *, unsigned> &c,
         std::unordered_map<const clang::VarDecl *, unsigned> &lc,
-        FieldWrites &fw, GlobalWriters &gw)
-        : counts(c), loopCounts(lc), fieldWrites(fw), globalWriters(gw) {}
+        FieldWrites &fw, GlobalWriters &gw,
+        std::unordered_set<const clang::FunctionDecl *> &ocf)
+        : counts(c), loopCounts(lc), fieldWrites(fw), globalWriters(gw),
+          opaqueCallFns(ocf) {}
 
     // write rate, not site count, is what coherence sees: a write under
     // any of these is repeatable per iteration.
@@ -731,6 +734,12 @@ public:
 
     bool VisitCallExpr(clang::CallExpr *CE) {
         const auto *callee = CE->getDirectCallee();
+        // A body this TU cannot see (syscall, libc, cross-TU) dominates the
+        // interval between two writes in the same function; what separates
+        // a per-request counter from a per-iteration one. Indirect calls
+        // count: same situation, less information.
+        if (currentFn && (!callee || !callee->hasBody()))
+            opaqueCallFns.insert(currentFn->getCanonicalDecl());
         if (!callee) return true;
         const auto *II = callee->getIdentifier();
         if (!II) return true;
@@ -772,6 +781,8 @@ private:
                 auto &rec = fieldWrites[llvm::cast<clang::FieldDecl>(
                     FD->getCanonicalDecl())];
                 ++rec.sites;
+                if (loopDepth > 0)
+                    ++rec.loopSites;
                 if (currentFn)
                     rec.writers.insert(currentFn->getCanonicalDecl());
                 // How the writer reached the object is what separates
@@ -857,7 +868,7 @@ void EscapeAnalysis::collectTypeAccessors(
 void EscapeAnalysis::collectGlobalWriteSites(
     const std::vector<const clang::FunctionDecl *> &bodies) {
     GlobalWriteVisitor visitor(globalWriteCounts_, globalLoopWriteCounts_,
-                               fieldWrites_, globalWriters_);
+                               fieldWrites_, globalWriters_, opaqueCallFns_);
     for (const auto *FD : bodies) {
         visitor.currentFn = FD;
         visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
@@ -873,7 +884,21 @@ EscapeAnalysis::fieldWriteEvidence(const clang::FieldDecl *FD) const {
     if (it == fieldWrites_.end())
         return {};
     return {it->second.sites,
-            static_cast<unsigned>(it->second.writers.size())};
+            static_cast<unsigned>(it->second.writers.size()),
+            it->second.loopSites};
+}
+
+bool EscapeAnalysis::fieldWritersAllOpaque(const clang::FieldDecl *FD) const {
+    if (!FD)
+        return false;
+    auto it = fieldWrites_.find(
+        llvm::cast<clang::FieldDecl>(FD->getCanonicalDecl()));
+    if (it == fieldWrites_.end() || it->second.writers.empty())
+        return false;   // nothing observed is not evidence of sparseness
+    for (const auto *W : it->second.writers)
+        if (!opaqueCallFns_.count(W))
+            return false;   // one tight writer is enough to contend
+    return true;
 }
 
 bool EscapeAnalysis::pairHasDistinctWriters(const clang::FieldDecl *A,

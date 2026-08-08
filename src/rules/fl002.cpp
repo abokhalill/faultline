@@ -76,11 +76,26 @@ public:
         // gate for non-atomic records.
         enum { kNoWrites, kPartial, kMultiWriter };
         int wev = kNoWrites;
+        // Co-residency in space is not co-residency in time. Two threads
+        // writing one line microseconds apart never find it in each other's
+        // L1 and generate no coherence traffic at all.
+        bool densePair = false;
+        bool sparsePair = false;
+        unsigned denseSites = 0;
         std::vector<std::string> writeEvidence;
         const auto &evPairs = hasAtomicPairs ? atomicPairs : mutablePairs;
         for (const auto &p : evPairs) {
             auto ea = escape.fieldWriteEvidence(p.a->decl);
             auto eb = escape.fieldWriteEvidence(p.b->decl);
+            if (ea.loopWriteSites || eb.loopWriteSites) {
+                densePair = true;
+                denseSites += ea.loopWriteSites + eb.loopWriteSites;
+            }
+            // Sparse only when BOTH sides are proven sparse. One tight writer
+            // is enough to keep the line moving.
+            if (escape.fieldWritersAllOpaque(p.a->decl) &&
+                escape.fieldWritersAllOpaque(p.b->decl))
+                sparsePair = true;
             int level = kNoWrites;
             // For an intra-array pair a == b, this reduces to "this array is
             // written from >=2 functions", which is the correct question.
@@ -250,6 +265,19 @@ public:
                 "no write sites to the co-located fields observed in "
                 "this TU: co-location is structural evidence only");
         }
+        if (densePair) {
+            escalations.push_back(
+                "write density: " + std::to_string(denseSites) +
+                " in-loop write site(s) to the flagged pair — spacing can "
+                "reach the sub-microsecond range where coherence cost is real");
+        }
+        else if (sparsePair)
+            escalations.push_back(
+                "every writer of this pair calls out to a body this TU cannot "
+                "see, and none writes in a loop: the writes are separated by a "
+                "syscall or external call and are microseconds apart. "
+                "Contended-RMW cost collapses ~75x once spacing exceeds "
+                "~125ns, so the co-location is real but the ping-pong is not");
 
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
@@ -292,6 +320,7 @@ public:
             {"mutable_pairs_same_line", std::to_string(mutablePairs.size())},
             {"atomic_pairs_same_line", std::to_string(map.atomicPairsOnSameLine().size())},
             {"thread_escape", "true"},
+            {"in_loop_write_sites", std::to_string(denseSites)},
             {"atomics", map.totalAtomicFields() > 0 ? "yes" : "no"},
             {"type_name", RD->getCanonicalDecl()->getQualifiedNameAsString()},
             {"pair_fields", pairFields},
@@ -313,6 +342,13 @@ public:
              "multi-writer intent",
              hasAtomicPairs || wev == kMultiWriter,
              deliberateLayout ? Severity::Medium : Severity::Critical},
+            // Gating: no temporal proximity, no mechanism.
+            {"writes land close enough in time to catch the line resident "
+             "in a peer core's L1",
+             "no writer is separated from the next by an opaque call",
+             !(sparsePair && !densePair),
+             (sparsePair && !densePair) ? Severity::Medium : sev,
+             /*gating=*/true},
             // Deliberately NOT gated on ev.hasSharingRoute, twice measured:
             // it demotes stats_state (the one adjudicated TP) while keeping
             // every FP. hasGlobalInstance is a per-TU fact and the record

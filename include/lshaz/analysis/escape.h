@@ -152,8 +152,19 @@ public:
     struct FieldWriteEvidence {
         unsigned writeSites = 0;
         unsigned writerFunctions = 0;
+        // Over-approximates density: a loop body containing a syscall is
+        // still sparse. Deliberate; this gates a conjunct, so erring toward
+        // "dense" costs precision while erring the other way costs recall.
+        unsigned loopWriteSites = 0;
     };
     FieldWriteEvidence fieldWriteEvidence(const clang::FieldDecl *FD) const;
+
+    // Every writer of this field is separated from its next write by a body
+    // this TU cannot see: positive evidence of microsecond spacing, which a
+    // writer count cannot supply. Absence proves nothing; a leaf setter has
+    // no opaque call and may still be driven from a tight loop.
+    bool fieldWritersAllOpaque(const clang::FieldDecl *FD) const;
+
 
     // Union of the two fields' writer functions has >=2 members: the
     // pair is written from more than one function in this TU. A single
@@ -190,6 +201,10 @@ public:
         // block produces the first. Writer counts cannot tell them apart.
         unsigned standingSites = 0;
         unsigned handedSites   = 0;
+        // Writes issued from inside a loop. Coherence cost tracks spacing,
+        // not site count: contended-RMW cost collapses 75x between 8ns and
+        // 125ns. Field-level twin of globalLoopWriteCounts_ (FL040).
+        unsigned loopSites     = 0;
         std::unordered_set<const clang::FunctionDecl *> writers;
     };
 
@@ -206,6 +221,7 @@ private:
     // (excluding the initializer expression on the VarDecl itself).
     std::unordered_map<const clang::VarDecl *, unsigned> globalWriteCounts_;
     std::unordered_map<const clang::VarDecl *, unsigned> globalLoopWriteCounts_;
+    std::unordered_set<const clang::FunctionDecl *> opaqueCallFns_;
 
     // Per-type: how many distinct functions access fields of this type.
     // Key: canonical RecordDecl*. Populated by scanTranslationUnit Pass 4.
