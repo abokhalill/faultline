@@ -35,8 +35,6 @@ jobs:
       - name: Scan baseline (main)
         run: |
           git checkout ${{ github.event.pull_request.base.sha }}
-          # Baseline is best-effort: the base commit may predate lshaz
-          # support entirely. A missing baseline is handled by diff.
           lshaz scan . --no-ir --format json --output /tmp/baseline.json || true
           git checkout ${{ github.event.pull_request.head.sha }}
 
