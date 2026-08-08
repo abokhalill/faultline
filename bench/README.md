@@ -2,7 +2,7 @@
 
 lshaz rules assert hardware mechanisms. This directory measures whether those
 mechanisms produce the cost the rule claims, and at what threshold. Every
-constant in `docs/measured-constants.md` was produced here.
+constant in `reports/measured-constants.md` was produced here.
 
 The rig exists because a rule can be structurally correct and still describe
 an effect that never fires. FL002 asserted MESI ping-pong from co-located
