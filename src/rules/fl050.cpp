@@ -103,10 +103,14 @@ public:
     bool requiresHotPath() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Deeply nested conditionals increase branch misprediction "
-               "surface. Each unpredictable branch costs ~14-20 cycles "
-               "(pipeline flush). Large switch statements on non-constexpr "
-               "values pressure the BTB and I-cache.";
+        return "Deeply nested conditionals and large switches widen the "
+               "branch misprediction surface. A missed branch costs ~26 "
+               "cycles; a predicted one is free. "
+               "Target count does not matter: a predictable indirect branch "
+               "costs the same at 4096 targets as at 2, so BTB capacity is "
+               "not the mechanism and case count is not a severity signal. "
+               "Cost requires the outcome to be data-dependent, which is a "
+               "runtime property — hence Medium without a profile.";
     }
 
     void analyze(const clang::Decl *D,
@@ -144,11 +148,11 @@ public:
             std::vector<std::string> escalations;
 
             if (site.isSwitchStmt) {
-                sev = Severity::High;
                 escalations.push_back(
-                    "Large switch (" + std::to_string(site.switchCases) +
-                    " cases): BTB capacity pressure, I-cache bloat from "
-                    "jump table expansion");
+                    "Switch with " + std::to_string(site.switchCases) +
+                    " non-trivial arms: an indirect jump the predictor must "
+                    "resolve; costs ~26 cycles only when the selector is "
+                    "data-dependent");
             } else {
                 if (site.depth >= 6) {
                     sev = Severity::High;
@@ -174,10 +178,13 @@ public:
                 hw << "switch statement with " << site.switchCases
                    << " cases in hot function '"
                    << FD->getQualifiedNameAsString()
-                   << "'. Non-constexpr switch generates indirect jump table. "
-                   << "BTB must predict target from " << site.switchCases
-                   << " possibilities. I-cache footprint scales with case count. "
-                   << "[Assumes: case distribution is non-uniform or unpredictable at runtime]";
+                   << "'. Non-constexpr switch generates an indirect jump. "
+                   << "Measured cost is misprediction, ~26 cycles, and is flat "
+                   << "in target count: a predictable indirect branch costs the "
+                   << "same at 4096 targets as at 2. Case count therefore does "
+                   << "not indicate severity. "
+                   << "[Requires: the selector varies unpredictably at runtime — "
+                   << "not established statically]";
             } else {
                 hw << "Conditional nesting depth " << site.depth
                    << " in hot function '" << FD->getQualifiedNameAsString()
@@ -208,13 +215,16 @@ public:
                 {"branch prediction surface on a hot path",
                  "a deep nest or a large switch in a hot function", true,
                  Severity::Medium},
-                {"indirect jump the BTB must predict among many targets",
+                {"an indirect jump whose target the predictor must resolve",
                  "a switch whose arms are real work, not a constant lookup",
                  site.isSwitchStmt, Severity::High},
                 {"correlated misprediction chains that defeat pattern "
                  "predictors",
                  "nesting depth at or beyond six",
                  !site.isSwitchStmt && site.depth >= 6, Severity::High},
+                {"branch outcomes vary unpredictably at run time",
+                 "runtime branch-miss evidence for this site",
+                 /*established=*/false, Severity::Medium, /*gating=*/true},
             };
             out.push_back(std::move(diag));
         }
