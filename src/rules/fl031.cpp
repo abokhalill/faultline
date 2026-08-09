@@ -137,10 +137,15 @@ public:
     bool requiresHotPath() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "std::function uses type-erased callable storage. "
-               "Invocation requires indirect call (BTB pressure). "
-               "Construction may heap-allocate if callable exceeds SBO "
-               "(typically 16-32B). Prevents inlining.";
+        return "std::function uses type-erased callable storage, with three "
+               "costs of very different size. The prevented inline is ~1ns "
+               "and is always paid. Misprediction adds up to ~8ns, but only "
+               "when the stored target varies unpredictably — a call site "
+               "holding one callable costs the same as one holding eight in "
+               "a predictable cycle, so BTB capacity is not the mechanism. "
+               "Construction may heap-allocate when the callable exceeds the "
+               "small-buffer (~16-32B), which is the largest term and the "
+               "only one an allocator can make worse.";
     }
 
     void analyze(const clang::Decl *D,
@@ -239,6 +244,13 @@ public:
                 {"the indirect call and any allocation recur per iteration",
                  "the use sits inside a loop", site.inLoop != 0,
                  Severity::Critical},
+                {"the stored target varies unpredictably between calls",
+                 "runtime evidence that this site is megamorphic",
+                 site.kind == StdFuncSite::Construct,
+                 site.kind == StdFuncSite::Construct
+                     ? Severity::Critical
+                     : (site.inLoop ? Severity::High : Severity::Medium),
+                 /*gating=*/true},
             };
             out.push_back(std::move(diag));
         }
