@@ -83,6 +83,13 @@ struct Diagnostic {
     // Escalation trace: why severity was raised from base.
     std::vector<std::string> escalations;
 
+    // HotnessSource as it stood in the emitting TU. Candidate means the TU
+    // lacked the entry points to decide; the reduce phase resolves it
+    // against the merged call graph and drops the finding if the function
+    // is not globally hot. Stored untyped to keep this header free of the
+    // oracle. Zero (None) for structural rules, which never consult it.
+    uint8_t hotness = 0;
+
     // Mechanism claims, when the rule declares them. Empty means the rule
     // has not been migrated, which the invariant gate counts and reports
     // rather than silently passing.

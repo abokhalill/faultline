@@ -63,6 +63,7 @@ const char *hotnessSourceName(HotnessSource s) {
         case HotnessSource::Declared:        return "declared";
         case HotnessSource::InferredDeep:    return "inferred-deep";
         case HotnessSource::InferredShallow: return "inferred-shallow";
+        case HotnessSource::Candidate:       return "cross-tu-candidate";
         case HotnessSource::None:            break;
     }
     return "none";
@@ -83,6 +84,11 @@ Severity hotnessSupportedSeverity(HotnessSource s, Severity base) {
         case HotnessSource::Profiled:
         case HotnessSource::Declared:
             return Severity::Critical;
+        // Unresolved. Bounded like the weakest real grade so a finding that
+        // somehow reaches output unresolved understates rather than
+        // overstates; the reduce phase normally rewrites this.
+        case HotnessSource::Candidate:
+            return demote(base, 2);
         // Nested loops or recursion: repetition is structurally certain,
         // its magnitude is not.
         case HotnessSource::InferredDeep:
@@ -221,6 +227,78 @@ void HotPathOracle::inferFromCodeShape(const CallGraph &cg) {
         record(fn, graded >= 2 ? HotnessSource::InferredDeep
                                : HotnessSource::InferredShallow);
     }
+}
+
+void HotPathOracle::markCrossTUCandidates(const CallGraph &cg) {
+    for (const auto *fn : cg.functions()) {
+        const auto *canon = fn->getCanonicalDecl();
+        if (hotCache_.count(canon))
+            continue;                       // already settled, and stronger
+        // Internal linkage with no local entry reaching it is genuinely
+        // cold: no other TU can name it. Anything externally visible may be
+        // called from a loop this TU cannot see.
+        if (!fn->isExternallyVisible())
+            continue;
+        record(canon, HotnessSource::Candidate);
+    }
+}
+
+std::map<std::string, HotnessSource>
+inferGlobalHotness(const ThreadRoleSummary &facts,
+                   const std::vector<std::string> &mainPatterns) {
+    std::map<std::string, HotnessSource> out;
+
+    // Same seeds as the per-TU pass, drawn from every TU at once: thread
+    // entries wherever they were spawned, plus the program entry points.
+    std::map<std::string, unsigned> depth;
+    std::vector<std::string> work;
+    auto seed = [&](const std::string &fn) {
+        if (depth.count(fn)) return;
+        depth[fn] = 0;
+        work.push_back(fn);
+    };
+    for (const auto &e : facts.threadEntries) seed(e);
+    for (const auto &p : mainPatterns) seed(p);
+
+    if (work.empty())
+        return out;
+
+    constexpr unsigned kMaxDepth = 4;
+    while (!work.empty()) {
+        const std::string caller = work.back();
+        work.pop_back();
+        const unsigned d = depth[caller];
+        auto edges = facts.callEdges.find(caller);
+        if (edges == facts.callEdges.end())
+            continue;
+        auto depthsIt = facts.edgeLoopDepth.find(caller);
+        for (const auto &callee : edges->second) {
+            unsigned site = 0;
+            if (depthsIt != facts.edgeLoopDepth.end()) {
+                auto s = depthsIt->second.find(callee);
+                if (s != depthsIt->second.end()) site = s->second;
+            }
+            unsigned nd = d + site;
+            if (callee == caller && nd == d) nd = d + 1;   // recursion repeats
+            if (nd > kMaxDepth) nd = kMaxDepth;
+            auto it = depth.find(callee);
+            if (it != depth.end() && it->second >= nd)
+                continue;
+            depth[callee] = nd;
+            work.push_back(callee);
+        }
+    }
+
+    for (const auto &[fn, d] : depth) {
+        if (d == 0) continue;
+        unsigned own = 0;
+        auto o = facts.ownLoopDepth.find(fn);
+        if (o != facts.ownLoopDepth.end()) own = o->second;
+        const unsigned graded = d + (own >= 2 ? 1u : 0u);
+        out[fn] = graded >= 2 ? HotnessSource::InferredDeep
+                              : HotnessSource::InferredShallow;
+    }
+    return out;
 }
 
 } // namespace lshaz

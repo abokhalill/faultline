@@ -363,9 +363,27 @@ void CallGraph::snapshotForThreadRoles(ThreadRoleSummary &out) const {
     for (const auto &[caller, callees] : calleeMap_) {
         if (callees.empty())
             continue;
-        auto &names = out.callEdges[threadRoleNodeName(caller, ctx_)];
-        for (const auto *callee : callees)
-            names.insert(threadRoleNodeName(callee, ctx_));
+        const std::string callerName = threadRoleNodeName(caller, ctx_);
+        auto &names = out.callEdges[callerName];
+        for (const auto *callee : callees) {
+            const std::string calleeName = threadRoleNodeName(callee, ctx_);
+            names.insert(calleeName);
+            // Sparse: zero is both the default on the read side and the
+            // overwhelming majority of call sites. Materialising it would put
+            // an IPC entry on every edge in the program.
+            const unsigned d = callSiteLoopDepth(caller, callee);
+            if (!d) continue;
+            auto &cur = out.edgeLoopDepth[callerName][calleeName];
+            if (d > cur) cur = d;
+        }
+    }
+    // Own loop depth travels for every node, not only callers: a leaf that
+    // spins is still the body the grade sharpens on.
+    for (const auto *fn : functions()) {
+        const unsigned d = ownLoopDepth(fn);
+        if (!d) continue;
+        auto &cur = out.ownLoopDepth[threadRoleNodeName(fn, ctx_)];
+        if (d > cur) cur = d;
     }
 }
 

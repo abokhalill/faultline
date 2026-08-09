@@ -6,6 +6,7 @@
 
 #include "lshaz/analysis/action.h"
 #include "lshaz/core/dedup.h"
+#include "lshaz/core/hot_path.h"
 #include "lshaz/core/interaction.h"
 #include "lshaz/core/perf_profile.h"
 #include "lshaz/core/precision.h"
@@ -353,6 +354,9 @@ std::string serializeShardResult(int exitCode,
             buf += '"'; buf += esc(d.escalations[j]); buf += '"';
         }
         buf += "]";
+        // Unserialized, this would make the cross-TU hotness verdict depend
+        // on whether the shard ran forked or sequentially.
+        buf += ",\"hot\":" + std::to_string(static_cast<unsigned>(d.hotness));
         // Unserialized fields are a jobs-dependent verdict: present on the
         // sequential path, gone on the forked one. This is the third such
         // field after the FL003 writer tier and the thread-writer escape
@@ -427,6 +431,32 @@ std::string serializeShardResult(int exitCode,
     emitNameSets(threadRoles.callEdges);
     buf += "},\"fieldWriters\":{";
     emitNameSets(threadRoles.fieldWriters);
+    buf += "},\"edgeDepth\":{";
+    {
+        bool firstCaller = true;
+        for (const auto &[caller, edges] : threadRoles.edgeLoopDepth) {
+            if (edges.empty()) continue;
+            if (!firstCaller) buf += ',';
+            buf += '"'; buf += esc(caller); buf += "\":{";
+            bool firstEdge = true;
+            for (const auto &[callee, d] : edges) {
+                if (!firstEdge) buf += ',';
+                buf += '"'; buf += esc(callee); buf += "\":" + std::to_string(d);
+                firstEdge = false;
+            }
+            buf += '}';
+            firstCaller = false;
+        }
+    }
+    buf += "},\"ownDepth\":{";
+    {
+        bool first = true;
+        for (const auto &[fn, d] : threadRoles.ownLoopDepth) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(fn); buf += "\":" + std::to_string(d);
+            first = false;
+        }
+    }
     buf += "}}";
 
     buf += ",\"striped\":{";
@@ -661,6 +691,8 @@ static Diagnostic parseDiag(const std::string &s, size_t &i) {
                 d.escalations.push_back(parseStr(s, i));
                 expect(s, i, ',');
             }
+        } else if (key == "hot") {
+            d.hotness = static_cast<uint8_t>(parseNum(s, i));
         } else if (key == "mc") {
             expect(s, i, '[');
             while (true) {
@@ -816,7 +848,47 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.callEdges);
                 else if (tk == "fieldWriters")
                     parseNameSets(out.threadRoles.fieldWriters);
-                else
+                else if (tk == "edgeDepth") {
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string caller = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        auto &dst = out.threadRoles.edgeLoopDepth[caller];
+                        ipc::expect(json, i, '{');
+                        while (true) {
+                            ipc::skipWS(json, i);
+                            if (i >= json.size() || json[i] == '}') {
+                                if (i < json.size()) ++i;
+                                break;
+                            }
+                            std::string callee = ipc::parseStr(json, i);
+                            ipc::expect(json, i, ':');
+                            dst[callee] =
+                                static_cast<unsigned>(ipc::parseNum(json, i));
+                            ipc::expect(json, i, ',');
+                        }
+                        ipc::expect(json, i, ',');
+                    }
+                } else if (tk == "ownDepth") {
+                    ipc::expect(json, i, '{');
+                    while (true) {
+                        ipc::skipWS(json, i);
+                        if (i >= json.size() || json[i] == '}') {
+                            if (i < json.size()) ++i;
+                            break;
+                        }
+                        std::string fn = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ':');
+                        out.threadRoles.ownLoopDepth[fn] =
+                            static_cast<unsigned>(ipc::parseNum(json, i));
+                        ipc::expect(json, i, ',');
+                    }
+                } else
                     ipc::skipValue(json, i);
                 ipc::expect(json, i, ',');
             }
@@ -2432,6 +2504,43 @@ ScanResult ScanPipeline::run(
         if (roleEscalated > 0)
             report("thread_roles", std::to_string(roleEscalated) +
                    " finding(s) escalated (disjoint writer roles)");
+    }
+
+    // Resolve cross-TU hotness candidates. The map phase could not decide
+    // for any function in a TU holding no entry point, so it deferred rather
+    // than answering "cold" from facts it did not have. This is the only
+    // place the whole call graph exists.
+    {
+        const auto globalHot = inferGlobalHotness(
+            result.threadRoleFacts, request.config.mainFunctionPatterns);
+        unsigned resolved = 0, dropped = 0;
+        for (auto &d : result.diagnostics) {
+            if (d.hotness != static_cast<uint8_t>(HotnessSource::Candidate))
+                continue;
+            auto it = globalHot.find(d.functionName);
+            if (it == globalHot.end()) {
+                // Never reached from any entry in any TU. This is the verdict
+                // the map phase would have reached had it been able to see
+                // the whole program.
+                d.suppressed = true;
+                ++dropped;
+                continue;
+            }
+            d.hotness = static_cast<uint8_t>(it->second);
+            ++resolved;
+            for (auto &c : d.mechanismClaims) {
+                if (!c.gating || c.effect.rfind("this code runs often", 0) != 0)
+                    continue;
+                c.effect = std::string("this code runs often enough for the "
+                                       "cost to recur (") +
+                           hotnessSourceName(it->second) + ", cross-TU)";
+                c.supports = hotnessSupportedSeverity(it->second, d.severity);
+            }
+        }
+        if (resolved || dropped)
+            report("hotness", std::to_string(resolved) +
+                   " cross-TU candidate(s) confirmed hot, " +
+                   std::to_string(dropped) + " dropped as cold");
     }
 
     // an already line-aligned type in-tree makes relocation available at

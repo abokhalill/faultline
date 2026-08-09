@@ -119,8 +119,13 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     oracle_.propagateViaCallGraph(cg);
     // After propagation: an explicit signal must not be downgraded to an
     // inference, and record() keeps the strongest source anyway.
-    if (config_.inferHotPaths)
+    if (config_.inferHotPaths) {
         oracle_.inferFromCodeShape(cg);
+        // Everything the per-TU pass could not settle. Without this, a TU
+        // holding no entry point answers "cold" for every function in it and
+        // silently disables two thirds of the rule set there.
+        oracle_.markCrossTUCandidates(cg);
+    }
 
     // Counted after propagation, since that is when hotness is final.
     // Reported so a scan that examined a fraction of a codebase cannot be
@@ -175,6 +180,10 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
             // cannot forget it: the ceiling is a property of how hotness was
             // evidenced, not of the individual mechanism.
             for (size_t i = before; i < diagnostics_.size(); ++i) {
+                // Recorded so the reduce phase can tell an unresolved
+                // cross-TU candidate from a settled local verdict without
+                // parsing the claim text back out.
+                diagnostics_[i].hotness = static_cast<uint8_t>(hs);
                 diagnostics_[i].mechanismClaims.push_back(
                     {std::string("this code runs often enough for the cost to "
                                  "recur (") + hotnessSourceName(hs) + ")",

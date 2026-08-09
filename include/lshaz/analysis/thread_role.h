@@ -26,6 +26,13 @@ struct ThreadRoleSummary {
     // "type_name::field_name" -> functions writing that field in this TU.
     std::map<std::string, std::set<std::string>> fieldWriters;
 
+    // Loop nesting at each call site, and each function's own maximum loop
+    // depth. Hotness inference is loop-depth-weighted, so the reduce phase
+    // needs both to rerun the per-TU relaxation over the merged graph rather
+    // than degrading every cross-TU callee to the weakest grade.
+    std::map<std::string, std::map<std::string, unsigned>> edgeLoopDepth;
+    std::map<std::string, unsigned> ownLoopDepth;
+
     void merge(const ThreadRoleSummary &other) {
         threadEntries.insert(other.threadEntries.begin(),
                              other.threadEntries.end());
@@ -33,6 +40,20 @@ struct ThreadRoleSummary {
             callEdges[caller].insert(callees.begin(), callees.end());
         for (const auto &[field, writers] : other.fieldWriters)
             fieldWriters[field].insert(writers.begin(), writers.end());
+        // Max, not overwrite: an inline body seen in several TUs must not
+        // depend on which shard reported it last, or output stops being
+        // jobs-invariant.
+        for (const auto &[caller, edges] : other.edgeLoopDepth) {
+            auto &dst = edgeLoopDepth[caller];
+            for (const auto &[callee, d] : edges) {
+                auto &cur = dst[callee];
+                if (d > cur) cur = d;
+            }
+        }
+        for (const auto &[fn, d] : other.ownLoopDepth) {
+            auto &cur = ownLoopDepth[fn];
+            if (d > cur) cur = d;
+        }
     }
 
     bool empty() const {

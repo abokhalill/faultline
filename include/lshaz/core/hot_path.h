@@ -2,8 +2,10 @@
 #pragma once
 
 #include "lshaz/core/severity.h"
+#include "lshaz/analysis/thread_role.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -26,6 +28,8 @@ struct Config;
 // Rules must not treat these alike — see supportedCeiling().
 enum class HotnessSource : uint8_t {
     None = 0,
+    Candidate,        // externally visible, unresolved: only the merged
+                      // call graph can say. 
     InferredShallow,  // reached from an entry through exactly one loop level
     InferredDeep,     // nested loops, or recursion (self-repetition)
     Declared,         // __attribute__((hot)) / annotate / config pattern
@@ -63,9 +67,19 @@ public:
     // entries and main, a callee inherits its caller's hotness plus the loop
     // nesting at the call site; recursion is self-repetition and counts.
     // Nothing here names a project symbol, so it cannot overfit to one
-    // codebase — but it is per-TU, so a function looped over from another
-    // translation unit is invisible to it.
+    // codebase — but it is per-TU: a function looped over from another
+    // translation unit is invisible here and must be resolved by
+    // inferGlobalHotness over the merged graph.
     void inferFromCodeShape(const CallGraph &cg);
+
+    // Mark every externally-visible function this pass could not settle. A
+    // TU without main or a thread entry seeds nothing, which silently
+    // disabled every hot-path rule inside it; a candidate lets the rule run
+    // and defers the verdict to the reduce phase instead of answering "cold"
+    // from facts this TU does not have. Internal-linkage functions are left
+    // alone: unreachable from a local entry, they cannot be entered from
+    // another TU except through an escaping function pointer.
+    void markCrossTUCandidates(const CallGraph &cg);
 
     // Load profile-derived hot function names (demangled qualified names).
     void loadProfileHotFunctions(std::unordered_set<std::string> names);
@@ -90,5 +104,14 @@ const char *hotnessSourceName(HotnessSource s);
 // grade that implies measured cost. Rules pass their own base severity and
 // get back what the evidence for hotness can carry.
 Severity hotnessSupportedSeverity(HotnessSource s, Severity base);
+
+// Reduce-phase hotness over the merged call graph, keyed by the same
+// qualified names the per-TU pass uses. Same loop-depth-weighted relaxation
+// as inferFromCodeShape, run once on facts no single TU has. Deterministic:
+// ordered inputs and a bounded fixed point, so the result does not depend on
+// shard count or completion order.
+std::map<std::string, HotnessSource>
+inferGlobalHotness(const ThreadRoleSummary &facts,
+                   const std::vector<std::string> &mainPatterns);
 
 } // namespace lshaz
