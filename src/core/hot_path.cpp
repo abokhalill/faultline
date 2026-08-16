@@ -264,6 +264,8 @@ inferGlobalHotness(const ThreadRoleSummary &facts,
         return out;
 
     constexpr unsigned kMaxDepth = 4;
+    // Reuses propagateViaCallGraph's reach bound; a second one would be arbitrary.
+    constexpr unsigned kFarCallDistance = 8;
     while (!work.empty()) {
         const std::string caller = work.back();
         work.pop_back();
@@ -289,12 +291,42 @@ inferGlobalHotness(const ThreadRoleSummary &facts,
         }
     }
 
+    // Depth proves repetition; distance says how thinly it spreads, since a
+    // loop's budget splits across its whole callee subtree. Without this one
+    // loop marks everything downstream hot.
+    std::map<std::string, unsigned> dist;
+    {
+        std::vector<std::string> q;
+        for (const auto &e : facts.threadEntries) { dist[e] = 0; q.push_back(e); }
+        for (const auto &p : mainPatterns)
+            if (!dist.count(p)) { dist[p] = 0; q.push_back(p); }
+        for (size_t head = 0; head < q.size(); ++head) {
+            const std::string cur = q[head];
+            const unsigned nd = dist[cur] + 1;
+            auto edges = facts.callEdges.find(cur);
+            if (edges == facts.callEdges.end()) continue;
+            for (const auto &callee : edges->second) {
+                auto it = dist.find(callee);
+                if (it != dist.end() && it->second <= nd) continue;
+                dist[callee] = nd;
+                q.push_back(callee);
+            }
+        }
+    }
+
     for (const auto &[fn, d] : depth) {
         if (d == 0) continue;
         unsigned own = 0;
         auto o = facts.ownLoopDepth.find(fn);
         if (o != facts.ownLoopDepth.end()) own = o->second;
-        const unsigned graded = d + (own >= 2 ? 1u : 0u);
+        unsigned graded = d + (own >= 2 ? 1u : 0u);
+
+        // Demote, never drop: still worth seeing, not worth asserting.
+        auto dit = dist.find(fn);
+        const unsigned callDist = dit == dist.end() ? kFarCallDistance
+                                                    : dit->second;
+        if (callDist > kFarCallDistance && graded > 1) graded = 1;
+
         out[fn] = graded >= 2 ? HotnessSource::InferredDeep
                               : HotnessSource::InferredShallow;
     }
