@@ -457,7 +457,16 @@ std::string serializeShardResult(int exitCode,
             first = false;
         }
     }
-    buf += "}}";
+    buf += "},\"overridden\":[";
+    {
+        bool first = true;
+        for (const auto &m : threadRoles.overriddenVirtuals) {
+            if (!first) buf += ',';
+            buf += '"'; buf += esc(m); buf += '"';
+            first = false;
+        }
+    }
+    buf += "]}";
 
     buf += ",\"striped\":{";
     {
@@ -848,6 +857,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.callEdges);
                 else if (tk == "fieldWriters")
                     parseNameSets(out.threadRoles.fieldWriters);
+                else if (tk == "overridden")
+                    parseStrArray(out.threadRoles.overriddenVirtuals);
                 else if (tk == "edgeDepth") {
                     ipc::expect(json, i, '{');
                     while (true) {
@@ -2541,6 +2552,33 @@ ScanResult ScanPipeline::run(
             report("hotness", std::to_string(resolved) +
                    " cross-TU candidate(s) confirmed hot, " +
                    std::to_string(dropped) + " dropped as cold");
+    }
+
+    // Monomorphic virtual calls. Nothing overrides the callee anywhere in the
+    // program, so the receiver cannot vary and the misprediction term is
+    // absent: ~1ns for the lost inline instead of ~9ns.
+    {
+        unsigned mono = 0;
+        for (auto &d : result.diagnostics) {
+            if (d.suppressed || (d.ruleID != "FL030" && d.ruleID != "FL031"))
+                continue;
+            auto ev = d.structuralEvidence.find("virtual_call");
+            if (ev == d.structuralEvidence.end())
+                continue;
+            if (result.threadRoleFacts.overriddenVirtuals.count(ev->second))
+                continue;
+            ++mono;
+            d.escalations.push_back(
+                "no override of '" + ev->second + "' anywhere in the program: "
+                "dispatch is monomorphic, so only the ~1ns inlining barrier "
+                "is paid");
+            for (auto &c : d.mechanismClaims)
+                if (c.gating && c.effect.rfind("receiver type varies", 0) == 0)
+                    c.supports = Severity::Medium;
+        }
+        if (mono)
+            report("devirt", std::to_string(mono) +
+                   " virtual dispatch finding(s) monomorphic program-wide");
     }
 
     // an already line-aligned type in-tree makes relocation available at

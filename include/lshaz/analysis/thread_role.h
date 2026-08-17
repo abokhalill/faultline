@@ -33,6 +33,12 @@ struct ThreadRoleSummary {
     std::map<std::string, std::map<std::string, unsigned>> edgeLoopDepth;
     std::map<std::string, unsigned> ownLoopDepth;
 
+    // Virtual methods some class actually overrides, qualified names. A call
+    // to a method absent here is monomorphic program-wide, which is the
+    // difference between paying ~1ns and ~9ns. Only the merged set can say —
+    // the override usually lives in another TU than the call.
+    std::set<std::string> overriddenVirtuals;
+
     void merge(const ThreadRoleSummary &other) {
         threadEntries.insert(other.threadEntries.begin(),
                              other.threadEntries.end());
@@ -54,6 +60,8 @@ struct ThreadRoleSummary {
             auto &cur = ownLoopDepth[fn];
             if (d > cur) cur = d;
         }
+        overriddenVirtuals.insert(other.overriddenVirtuals.begin(),
+                                  other.overriddenVirtuals.end());
     }
 
     bool empty() const {

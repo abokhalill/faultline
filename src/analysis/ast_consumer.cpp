@@ -64,6 +64,19 @@ unsigned featureMask(const clang::Stmt *Body) {
     return V.mask;
 }
 
+void collectOverriddenVirtuals(const std::vector<clang::Decl *> &decls,
+                               ThreadRoleSummary &out) {
+    for (const auto *D : decls) {
+        const auto *RD = llvm::dyn_cast<clang::CXXRecordDecl>(D);
+        if (!RD || !RD->isCompleteDefinition())
+            continue;
+        for (const auto *MD : RD->methods())
+            for (const auto *Base : MD->overridden_methods())
+                out.overriddenVirtuals.insert(
+                    Base->getCanonicalDecl()->getQualifiedNameAsString());
+    }
+}
+
 bool isInSystemHeader(const clang::Decl *D, const clang::SourceManager &SM) {
     auto loc = D->getLocation();
     if (loc.isInvalid())
@@ -331,6 +344,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     // escape traversal. No additional TU walks.
     cg.snapshotForThreadRoles(threadRoles_);
     escape.appendFieldWriterNames(threadRoles_);
+    collectOverriddenVirtuals(decls, threadRoles_);
 
     StripedArrayAnalysis striped(Ctx, config_, oracle_);
     striped.catalogue(decls);
