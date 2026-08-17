@@ -147,9 +147,14 @@ public:
     unsigned requiredFeatures() const override { return FEAT_CALL; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Allocator lock contention (glibc malloc arena locks). "
-               "TLB pressure from new page mappings. "
-               "Page fault jitter. Heap fragmentation degrades spatial locality.";
+        return "The allocate/free round trip itself: 14.7ns at 64B, 55ns at "
+               "4KB, always paid. Arena lock contention is not a general cost "
+               "— same-thread alloc/free measures flat from 1 to 3 threads, "
+               "because tcache and per-thread arenas keep it off shared state. "
+               "It appears when a block is freed by a thread other than the "
+               "one that allocated it, returning it to the owning arena: 5-25x "
+               "under glibc, still 4-5x under jemalloc. Volume is not the "
+               "signal; cross-thread ownership transfer is.";
     }
 
     void analyze(const clang::Decl *D,
@@ -302,15 +307,25 @@ public:
                 {"allocate/free round trip, and locality lost against inline "
                  "or stack storage",
                  "an allocation on a hot path", true, Severity::Medium},
+                // Measured flat 1->3 threads for same-thread alloc/free, so
+                // allocator class alone cannot establish contention.
                 {"allocator arena lock contention",
-                 "an allocation not served from the thread cache",
-                 ac != AllocatorClass::ThreadLocal, Severity::High},
+                 "a free on a thread other than the allocating one, which "
+                 "returns the block to another thread's arena",
+                 false, Severity::High},
                 {"mmap syscall, page faults, TLB shootdown on munmap",
                  "an allocation above the mmap threshold",
                  ac == AllocatorClass::Syscall, Severity::Critical},
                 {"the cost is paid on every iteration",
                  "the allocation sits inside a loop", site.inLoop != 0,
                  Severity::High},
+                // Cross-thread free is the only term that reaches Critical,
+                // and proving it needs alloc/free ownership across TUs, which
+                // we cannot do yet. Unestablished so the grade says so.
+                {"the block is freed by a thread other than the allocator, "
+                 "costing 4-5x under jemalloc and up to 25x under glibc",
+                 "alloc and free attributed to disjoint thread roles",
+                 false, Severity::High, /*gating=*/true},
             };
             out.push_back(std::move(diag));
         }
