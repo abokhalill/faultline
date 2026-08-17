@@ -16,3 +16,13 @@ reports/
 /CMakeFiles/
 /CMakeCache.txt
 *.tsv
+
+# Local-only: OSS corpus, scan artifacts, internal notes, measurement suite.
+# Tracked once by accident via `git add -A`; ignored so it cannot recur.
+*-fork/
+valkey-base/
+results/
+verify/
+.claude/
+CLAUDE.md
+llvm.sh
