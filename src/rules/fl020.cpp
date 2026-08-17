@@ -144,8 +144,6 @@ public:
 
     bool requiresHotPath() const override { return true; }
 
-    unsigned requiredFeatures() const override { return FEAT_CALL; }
-
     std::string_view getHardwareMechanism() const override {
         return "The allocate/free round trip itself: 14.7ns at 64B, 55ns at "
                "4KB, always paid. Arena lock contention is not a general cost "
