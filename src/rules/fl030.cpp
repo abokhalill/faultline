@@ -101,6 +101,8 @@ public:
 
     bool requiresHotPath() const override { return true; }
 
+    unsigned requiredFeatures() const override { return FEAT_VIRTUAL; }
+
     std::string_view getHardwareMechanism() const override {
         return "Indirect branch via vtable pointer, with two separable costs. "
                "The inlining barrier is ~1ns and is always paid: the callee "

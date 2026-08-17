@@ -102,6 +102,8 @@ public:
 
     bool requiresHotPath() const override { return true; }
 
+    unsigned requiredFeatures() const override { return FEAT_BRANCH; }
+
     std::string_view getHardwareMechanism() const override {
         return "Deeply nested conditionals and large switches widen the "
                "branch misprediction surface. A missed branch costs ~26 "

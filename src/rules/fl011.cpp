@@ -258,6 +258,8 @@ public:
 
     bool requiresHotPath() const override { return true; }
 
+    unsigned requiredFeatures() const override { return FEAT_ATOMIC | FEAT_CALL; }
+
     std::string_view getHardwareMechanism() const override {
         return "Cache line ownership thrashing via MESI RFO (Read-For-Ownership). "
                "Each atomic write from a different core forces exclusive ownership "

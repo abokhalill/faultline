@@ -144,6 +144,8 @@ public:
 
     bool requiresHotPath() const override { return true; }
 
+    unsigned requiredFeatures() const override { return FEAT_CALL; }
+
     std::string_view getHardwareMechanism() const override {
         return "Allocator lock contention (glibc malloc arena locks). "
                "TLB pressure from new page mappings. "

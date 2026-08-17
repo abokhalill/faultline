@@ -136,6 +136,8 @@ public:
 
     bool requiresHotPath() const override { return true; }
 
+    unsigned requiredFeatures() const override { return FEAT_CALL; }
+
     std::string_view getHardwareMechanism() const override {
         return "std::function uses type-erased callable storage, with three "
                "costs of very different size. The prevented inline is ~1ns "

@@ -326,6 +326,8 @@ public:
 
     bool requiresHotPath() const override { return true; }
 
+    unsigned requiredFeatures() const override { return FEAT_LOOP; }
+
     std::string_view getHardwareMechanism() const override {
         return "A tight poll loop without PAUSE speculates loads far ahead; "
                "the other core's eventual write invalidates the line and the "

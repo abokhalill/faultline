@@ -19,6 +19,51 @@ namespace lshaz {
 
 namespace {
 
+class FeatureVisitor : public clang::RecursiveASTVisitor<FeatureVisitor> {
+public:
+    unsigned mask = 0;
+
+    bool VisitCallExpr(clang::CallExpr *E) {
+        mask |= FEAT_CALL;
+        if (const auto *MC = llvm::dyn_cast<clang::CXXMemberCallExpr>(E))
+            if (const auto *MD = MC->getMethodDecl(); MD && MD->isVirtual())
+                mask |= FEAT_VIRTUAL;
+        return true;
+    }
+    bool VisitAtomicExpr(clang::AtomicExpr *)   { mask |= FEAT_ATOMIC; return true; }
+    bool VisitForStmt(clang::ForStmt *)         { mask |= FEAT_LOOP;   return true; }
+    bool VisitWhileStmt(clang::WhileStmt *)     { mask |= FEAT_LOOP;   return true; }
+    bool VisitDoStmt(clang::DoStmt *)           { mask |= FEAT_LOOP;   return true; }
+    bool VisitCXXForRangeStmt(clang::CXXForRangeStmt *) { mask |= FEAT_LOOP; return true; }
+    bool VisitIfStmt(clang::IfStmt *)           { mask |= FEAT_BRANCH; return true; }
+    bool VisitSwitchStmt(clang::SwitchStmt *)   { mask |= FEAT_BRANCH; return true; }
+
+    bool VisitDeclRefExpr(clang::DeclRefExpr *E) {
+        if (const auto *ND = E->getDecl())
+            if (ND->getName().starts_with("__atomic") ||
+                ND->getName().starts_with("atomic_"))
+                mask |= FEAT_ATOMIC;
+        return true;
+    }
+
+    // std::atomic<T>::store is a member call, not an AtomicExpr. Over-approximate
+    // on the type name — a spurious bit costs one rule pass, a missing one costs
+    // a finding.
+    bool VisitCXXMemberCallExpr(clang::CXXMemberCallExpr *E) {
+        if (const auto *RD = E->getRecordDecl())
+            if (RD->getName().contains_insensitive("atomic"))
+                mask |= FEAT_ATOMIC;
+        return true;
+    }
+};
+
+unsigned featureMask(const clang::Stmt *Body) {
+    if (!Body) return 0;
+    FeatureVisitor V;
+    V.TraverseStmt(const_cast<clang::Stmt *>(Body));
+    return V.mask;
+}
+
 bool isInSystemHeader(const clang::Decl *D, const clang::SourceManager &SM) {
     auto loc = D->getLocation();
     if (loc.isInvalid())
@@ -169,9 +214,21 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
         const HotnessSource hs =
             FD ? oracle_.hotnessSource(FD) : HotnessSource::None;
 
+        // Only worth computing for unresolved candidates; a settled verdict
+        // earns the full pass regardless.
+        const unsigned feats =
+            (FD && hs == HotnessSource::Candidate && FD->hasBody())
+                ? featureMask(FD->getBody())
+                : ~0u;
+
         for (const auto &rule : rules) {
             if (disabled.count(std::string(rule->getID())))
                 continue;
+            if (rule->requiresHotPath()) {
+                const unsigned need = rule->requiredFeatures();
+                if (need && !(feats & need))
+                    continue;
+            }
             const size_t before = diagnostics_.size();
             rule->analyze(D, Ctx, oracle_, config_, escape, diagnostics_);
             if (!rule->requiresHotPath() || hs == HotnessSource::None)

@@ -149,6 +149,8 @@ public:
 
     bool requiresHotPath() const override { return true; }
 
+    unsigned requiredFeatures() const override { return FEAT_CALL; }
+
     std::string_view getHardwareMechanism() const override {
         return "Lock convoy: threads serialize on contended mutex, converting "
                "parallel execution to sequential. Blocking locks trigger "
