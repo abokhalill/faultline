@@ -271,13 +271,25 @@ public:
                 " in-loop write site(s) to the flagged pair — spacing can "
                 "reach the sub-microsecond range where coherence cost is real");
         }
+        // The decay is a single-socket property. Cross-socket ownership is a
+        // QPI round trip on the critical path of the LOCK, unhideable by any
+        // gap: measured flat at 32-52ns from 134ns out to 85us spacing, where
+        // intra-socket had collapsed to zero by 670ns. Sparseness earns no
+        // demotion on a machine that may schedule the writers on two sockets.
+        const bool decayApplies = Cfg.numaSockets < 2;
+        if (sparsePair && !densePair && !decayApplies)
+            escalations.push_back(
+                "writers are sparse, but the target is multi-socket: "
+                "cross-socket sharing costs ~45ns per write and does not "
+                "decay with spacing, so sparseness earns no demotion here");
         else if (sparsePair)
             escalations.push_back(
                 "every writer of this pair calls out to a body this TU cannot "
                 "see, and none writes in a loop: the writes are separated by a "
                 "syscall or external call and are microseconds apart. "
                 "Contended-RMW cost collapses ~75x once spacing exceeds "
-                "~125ns, so the co-location is real but the ping-pong is not");
+                "~125ns within a socket, so the co-location is real but the "
+                "ping-pong is not");
 
         const auto &SM = Ctx.getSourceManager();
         auto loc = RD->getLocation();
@@ -345,9 +357,10 @@ public:
             // Gating: no temporal proximity, no mechanism.
             {"writes land close enough in time to catch the line resident "
              "in a peer core's L1",
-             "no writer is separated from the next by an opaque call",
-             !(sparsePair && !densePair),
-             (sparsePair && !densePair) ? Severity::Medium : sev,
+             "no writer is separated from the next by an opaque call, on a "
+             "single-socket target where coherence cost decays with spacing",
+             !(sparsePair && !densePair && decayApplies),
+             (sparsePair && !densePair && decayApplies) ? Severity::Medium : sev,
              /*gating=*/true},
             // Deliberately NOT gated on ev.hasSharingRoute, twice measured:
             // it demotes stats_state (the one adjudicated TP) while keeping

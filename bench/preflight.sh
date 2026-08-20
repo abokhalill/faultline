@@ -42,6 +42,13 @@ for n in $nodes; do
     done
 done
 csv() { echo $* | tr ' ' '\n' | sort -n | uniq | paste -sd,; }
+# The kernel prints cpu sets in range form ("8-15,24-31"); we derive them
+# expanded. Compare as sets or an identical set reads as DRIFT.
+expand() {
+    for c in $(echo "$1" | tr ',' ' '); do
+        case "$c" in *-*) seq ${c%-*} ${c#*-};; *) echo "$c";; esac
+    done | sort -n | uniq | paste -sd,
+}
 HK=$(csv $HOUSEKEEPING); ISO=$(csv $ISOLATED)
 HK_MASK=$(python3 -c "
 m=0
@@ -56,7 +63,7 @@ turbo=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null \
         || cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null | tr 1 9 | tr 0 1 | tr 9 0)
 chk no_turbo     "$turbo"                                                      1
 chk governor     "$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)" performance
-chk isolated     "$(cat /sys/devices/system/cpu/isolated)"                     "$ISO"
+chk isolated     "$(expand "$(cat /sys/devices/system/cpu/isolated)")"         "$ISO"
 chk paranoid     "$(sysctl -n kernel.perf_event_paranoid)"                     -1
 chk aslr         "$(sysctl -n kernel.randomize_va_space)"                      0
 chk nmi_watchdog "$(sysctl -n kernel.nmi_watchdog)"                            0

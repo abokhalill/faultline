@@ -22,11 +22,17 @@ note "$model"
 [ "${sockets:-0}" -ge 2 ] && ok "sockets=$sockets" || bad "sockets=$sockets (need >=2 for FL060)"
 [ "${numa:-0}" -ge 2 ]    && ok "numa nodes=$numa" || bad "numa nodes=$numa (need >=2)"
 
-echo "=== 2. perf can count at all ==="
-if perf stat -e cycles true 2>&1 | grep -qE "not supported|not counted"; then
-    bad "perf cycles unsupported — no PMU access"
+echo "=== 2. perf capability ==="
+# Sampling and counting are separate privileges and some hosts grant only one.
+# Sampling is what this campaign needs: every harness times with clock_gettime
+# and every attribution comes from c2c. Counting is a nice-to-have, so it warns
+# rather than fails — calling a sampling-capable box "no PMU access" would send
+# a usable machine back.
+if perf stat -a -e cycles -- true 2>&1 | grep -qE "not supported|not counted"; then
+    note "warn: hardware counting unavailable (no cycles/instructions/IPC)"
+    note "      use valgrind --tool=cachegrind for deterministic counts instead"
 else
-    ok "perf counts cycles"
+    ok "perf counts hardware events"
 fi
 
 echo "=== 3. coherence events exist ==="
