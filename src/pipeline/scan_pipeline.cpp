@@ -10,6 +10,7 @@
 #include "lshaz/core/interaction.h"
 #include "lshaz/core/perf_profile.h"
 #include "lshaz/core/precision.h"
+#include "lshaz/core/registry.h"
 #include "lshaz/core/version.h"
 #include "lshaz/hypothesis/calibration.h"
 #include "lshaz/hypothesis/hypothesis.h"
@@ -2524,11 +2525,19 @@ ScanResult ScanPipeline::run(
     {
         const auto globalHot = inferGlobalHotness(
             result.threadRoleFacts, request.config.mainFunctionPatterns);
+        std::set<std::string> withdrawable;
+        for (const auto &r : RuleRegistry::instance().rules())
+            if (r->withdrawnWhenNotHot())
+                withdrawable.insert(std::string(r->getID()));
         unsigned resolved = 0, dropped = 0;
         for (auto &d : result.diagnostics) {
             if (d.hotness != static_cast<uint8_t>(HotnessSource::Candidate))
                 continue;
             auto it = globalHot.find(d.functionName);
+            if (it == globalHot.end() && !withdrawable.count(d.ruleID)) {
+                d.hotness = static_cast<uint8_t>(HotnessSource::None);
+                continue;
+            }
             if (it == globalHot.end()) {
                 // Never reached from any entry in any TU. This is the verdict
                 // the map phase would have reached had it been able to see

@@ -349,6 +349,7 @@ public:
     Severity getBaseSeverity() const override { return Severity::High; }
 
     bool requiresHotPath() const override { return true; }
+    bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
         return "On x86-64 TSO: seq_cst stores lower to XCHG (implicit LOCK, "

@@ -143,6 +143,7 @@ public:
     Severity getBaseSeverity() const override { return Severity::Critical; }
 
     bool requiresHotPath() const override { return true; }
+    bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
         return "The allocate/free round trip itself: 14.7ns at 64B, 55ns at "

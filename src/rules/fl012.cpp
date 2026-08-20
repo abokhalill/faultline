@@ -148,6 +148,7 @@ public:
     Severity getBaseSeverity() const override { return Severity::Critical; }
 
     bool requiresHotPath() const override { return true; }
+    bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
         return "Lock convoy: threads serialize on contended mutex, converting "

@@ -100,6 +100,7 @@ public:
     Severity getBaseSeverity() const override { return Severity::High; }
 
     bool requiresHotPath() const override { return true; }
+    bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
         return "Indirect branch via vtable pointer, with two separable costs. "

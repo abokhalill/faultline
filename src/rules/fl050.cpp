@@ -101,6 +101,7 @@ public:
     Severity getBaseSeverity() const override { return Severity::Medium; }
 
     bool requiresHotPath() const override { return true; }
+    bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
         return "Deeply nested conditionals and large switches widen the "
