@@ -140,11 +140,9 @@ public:
             if (site.inLoop) {
                 sev = Severity::Critical;
                 // Frequency, not per-call cost. A loop over a homogeneous
-                // container is the monomorphic case and the cheapest one
-                // measured (+0.99ns over a direct call); it does not pressure
-                // the BTB, which bench/btb_cost.c shows is flat to 4096
-                // targets. What a loop multiplies is how often the lost
-                // inline is paid.
+                // container is the monomorphic case and the cheapest one there
+                // is; what the loop multiplies is how often the lost inline is
+                // paid, not the cost of each dispatch.
                 escalations.push_back(
                     "Virtual call inside loop: the per-call cost is paid every "
                     "iteration, so the aggregate scales with trip count");
@@ -164,9 +162,9 @@ public:
             hw << "Virtual call to '" << site.className << "::" << site.methodName
                << "' in hot function '" << FD->getQualifiedNameAsString()
                << "'. Requires vtable pointer dereference (potential L1D miss "
-               << "if vtable is cold) followed by indirect branch. Measured "
-               << "cost splits in two: the lost inline is +0.99ns and is always "
-               << "paid; misprediction adds up to +8.1ns but only when the "
+               << "if vtable is cold) followed by indirect branch. The cost "
+               << "splits in two: the lost inline is ~1ns and is always "
+               << "paid; misprediction adds up to ~8ns but only when the "
                << "receiver type varies unpredictably. Monomorphic dispatch "
                << "costs the same at 8 candidate types as at 1. "
                << "[Requires, for the larger term: polymorphic and "

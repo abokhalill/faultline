@@ -147,9 +147,9 @@ public:
 
     std::string_view getHardwareMechanism() const override {
         return "The allocate/free round trip itself: 14.7ns at 64B, 55ns at "
-               "4KB, always paid. Arena lock contention is not a general cost "
-               "— same-thread alloc/free measures flat from 1 to 3 threads, "
-               "because tcache and per-thread arenas keep it off shared state. "
+               "4KB, always paid. Arena lock contention is not a general cost: "
+               "same-thread alloc/free is flat in thread count, because tcache "
+               "and per-thread arenas keep it off shared state entirely. "
                "It appears when a block is freed by a thread other than the "
                "one that allocated it, returning it to the owning arena: 5-25x "
                "under glibc, still 4-5x under jemalloc. Volume is not the "

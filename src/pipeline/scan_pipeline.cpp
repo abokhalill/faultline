@@ -2167,7 +2167,7 @@ ScanResult ScanPipeline::run(
 
                 // One record per TU, flushed as it completes. Writing only at
                 // the end meant a single fatal TU discarded every TU the shard
-                // had already finished — one crash cost 354/354 on rocksdb.
+                // had already finished, so one crash could lose an entire shard.
                 // Records are newline-delimited so a torn tail is discardable
                 // and the parent can name exactly which TUs went unreached.
                 std::error_code ec;

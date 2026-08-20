@@ -27,10 +27,9 @@ struct BranchSite {
 // A switch whose every arm returns a constant is a lookup, not a branch
 // tree: the compiler emits a jump table into trivial stubs, or an indexed
 // array of constants with no branch at all. Either way there is one indirect
-// branch at most, and the cost does not scale with case count — so the
-// BTB-capacity mechanism this rule reports does not apply to it.
-// redis's sentinelFailoverStateStr (8 arms, each `return "literal"`) is the
-// shape; reporting it as jump-table pressure is a fabricated mechanism.
+// branch at most, and the cost does not scale with case count, so the
+// mechanism this rule reports does not apply. A state-name lookup is the
+// canonical shape; grading it as dispatch pressure invents a mechanism.
 bool isConstantLookupSwitch(const clang::SwitchStmt *S,
                             clang::ASTContext &Ctx) {
     bool anyCase = false;
@@ -179,9 +178,9 @@ public:
                 hw << "switch statement with " << site.switchCases
                    << " cases in hot function '"
                    << FD->getQualifiedNameAsString()
-                   << "'. Non-constexpr switch generates an indirect jump. "
-                   << "Measured cost is misprediction, ~26 cycles, and is flat "
-                   << "in target count: a predictable indirect branch costs the "
+                   << "'. Non-constexpr switch generates an indirect jump. The "
+                   << "cost is misprediction, ~26 cycles, and it is flat in "
+                   << "target count: a predictable indirect branch costs the "
                    << "same at 4096 targets as at 2. Case count therefore does "
                    << "not indicate severity. "
                    << "[Requires: the selector varies unpredictably at runtime — "

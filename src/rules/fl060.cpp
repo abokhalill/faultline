@@ -25,14 +25,13 @@ public:
     std::string_view getHardwareMechanism() const override {
         return "On multi-socket systems memory is physically partitioned across "
                "NUMA nodes, and a remote access pays the interconnect on the "
-               "critical path. Measured on Haswell-EP: ~+40ns over local, about "
-               "1.25x — not the 2-4x commonly quoted, and local itself is ~160-190ns "
-               "once page walks count. Latency is the mechanism, not bandwidth: a "
-               "single core reads local and remote at the same 4.6-4.8 GB/s because "
-               "it cannot saturate either link, so padding or replication helps and "
-               "widening the structure does not. Large shared mutable structures "
-               "allocated without NUMA-aware placement are accessed remotely by at "
-               "least one socket.";
+               "critical path: roughly +40ns over local, about 1.25x. Latency is "
+               "the mechanism, not bandwidth — a single core cannot saturate "
+               "either link, so it reads local and remote memory at the same "
+               "rate. Placement and per-node replication help; widening the "
+               "structure does not. Large shared mutable structures allocated "
+               "without NUMA-aware placement are accessed remotely by at least "
+               "one socket.";
     }
 
     void analyze(const clang::Decl *D,

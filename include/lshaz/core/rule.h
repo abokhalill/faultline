@@ -36,9 +36,7 @@ public:
 
     // True when the rule returns early for cold code, so a finding only exists
     // because hotness was believed. Those are withdrawable once the merged
-    // call graph disagrees. FL021 and FL070 report regardless and merely grade
-    // by hotness — withdrawing theirs deleted 39 valkey findings silently.
-    // Defaults false: forgetting it costs a weak finding, never a lost one.
+    // call graph disagrees.
     virtual bool withdrawnWhenNotHot() const { return false; }
 
     virtual void analyze(const clang::Decl *D,

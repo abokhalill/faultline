@@ -67,10 +67,10 @@ public:
     // Entries whose role runs on more than one thread at once.
     std::unordered_set<const clang::FunctionDecl *> poolEntries;
     std::unordered_set<const clang::FunctionDecl *> spawnSites;
-    // The fn-slot argument was a parameter of the enclosing function: the
-    // enclosing function is a spawner wrapper (memcached's create_worker),
-    // and function literals at that argument position of its call sites
-    // are entries. Resolved TU-wide after all functions are processed.
+    // The fn-slot argument was a parameter of the enclosing function, so that
+    // function is a spawner wrapper and function literals at the same argument
+    // position of its call sites are entries. Resolved TU-wide once all
+    // functions are processed.
     int spawnerParamIdx = -1;
     // (callee, argIdx, passed function) for every function-literal
     // argument observed, to resolve against detected spawners.
@@ -346,9 +346,8 @@ void CallGraph::resolveSpawnerEntries() {
 
         // The loop is around the *wrapper* call, not the pthread_create
         // inside it, so multiplicity has to be read one level out. Missing
-        // this made every pool spawned through a helper -- memcached's
-        // create_worker, and most production thread pools -- look
-        // single-instance.
+        // this made every pool spawned through a helper -- which is most
+        // production thread pools -- look single-instance.
         const auto &cs = callers(callee);
         bool repeated = cs.size() >= 2;
         for (const auto *c : cs)

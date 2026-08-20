@@ -48,7 +48,7 @@ struct ScanArgs {
     std::string outputFile;
     std::string minSeverity = "Informational";
     std::string minEvidence = "speculative";
-    // O2 default per the rocksdb A/B: 67% of hot findings refine
+    // O2 by default: most hot findings refine differently at O2
     // differently at O2 (the refiner then judges what actually executes,
     // post-inlining), and O2 IR is cheaper to emit than O0 on template
     // C++. --ir-opt O0 remains available for debug-build parity.
