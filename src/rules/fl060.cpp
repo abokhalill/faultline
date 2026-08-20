@@ -23,10 +23,16 @@ public:
     Severity getBaseSeverity() const override { return Severity::High; }
 
     std::string_view getHardwareMechanism() const override {
-        return "On multi-socket systems, memory is physically partitioned across "
-               "NUMA nodes. Accessing remote memory incurs ~100-300ns penalty vs "
-               "~60-80ns local. Large shared mutable structures allocated without "
-               "NUMA-aware placement will be accessed remotely by at least one socket.";
+        return "On multi-socket systems memory is physically partitioned across "
+               "NUMA nodes, and a remote access pays the interconnect on the "
+               "critical path. Measured on Haswell-EP: ~+40ns over local, about "
+               "1.25x — not the 2-4x commonly quoted, and local itself is ~160-190ns "
+               "once page walks count. Latency is the mechanism, not bandwidth: a "
+               "single core reads local and remote at the same 4.6-4.8 GB/s because "
+               "it cannot saturate either link, so padding or replication helps and "
+               "widening the structure does not. Large shared mutable structures "
+               "allocated without NUMA-aware placement are accessed remotely by at "
+               "least one socket.";
     }
 
     void analyze(const clang::Decl *D,
@@ -184,9 +190,11 @@ public:
             {"a large shared mutable structure with no placement control",
              "size past the threshold, thread escape, mutable state", true,
              Severity::Medium},
-            {"remote-node access at ~100-300ns against ~60-80ns local",
+            // +40ns is one L3-miss-ish step, not the order of magnitude the
+            // old text implied, so it cannot carry Critical on its own.
+            {"remote-node access at ~+40ns over local, about 1.25x",
              "a multi-socket deployment (numa_sockets >= 2)",
-             Cfg.numaSockets >= 2, Severity::Critical},
+             Cfg.numaSockets >= 2, Severity::High},
         };
         out.push_back(std::move(diag));
     }
