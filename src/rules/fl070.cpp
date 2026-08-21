@@ -152,10 +152,16 @@ public:
         return "A working set spanning more base pages than the dTLB "
                "covers (~64 L1 / ~1-2K L2 entries at 4KB) turns strided "
                "access into page walks — 4-level lookups, each a potential "
-               "cache-miss chain (dtlb_load_misses.walk_completed). A 2MB "
-               "hugepage entry covers 512x the reach; khugepaged can only "
-               "collapse 2MB-aligned extents, so base alignment gates the "
-               "whole mitigation.";
+               "cache-miss chain (dtlb_load_misses.walk_completed). The walk "
+               "costs ~8-24ns per access. It bites hardest when the working "
+               "set fits in cache but outruns TLB reach — there the access "
+               "itself is cheap and the walk is most of the latency, doubling "
+               "it; past last-level cache the same walk is a smaller share of "
+               "a DRAM hit. Size alone therefore points the wrong way: the "
+               "largest structures are where the effect is proportionally "
+               "smallest. A 2MB hugepage entry covers 512x the reach; "
+               "khugepaged can only collapse 2MB-aligned extents, so base "
+               "alignment gates the whole mitigation.";
     }
 
     void analyze(const clang::Decl *D,
