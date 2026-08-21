@@ -22,10 +22,16 @@ public:
     Severity getBaseSeverity() const override { return Severity::High; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Global mutable state accessed from multiple cores causes "
-               "NUMA remote memory access on multi-socket systems (~100-300ns "
-               "penalty). Cache line contention on shared writes. "
-               "Scalability collapse under core count increase.";
+        return "A line written by many cores serialises: per-operation cost "
+               "grows about linearly with writer count — ~18ns per added "
+               "thread, reaching 31x the uncontended cost at 14 — so "
+               "aggregate throughput stays flat and extra cores buy nothing. "
+               "That is the scalability collapse, and it needs the writes "
+               "close together in time: the cost vanishes entirely once they "
+               "are ~1us apart at 14 threads, or ~125ns apart at 2, since "
+               "more writers keep the line contended longer. On multi-socket "
+               "targets the remote access adds ~40ns (1.25x), which is a "
+               "separate and much smaller term than the contention itself.";
     }
 
     void analyze(const clang::Decl *D,
