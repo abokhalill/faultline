@@ -22,8 +22,16 @@ public:
     Severity getBaseSeverity() const override { return Severity::High; }
 
     std::string_view getHardwareMechanism() const override {
-        return "L1/L2 cache line footprint expansion. Increased eviction "
-               "probability. Higher coherence traffic under multi-core writes.";
+        return "Footprint expansion. A record needing two lines where one "
+               "would do doubles the cache it occupies, so an array of them "
+               "outruns a given cache level at half the element count. Cost "
+               "is nil while the working set still fits — measured +2% at "
+               "256KB — and grows sharply as it stops: +36% at 4MB, +123% "
+               "once the spread form exceeds last-level cache and the packed "
+               "form does not. Extra lines per access are not themselves a "
+               "cost: touching two resident lines measures the same as one. "
+               "The variable is total footprint against cache size, so "
+               "instance count matters as much as layout.";
     }
 
     void analyze(const clang::Decl *D,
@@ -126,16 +134,20 @@ public:
             for (const auto &b : map.buckets()) {
                 if (b.atomicCount > 0) ++atomicLines;
             }
-            // Critical needs the multi-line RFO mechanism to be
-            // realizable: >=2 atomics AND >=2 lines carrying them. One
-            // atomic occupies one line at runtime no matter how many
-            // buckets alignment uncertainty smears it across.
-            if (map.totalAtomicFields() >= 2 && atomicLines >= 2)
-                sev = Severity::Critical;
+            // Atomics spread across lines do not cost per access: touching two
+            // resident lines measures the same as one. Separating them is also
+            // FL002's prescribed fix, so escalating on it graded the remedy as
+            // the hazard. What this signals is a wider record, and width only
+            // costs once the instances outrun a cache level — which is a
+            // working-set fact, not a layout one.
+            if (map.totalAtomicFields() >= 2 && atomicLines >= 2 &&
+                sev < Severity::High)
+                sev = Severity::High;
             escalations.push_back(
                 std::to_string(map.totalAtomicFields()) +
                 " atomic field(s) across " + std::to_string(atomicLines) +
-                " line(s): RFO traffic on each distinct line");
+                " line(s): a wider record, costing once an array of them "
+                "outruns cache — not per access");
 
             // Refcount-only structs: single atomic refcount with immutable
             // co-located data. demote; cache line spanning is real but

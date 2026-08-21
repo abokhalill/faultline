@@ -20,7 +20,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-static int port, nthreads, seconds, depth;
+static int port, nthreads, seconds, depth, keyspace;
 static int cpus[64], ncpu;
 static volatile int stop_now;
 
@@ -53,11 +53,11 @@ static void *worker(void *arg) {
             // which is where server-side contention would live.
             if (n % 4)
                 off += snprintf(buf + off, sizeof buf - off,
-                                "get k%lu\r\n", (n * 7919) % 20000);
+                                "get k%lu\r\n", (n * 7919) % keyspace);
             else
                 off += snprintf(buf + off, sizeof buf - off,
                                 "set k%lu 0 0 512\r\n%.512s\r\n",
-                                (n * 7919) % 20000, val);
+                                (n * 7919) % keyspace, val);
         }
         if (write(fd, buf, off) != off) break;
         if (read(fd, rsp, sizeof rsp) <= 0) break;
@@ -67,11 +67,15 @@ static void *worker(void *arg) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 5) {
-        fprintf(stderr, "usage: %s <port> <threads> <seconds> <cpulist>\n", argv[0]);
+    if (argc != 6) {
+        fprintf(stderr, "usage: %s <port> <threads> <seconds> <cpulist> <keyspace>\n"
+                        "  keyspace=1 forces every client onto one item, which is\n"
+                        "  the adversarial case for refcount and LRU contention\n", argv[0]);
         return 2;
     }
     port = atoi(argv[1]); nthreads = atoi(argv[2]); seconds = atoi(argv[3]);
+    keyspace = atoi(argv[5]);
+    if (keyspace < 1) keyspace = 1;
     for (char *t = strtok(argv[4], ","); t && ncpu < 64; t = strtok(NULL, ","))
         cpus[ncpu++] = atoi(t);
     if (!ncpu) { fprintf(stderr, "no cpus\n"); return 2; }
