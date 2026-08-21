@@ -45,6 +45,7 @@ fi
 python3 - "$DATA.txt" "$FINDINGS" "$BIN" <<'PY'
 import json, re, subprocess, sys, collections
 report, findings_path, binary = sys.argv[1], sys.argv[2], sys.argv[3]
+target = binary.split('/')[-1]
 
 # The Pareto section alternates a cacheline header carrying absolute HITM
 # counts with contributing rows carrying percentages of it. Attribute each row
@@ -69,6 +70,14 @@ for ln in open(report, errors='ignore'):
         continue
     if i + 1 >= len(parts):
         continue
+    # Userspace only, and only the binary under test. Kernel coherence traffic
+    # dominates every server workload we have measured, and lshaz neither
+    # analyses the kernel nor claims to — scoring against it measures nothing.
+    if parts[i] != '[.]':
+        continue
+    obj = parts[i + 2] if i + 2 < len(parts) else ''
+    if target and obj != target:
+        continue
     sym = parts[i + 1]
     pct = [p for p in parts[:i] if p.endswith('%')]
     if len(pct) < 2:
@@ -89,13 +98,22 @@ for f in found:
         if isinstance(v, str):
             flagged.add(v.split('::')[-1])
 
+if not hot:
+    print(f"\nNo HITM attributable to '{target}' — all of it is kernel or other objects.")
+    print("Recall is UNANSWERABLE for this workload: there is no userspace")
+    print("coherence cost to have found or missed. That is a result about the")
+    print("workload, not a score for the analyser.")
+    sys.exit(3)
+
 print(f"\n{'symbol':<34} {'hitm':>8}  {'site':<20} verdict")
 print('-' * 76)
 hits = misses = 0
 hit_w = miss_w = 0
 for sym, n in hot.most_common(40):
     base = sym.split('+')[0].split('@')[0]
-    ok = any(base == g or base in g or g in base for g in flagged if g)
+    # Exact match only. Substring matching scored kfree as FOUND because a
+    # finding ended in "free", which inflates recall with nonsense.
+    ok = base in flagged
     if ok: hits += 1;  hit_w  += n
     else:  misses += 1; miss_w += n
     print(f"{base:<34} {n:>8}  {where.get(sym,'?'):<20} {'FOUND' if ok else 'MISSED'}")
