@@ -19,8 +19,10 @@ model=$(lscpu | sed -n 's/^Model name: *//p' | head -1)
 sockets=$(lscpu | sed -n 's/^Socket(s): *//p')
 numa=$(lscpu | sed -n 's/^NUMA node(s): *//p')
 note "$model"
-[ "${sockets:-0}" -ge 2 ] && ok "sockets=$sockets" || bad "sockets=$sockets (need >=2 for FL060)"
-[ "${numa:-0}" -ge 2 ]    && ok "numa nodes=$numa" || bad "numa nodes=$numa (need >=2)"
+# Single socket is a legitimate rig for everything except FL060 and the
+# cross-socket sweep, so report the capability rather than failing on it.
+ok "sockets=$sockets, numa nodes=$numa"
+[ "${numa:-0}" -ge 2 ] || note "single node: FL060 and numa_sweep.sh unavailable here"
 
 echo "=== 2. perf capability ==="
 # Sampling and counting are separate privileges and some hosts grant only one.
@@ -54,14 +56,18 @@ else
     sleep 1
     perf c2c record -a -o /tmp/accept_c2c.data -- sleep 6 >/dev/null 2>&1
     wait $kp 2>/dev/null
-    hitm=$(perf c2c report -i /tmp/accept_c2c.data --stdio 2>/dev/null \
-           | grep -iE "LLC Misses to Remote|Load HITMs|Total HITM" | head -3)
-    if [ -n "$hitm" ]; then
-        ok "c2c produced a HITM report"
-        echo "$hitm" | sed 's/^/        /'
+    rpt=$(perf c2c report -i /tmp/accept_c2c.data --stdio 2>/dev/null)
+    # Count HITM, do not read the "LLC Misses to Remote" percentages: on a
+    # single-socket box those are zero by construction and a working
+    # instrument reads as blind.
+    loc=$(echo "$rpt" | sed -n 's/.*Load Local HITM *: *\([0-9]*\).*/\1/p'  | head -1)
+    rem=$(echo "$rpt" | sed -n 's/.*Load Remote HITM *: *\([0-9]*\).*/\1/p' | head -1)
+    tot=$(( ${loc:-0} + ${rem:-0} ))
+    if [ "$tot" -gt 0 ]; then
+        ok "c2c sees the known positive: ${loc:-0} local + ${rem:-0} remote HITM"
         note "verify by eye: HITM should concentrate on ONE line, two offsets"
     else
-        bad "c2c produced no HITM on a known positive — INSTRUMENT IS BLIND"
+        bad "zero HITM on a known positive — INSTRUMENT IS BLIND, do not trust nulls"
     fi
 fi
 
