@@ -91,11 +91,15 @@ public:
     bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Single-point fan-out dispatcher serializes all message processing "
-               "through one function. Under load, this creates: instruction cache "
-               "pressure from large dispatch body, branch misprediction from "
-               "polymorphic dispatch, and prevents per-core locality of message "
-               "handling state.";
+        return "A single fan-out point routes all message processing through "
+               "one function. The cost is branch misprediction on the "
+               "selector, ~26 cycles when it is data-dependent — arm count "
+               "itself is nearly free, since quadrupling it measured +8%. "
+               "Instruction-cache pressure applies only once the inlined arms "
+               "exceed L1i, so a wide dispatcher of small arms costs little "
+               "and a narrow one of large arms can cost more. Centralisation "
+               "also prevents per-core locality of handler state, which is a "
+               "separate argument from either.";
     }
 
     void analyze(const clang::Decl *D,

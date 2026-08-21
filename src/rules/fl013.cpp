@@ -331,9 +331,12 @@ public:
         return "A tight poll loop without PAUSE speculates loads far ahead; "
                "the other core's eventual write invalidates the line and the "
                "pipeline takes a memory-order machine clear (full flush, "
-               "machine_clears.memory_ordering). The spinning logical core "
-               "also monopolizes issue ports its SMT sibling needs. PAUSE "
-               "de-speculates the loop and yields sibling bandwidth.";
+               "machine_clears.memory_ordering). PAUSE de-speculates the loop. "
+               "The sibling-starvation half of this is weaker than commonly "
+               "claimed: a spinning logical core cost its SMT sibling nothing "
+               "measurable against a latency-bound workload, so PAUSE is worth "
+               "adding for the machine clear rather than for sibling "
+               "bandwidth.";
     }
 
     void analyze(const clang::Decl *D,

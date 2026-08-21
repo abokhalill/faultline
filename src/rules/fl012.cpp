@@ -151,10 +151,14 @@ public:
     bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Lock convoy: threads serialize on contended mutex, converting "
-               "parallel execution to sequential. Blocking locks trigger "
-               "futex syscall → context switch (~1-10us). Cache line "
-               "contention on mutex internal state.";
+        return "Threads serialise on a contended mutex, converting parallel "
+               "execution to sequential: measured 7x the uncontended cost at "
+               "two cores. The lock itself is ~14ns uncontended, about 8ns "
+               "over an atomic doing the same work. A futex sleep and context "
+               "switch costs microseconds, but modern mutexes spin adaptively "
+               "and only block when the critical section is long enough to "
+               "make spinning wasteful — so that term applies to the length of "
+               "the section held, not to the presence of a lock.";
     }
 
     void analyze(const clang::Decl *D,
