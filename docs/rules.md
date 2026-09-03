@@ -270,7 +270,21 @@ thread-derived:
 
 - `thread_local` storage class on the index variable, the value *is* the
   thread's identity; no heuristic involved
-- a narrow identifier set (`tid`, `thread_index`, `*_tid`, `sched_getcpu`, …)
+- a narrow identifier set (`tid`, `thread_index`, `*_tid`, `sched_getcpu`, …),
+  extended per project by `thread_index_patterns`. The set stays narrow
+  because the generic spellings are ambiguous: adding `slot` to redis finds
+  the two real per-thread arrays in the HNSW module and three cluster
+  hash-slot arrays that have nothing to do with threads.
+
+**Whose identity the subscript names decides the grade.** `arr[tid]`,
+`arr[sched_getcpu()]` and a `thread_local` index name the thread executing
+the write. `arr[c->tid]` reads the id out of an object the caller handed in,
+so it names that object's *owner*, and a single thread can drive every slot:
+redis writes `io_threads_clients_num[c->tid]` only from the main thread. When
+every subscript is an owner id and the writer-role join has not established
+two roles, the finding caps at Medium, loses 0.15 confidence, and carries
+`index_identity: owner`. It is demoted rather than dropped, since a worker
+that stamps itself into the object first makes the owner id its own.
 
 Loop-induction subscripts classify as **aggregation sweeps**, bulk resets
 and total-summing loops are single-threaded traversals and never count as

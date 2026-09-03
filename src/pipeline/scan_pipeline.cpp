@@ -1538,10 +1538,9 @@ static unsigned emitStripedArrayFindings(
         if (v.mitigation == StripeMitigation::HeadPadded &&
             d.severity > Severity::Medium)
             d.severity = Severity::Medium;
-        // Reported, not dropped: an owner id can still be the writer's own
-        // when a worker stamps itself into the object first, which is not
-        // decidable here. The role join is the thing that would settle it,
-        // and where it does (multiRole) the grade stands.
+        // Demoted, not dropped: a worker that stamps itself into the object
+        // first makes the owner id its own, undecidable here. Where the role
+        // join already settled it, the grade stands.
         if (v.ownerIndexed && !v.multiRole) {
             if (d.severity > Severity::Medium)
                 d.severity = Severity::Medium;

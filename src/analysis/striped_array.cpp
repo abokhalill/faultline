@@ -20,8 +20,9 @@ namespace lshaz {
 
 namespace {
 
-// Deliberately narrow. 
-bool nameIsThreadIdent(llvm::StringRef n) {
+// Deliberately narrow; thread_index_patterns carries per-project spellings.
+bool nameIsThreadIdent(llvm::StringRef n,
+                       const std::vector<std::string> &extra) {
     static constexpr llvm::StringLiteral kExact[] = {
         "tid", "thread_id", "thread_index", "thread_idx", "thread_num",
         "thd_id", "cur_tid", "running_tid", "core_id", "cpu_id", "shard_id",
@@ -29,8 +30,13 @@ bool nameIsThreadIdent(llvm::StringRef n) {
     };
     for (auto e : kExact)
         if (n.equals_insensitive(e)) return true;
-    return n.ends_with("_tid") || n.ends_with("_thread_id") ||
-           n.ends_with("_thread_index");
+    if (n.ends_with("_tid") || n.ends_with("_thread_id") ||
+        n.ends_with("_thread_index"))
+        return true;
+    const std::string s = n.str();
+    for (const auto &p : extra)
+        if (fnmatch(p.c_str(), s.c_str(), 0) == 0) return true;
+    return false;
 }
 
 bool isStdAtomicRecord(clang::QualType QT) {
@@ -232,11 +238,8 @@ private:
         return static_cast<uint8_t>(WriteFrequencyTier::Unknown);
     }
 
-    // arr[c->tid] reads the tid the object carries, so it names whichever
-    // thread owns that object rather than the one executing the write. A
-    // queue hands each item to one owner at a time, so this shape can be
-    // written entirely from one thread however thread-shaped the name is.
-    // arr[tid] and arr[sched_getcpu()] name the writer and stay strong.
+    // arr[c->tid] carries the owner's id, so one thread can drive every
+    // slot. arr[tid] and arr[sched_getcpu()] carry the writer's.
     bool isHandedOverIndex(const clang::Expr *idx) {
         return llvm::isa<clang::MemberExpr>(idx->IgnoreParenImpCasts());
     }
@@ -260,15 +263,15 @@ private:
             if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(D))
                 if (VD->getTLSKind() != clang::VarDecl::TLS_None)
                     return IndexProvenance::ThreadIdent;
-            if (nameIsThreadIdent(D->getName()))
+            if (nameIsThreadIdent(D->getName(), cfg.threadIndexPatterns))
                 return IndexProvenance::ThreadIdent;
         }
         if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(idx))
-            if (nameIsThreadIdent(ME->getMemberDecl()->getName()))
+            if (nameIsThreadIdent(ME->getMemberDecl()->getName(), cfg.threadIndexPatterns))
                 return IndexProvenance::ThreadIdent;
         if (const auto *CE = llvm::dyn_cast<clang::CallExpr>(idx))
             if (const auto *F = CE->getDirectCallee())
-                if (F->getIdentifier() && nameIsThreadIdent(F->getName()))
+                if (F->getIdentifier() && nameIsThreadIdent(F->getName(), cfg.threadIndexPatterns))
                     return IndexProvenance::ThreadIdent;
         return IndexProvenance::Unknown;
     }

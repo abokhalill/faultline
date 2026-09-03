@@ -178,11 +178,9 @@ void testEveryRuleHasCanary(const std::string &bin,
           "every registered rule fires on hft_core or canary");
 }
 
-// The registry gate above asks only whether a rule fired somewhere, and both
-// fixtures were C++. A rule matching C++ spellings alone therefore kept the
-// gate green while reporting nothing on any C codebase: FL013 missed every
-// spin loop in redis that way, 41 POSIX lock sites went with it, and the
-// output was indistinguishable from a clean scan.
+// The gate above asks only whether a rule fired somewhere, and both fixtures
+// were C++, so a rule matching C++ spellings alone stayed green while
+// reporting nothing in C. That hid FL012 and FL013 on all of redis.
 void testCLanguageCanary(const std::string &bin,
                          const std::string &canaryFixture) {
     std::cerr << "test: language-specific rules fire on a C translation unit\n";
@@ -228,12 +226,9 @@ void testCLanguageCanary(const std::string &bin,
     }
 }
 
-// A thread-shaped subscript proves striping only when it names the thread
-// doing the write. arr[c->tid] names whichever thread owns the object the
-// caller passed in, and one thread can drive every slot that way: redis
-// writes io_threads_clients_num only from the main thread and it graded
-// High. Both shapes live in the canary so the two grades are compared
-// against each other rather than against a remembered number.
+// arr[c->tid] carries the owner's id, so one thread can drive every slot:
+// redis writes io_threads_clients_num only from main and it graded High.
+// Both shapes sit in the canary so the grades are compared to each other.
 void testStripeIndexIdentity(const std::string &bin,
                              const std::string &canaryFixture) {
     std::cerr << "test: owner-indexed striping grades below writer-indexed\n";

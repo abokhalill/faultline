@@ -111,6 +111,11 @@ struct Config {
     // built in.
     std::vector<std::string> relaxFunctionPatterns;
 
+    // Project names for a thread-slot index (fnmatch), added to FL003's
+    // built-in set. Kept out of that set because `slot` and `shard` name
+    // hash buckets and ring positions at least as often.
+    std::vector<std::string> threadIndexPatterns;
+
     static Config loadFromFile(const std::string &path);
     static Config defaults();
 };

@@ -54,6 +54,8 @@ thread_entry_patterns: []     # worker roots when function-pointer dispatch
                               # breaks call-graph reachability
 main_function_patterns: []    # additional main-thread roots
 relax_function_patterns: []   # FL013: project-specific cpu_relax()/pause()
+thread_index_patterns: []     # FL003: project spellings of a thread-slot
+                              # subscript, e.g. ["slot"]
 
 # Target model
 target_arch: "x86-64"         # x86-64 | arm64 | arm64-apple
