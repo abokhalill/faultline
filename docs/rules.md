@@ -360,9 +360,12 @@ makes the weaker order correct.
 
 **Base severity:** Critical &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
-**Hardware mechanism:** Every atomic RMW takes exclusive line ownership. N
-cores incrementing one counter serialize on line ownership transfer,
-throughput collapses to coherence latency, not core count.
+**Hardware mechanism:** Every atomic RMW takes the line in Modified state, so
+two cores writing it trade ownership. The LOCK-prefixed operation costs ~4-6ns
+uncontended at every ordering. The transfer on top is spacing-dependent within
+a socket: +22ns at 8ns between writes, +0.3ns at 125ns, nothing past ~1us,
+since the line must still be resident in a peer's L1 to be stolen. Across
+sockets it does not decay at all, 32-52ns flat from ~670ns out to 85us.
 
 **Detection:** Atomic **write** sites (all forms; loads and pure fences
 excluded) in hot functions, on data with thread-escape evidence. The owning
@@ -488,8 +491,11 @@ entries and evicts L1D lines on every call/return cycle through it.
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
-**Hardware mechanism:** Indirect branch misprediction costs a pipeline flush
-(~15–20 cycles); polymorphic call sites pressure the BTB.
+**Hardware mechanism:** Two separable costs. The inlining barrier is ~1ns and
+is always paid. Misprediction adds up to ~8ns, but only when the receiver type
+varies unpredictably: a monomorphic site, or a predictable cycle over eight
+types, costs the same as one type. Candidate-type count is not the signal, and
+the two costs have different fixes.
 
 **Detection:** Virtual calls in hot functions. The IR pass is decisive here:
 calls the optimizer devirtualized are strongly demoted (−0.25 confidence);
@@ -594,8 +600,12 @@ still share a line is the bug this rule exists to catch.
 
 **Base severity:** Medium &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
-**Hardware mechanism:** Nested data-dependent branches multiply misprediction
-probability and fragment the instruction stream (I-cache/BTB pressure).
+**Hardware mechanism:** Nested conditionals widen the misprediction surface. A
+missed branch costs ~26 cycles and a predicted one is free. Target count does
+not matter: a predictable indirect branch costs the same at 4096 targets as at
+2, so BTB capacity is not the mechanism and case count is not a severity
+signal. Cost requires the outcome to be data-dependent, which is a runtime
+property, hence Medium without a profile.
 
 **Detection:** Conditional nesting depth above `branch_depth_warn`
 (default 4) in hot functions.
@@ -611,9 +621,12 @@ decision outcomes.
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** struct &nbsp;|&nbsp; **Gate:** none
 
-**Hardware mechanism:** Cross-socket access adds ~100–300ns per miss. Pages
-are placed by first touch; a structure initialized on one node and written
-from all nodes is remote for every other socket.
+**Hardware mechanism:** A remote access pays the interconnect on the critical
+path, roughly +40ns over local, about 1.25x. Latency is the mechanism, not
+bandwidth: one core reads local and remote memory at the same rate, so
+widening the structure does not help and placement does. Pages are placed by
+first touch, so a structure initialized on one node and written from all nodes
+is remote for every other socket.
 
 **Detection:** Shared mutable structures (≥256B) with thread-escape evidence
 and unfavorable placement inference (`NUMATopology`: local-init, main-thread,
@@ -664,9 +677,13 @@ extents: a 4MB array misaligned by a page backs 1 huge page instead of
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
-**Hardware mechanism:** A single dispatch site routing to many targets is a
-worst case for indirect branch prediction. The BTB entry is retrained on
-every target change.
+**Hardware mechanism:** The cost is misprediction on the selector, ~26 cycles
+when it is data-dependent. Arm count is nearly free: quadrupling it measured
++8% on thin arms and +0.02% on fat ones, so this is the mechanism FL050
+already prices and dispatcher width adds almost nothing. Instruction-cache
+pressure applies only once the inlined arms exceed L1i, which is untested.
+Centralization also prevents per-core locality of handler state, a separate
+argument from either.
 
 **Detection:** High fan-out dispatcher functions in hot paths.
 
