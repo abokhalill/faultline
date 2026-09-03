@@ -94,6 +94,7 @@ report, not missing from your code.
 | FL011 | Atomic hammered from a hot path |
 | FL012 | Lock in a hot path |
 | FL013 | Spin-wait with no `pause` |
+| FL014 | Atomic on an address nothing proved aligned |
 | FL020 | Heap allocation in a hot path |
 | FL021 | Stack frame big enough to blow L1d |
 | FL030 | Virtual dispatch in a hot path |

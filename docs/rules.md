@@ -1,6 +1,6 @@
 # Rules Reference
 
-lshaz ships 16 rules. Each targets one microarchitectural hazard class, and
+lshaz ships 21 rules. Each targets one microarchitectural hazard class, and
 each must map to a concrete hardware mechanism, cache, coherence, store
 buffer, TLB, branch predictor, NUMA, or allocator.
 
@@ -19,6 +19,7 @@ mechanism and mitigation text the diagnostics carry.
 | FL011 | Atomic contention | Atomic write sites generating cross-core RFO traffic | Function | Yes |
 | FL012 | Lock contention | Mutex/spinlock acquisition in a hot function | Function | Yes |
 | FL013 | Spin-wait without pause | Tight atomic/volatile poll loop lacking pause/yield/backoff | Function | Yes |
+| FL014 | Misaligned atomic | Atomic through a pointer cast the source never proved aligned | Function | No |
 | FL020 | Heap allocation | Allocation in a hot function; severity shaped by allocator topology | Function | Yes |
 | FL021 | Stack pressure | Stack frame exceeding threshold (default 2048B) | Function | No |
 | FL030 | Virtual dispatch | Virtual/indirect call in a hot function, not devirtualized in IR | Function | Yes |
@@ -458,6 +459,44 @@ latency on Skylake+-derived cores, a widely cited figure this project
 has not measured); a deliberate bare spin on a
 sub-microsecond signaling path is what `// lshaz-suppress FL013` is
 for, and the diagnostic says so.
+
+### FL014, Atomic on an Unprovably Aligned Address
+
+**Base severity:** Critical &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** none
+
+**Hardware mechanism, and it differs by target.** On x86-64 a LOCK-prefixed
+operation spanning two cache lines cannot lock a single line, so the core
+escalates to a bus lock and stalls every core on the socket: 3007ns against
+6.0ns for the same operation naturally aligned, **500x**, the largest single
+figure in `measured-constants.md`. Measured on Intel Coffee Lake only; AMD is
+unmeasured and the text says so. On ARM64 the exclusive and LSE atomics
+require natural alignment, so the identical source raises an alignment fault
+and the process takes SIGBUS. Detection is the same on both; only the
+consequence and the mitigation branch.
+
+**Detection:** an atomic operation (`AtomicExpr`, so C11 `_Atomic` and the
+GNU builtins, plus `__sync_*`) whose pointer operand is an explicit cast from
+a base narrower than the access. That is the shape where the pointer's type
+asserts an alignment the source never established, and the compiler believes
+it: `__atomic_fetch_add((long*)(buf+60), ...)` emits `lock incq buf+60` on
+x86-64 and `ldxr/stxr` on ARM64.
+
+**A packed `_Atomic` field is a different shape and is not this rule.** Clang
+diagnoses it under `-Watomic-alignment` and lowers it to a libatomic call, so
+it never reaches a LOCK prefix or an exclusive. Reporting it here would
+duplicate an existing compiler warning about a hazard that does not occur.
+
+**Grading follows what the offset proves**, using the same realizable-shift
+sweep as the pair co-residency contract:
+
+| Evidence | Severity | Tier |
+|---|---|---|
+| Crosses a line under every realizable base alignment | Critical | `proven` |
+| Crosses under some realizable base alignment | Critical | `likely` |
+| Offset not compile-time evaluable | Medium | `speculative` |
+
+An address is aligned to `gcd(align(base), offset)`, so a cast whose offset
+already covers the access asserts nothing untrue and is not reported.
 
 ---
 
