@@ -486,6 +486,8 @@ std::string serializeShardResult(int exitCode,
             buf += ",\"vo\":" + std::to_string(a.elementIsVolatile ? 1 : 0);
             buf += ",\"st\":" + std::to_string(a.isFileStatic ? 1 : 0);
             buf += ",\"tls\":" + std::to_string(a.tlsIndexed ? 1 : 0);
+            buf += ",\"ho\":" + std::to_string(a.indexIsHandedOver ? 1 : 0);
+            buf += ",\"oi\":" + std::to_string(a.indexIsOwnIdentity ? 1 : 0);
             buf += ",\"hp\":" + std::to_string(a.hasHeadPaddingOffset ? 1 : 0);
             buf += ",\"wt\":" + std::to_string(a.writerTier);
             buf += ",\"w\":[";
@@ -952,6 +954,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                         else if (f == "vo") a.elementIsVolatile = v != 0;
                         else if (f == "st") a.isFileStatic = v != 0;
                         else if (f == "tls") a.tlsIndexed = v != 0;
+                        else if (f == "ho") a.indexIsHandedOver = v != 0;
+                        else if (f == "oi") a.indexIsOwnIdentity = v != 0;
                         else if (f == "hp") a.hasHeadPaddingOffset = v != 0;
                         else if (f == "wt") a.writerTier =
                             static_cast<uint8_t>(v);
@@ -1534,6 +1538,20 @@ static unsigned emitStripedArrayFindings(
         if (v.mitigation == StripeMitigation::HeadPadded &&
             d.severity > Severity::Medium)
             d.severity = Severity::Medium;
+        // Reported, not dropped: an owner id can still be the writer's own
+        // when a worker stamps itself into the object first, which is not
+        // decidable here. The role join is the thing that would settle it,
+        // and where it does (multiRole) the grade stands.
+        if (v.ownerIndexed && !v.multiRole) {
+            if (d.severity > Severity::Medium)
+                d.severity = Severity::Medium;
+            d.confidence = std::max(d.confidence - 0.15, 0.35);
+            d.escalations.push_back(
+                "every thread-identity subscript reaches this array through a "
+                "field of an object the caller handed in, which names the "
+                "object's owner rather than the writing thread: one thread "
+                "can drive every slot, so striping is not established");
+        }
 
         d.location.file = s.file;
         d.location.line = s.line;
@@ -1562,6 +1580,7 @@ static unsigned emitStripedArrayFindings(
             {"contended_lines", std::to_string(v.contendedLines)},
             {"striped_writers", std::to_string(v.writerCount)},
             {"tls_indexed", s.tlsIndexed ? "yes" : "no"},
+            {"index_identity", v.ownerIndexed ? "owner" : "writer"},
             {"atomic_elem", s.elementIsAtomic ? "yes" : "no"},
             {"scope", s.isFileStatic ? "file-static" : "member"},
             {"write_frequency", writeFrequencyName(v.frequency)},

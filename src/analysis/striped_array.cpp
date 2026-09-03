@@ -205,6 +205,8 @@ private:
         s->stripedWriters.insert(wn);
         s->writerTier = std::max(s->writerTier, tierOf(wn));
         if (isTLSDerived(E->getIdx())) s->tlsIndexed = true;
+        if (isHandedOverIndex(E->getIdx())) s->indexIsHandedOver = true;
+        else                               s->indexIsOwnIdentity = true;
     }
 
     // Named-function tiers outrank oracle hotness: the oracle reaches
@@ -228,6 +230,15 @@ private:
         if (oracle.isFunctionHot(currentFn))
             return static_cast<uint8_t>(WriteFrequencyTier::Hot);
         return static_cast<uint8_t>(WriteFrequencyTier::Unknown);
+    }
+
+    // arr[c->tid] reads the tid the object carries, so it names whichever
+    // thread owns that object rather than the one executing the write. A
+    // queue hands each item to one owner at a time, so this shape can be
+    // written entirely from one thread however thread-shaped the name is.
+    // arr[tid] and arr[sched_getcpu()] name the writer and stay strong.
+    bool isHandedOverIndex(const clang::Expr *idx) {
+        return llvm::isa<clang::MemberExpr>(idx->IgnoreParenImpCasts());
     }
 
     bool isTLSDerived(const clang::Expr *idx) {

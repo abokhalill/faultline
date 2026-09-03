@@ -58,6 +58,14 @@ struct StripedArraySite {
     bool isFileStatic      = false;
     // index is thread_local-derived: per-thread striping by definition.
     bool tlsIndexed        = false;
+    // Every thread-identity subscript reached this array through a field of
+    // an object the caller handed in (c->tid), which names the object's
+    // owner and not the thread doing the write. The same standing-versus-
+    // handed-over split EscapeAnalysis draws for write targets.
+    bool indexIsHandedOver = false;
+    // Some subscript named the executing thread directly: thread_local
+    // storage, a gettid/sched_getcpu call, or a plain local or parameter.
+    bool indexIsOwnIdentity = false;
     // Base alignment alone separates slot 0 from the preceding symbol and
     // does nothing for slot 0 vs slot 1. Mitigation requires alignment
     // AND indexing that starts at a padded offset.
@@ -75,6 +83,8 @@ struct StripedArraySite {
         elementIsAtomic       |= o.elementIsAtomic;
         elementIsVolatile     |= o.elementIsVolatile;
         tlsIndexed            |= o.tlsIndexed;
+        indexIsHandedOver     |= o.indexIsHandedOver;
+        indexIsOwnIdentity    |= o.indexIsOwnIdentity;
         hasHeadPaddingOffset  |= o.hasHeadPaddingOffset;
         if (elemSizeBytes == 0) { elemSizeBytes = o.elemSizeBytes;
                                   elemCount = o.elemCount;
@@ -146,6 +156,9 @@ struct StripeVerdict {
     // array however it is indexed. Distinct from "one known role": a worker
     // pool is one role across many threads.
     bool     mainThreadOnly = false;
+    // No subscript named the writing thread; every one came from a field of
+    // a handed-in object, which is the owner's identity.
+    bool     ownerIndexed   = false;
     uint64_t slotsPerLine = 0;
     uint64_t contendedLines = 0;
     StripeMitigation mitigation = StripeMitigation::None;

@@ -228,6 +228,46 @@ void testCLanguageCanary(const std::string &bin,
     }
 }
 
+// A thread-shaped subscript proves striping only when it names the thread
+// doing the write. arr[c->tid] names whichever thread owns the object the
+// caller passed in, and one thread can drive every slot that way: redis
+// writes io_threads_clients_num only from the main thread and it graded
+// High. Both shapes live in the canary so the two grades are compared
+// against each other rather than against a remembered number.
+void testStripeIndexIdentity(const std::string &bin,
+                             const std::string &canaryFixture) {
+    std::cerr << "test: owner-indexed striping grades below writer-indexed\n";
+    if (canaryFixture.empty()) {
+        check(false, "canary fixture present for the stripe-identity gate");
+        return;
+    }
+    auto tmp = isolateFixture(canaryFixture, "stripeid");
+    auto r = run(bin + " scan " + (tmp / "project").string() +
+                 " --no-ir --format json");
+    fs::remove_all(tmp);
+
+    auto identityOf = [&](const std::string &symbol) -> std::string {
+        auto at = r.out.find("\"symbol\": \"" + symbol + "\"");
+        if (at == std::string::npos)
+            at = r.out.find("\"symbol\":\"" + symbol + "\"");
+        if (at == std::string::npos) return "<absent>";
+        // structuralEvidence is a std::map, so keys are emitted in
+        // alphabetical order and index_identity precedes symbol.
+        auto k = r.out.rfind("\"index_identity\"", at);
+        if (k == std::string::npos) return "<absent>";
+        auto q = r.out.find('"', r.out.find(':', k));
+        if (q == std::string::npos) return "<absent>";
+        auto e = r.out.find('"', q + 1);
+        if (e == std::string::npos) return "<absent>";
+        return r.out.substr(q + 1, e - q - 1);
+    };
+
+    check(identityOf("g_thread_bytes") == "writer",
+          "a subscript on the writer's own parameter reads as writer identity");
+    check(identityOf("canary_clients_per_thread") == "owner",
+          "a subscript through a handed-in object reads as owner identity");
+}
+
 void testMechanismClaimsBoundSeverity(const std::string &bin,
                                       const std::string &fixture,
                                       const std::string &canaryFixture) {
@@ -881,6 +921,7 @@ int main() {
     // Recall canary: registry completeness.
     testEveryRuleHasCanary(bin, fixture, canaryPath());
     testCLanguageCanary(bin, canaryPath());
+    testStripeIndexIdentity(bin, canaryPath());
     testMechanismClaimsBoundSeverity(bin, fixture, canaryPath());
 
     // Hazard detection.

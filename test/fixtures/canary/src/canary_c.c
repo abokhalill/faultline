@@ -33,6 +33,28 @@ void canary_release(int id) {
                           memory_order_seq_cst);
 }
 
+// FL003. Owner-indexed striping. The subscript is a field of an object the
+// caller handed in, so it names the client's owning thread and not the one
+// executing the write; one thread can drive every slot. redis
+// io_threads_clients_num has exactly this shape and is written only from the
+// main thread. Grades below canary.cpp's g_thread_bytes, which subscripts on
+// its own parameter and so names its writer.
+typedef struct {
+    int tid;
+} canary_client;
+
+static int canary_clients_per_thread[64];
+
+__attribute__((hot))
+void canary_bind_client(canary_client *c) {
+    canary_clients_per_thread[c->tid]++;
+}
+
+__attribute__((hot))
+void canary_unbind_client(canary_client *c) {
+    canary_clients_per_thread[c->tid]--;
+}
+
 // FL012. POSIX lock through a free function, which arrives as a CallExpr
 // and not a member call. Two sequential lock/unlock pairs, so a depth
 // tracker that ignores unlock reports the second as nested.

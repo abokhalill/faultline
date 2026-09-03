@@ -33,6 +33,8 @@ StripeVerdict gradeStripedArray(const StripedArraySite &s,
     // threads in that one role, so a single-role mask there is consistent
     // with heavy contention rather than evidence against it.
     v.mainThreadOnly = (mask == ROLE_MAIN);
+    v.ownerIndexed =
+        s.indexIsHandedOver && !s.indexIsOwnIdentity && !s.tlsIndexed;
 
     v.frequency = static_cast<WriteFrequencyTier>(s.writerTier);
     return v;
