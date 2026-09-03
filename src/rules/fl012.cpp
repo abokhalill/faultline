@@ -51,13 +51,6 @@ public:
         for (const auto *mt : mutexTypes) {
             if (className == mt) { isMutex = true; break; }
         }
-        // POSIX mutex types.
-        if (!isMutex) {
-            if (className.find("pthread_mutex_t") != std::string::npos ||
-                className.find("pthread_spinlock_t") != std::string::npos ||
-                className.find("pthread_rwlock_t") != std::string::npos)
-                isMutex = true;
-        }
         if (!isMutex)
             return true;
 
