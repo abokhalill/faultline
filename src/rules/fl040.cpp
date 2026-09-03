@@ -121,9 +121,13 @@ public:
            << "' (type: " << QT.getAsString() << "). "
            << "Accessible from any thread without confinement. ";
         if (concurrentWriters)
-            hw << "On multi-socket systems, remote NUMA access adds "
-               << "~100-300ns. Under multi-core write contention, cache line "
-               << "bouncing degrades linearly with core count.";
+            hw << "Under multi-core write contention the line serialises: "
+               << "~18ns per added writer, reaching 31x the uncontended cost "
+               << "at 14, so extra cores buy no throughput. That needs the "
+               << "writes close together in time, and it vanishes past "
+               << "~125ns of spacing at 2 writers or ~1us at 14. On "
+               << "multi-socket targets remote access adds ~40ns (1.25x) on "
+               << "top, a separate and much smaller term.";
         else
             hw << "Concurrent access is not established here, so the NUMA "
                << "and coherence penalties are potential rather than "
