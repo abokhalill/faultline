@@ -557,7 +557,7 @@ int runInitCommand(int argc, const char **argv) {
     llvm::sys::fs::real_path(target, absTarget);
     std::string dir = std::string(absTarget);
 
-    // Step 1: compile_commands.json
+    // compile_commands.json
     if (!force && hasCompileDB(dir)) {
         llvm::errs() << "lshaz init: compile_commands.json already exists "
                         "(use --force to regenerate)\n";
@@ -579,7 +579,7 @@ int runInitCommand(int argc, const char **argv) {
         }
     }
 
-    // Step 2: validate compile_commands.json by probing sample TUs.
+    // Validate the database by probing sample TUs.
     {
         llvm::SmallString<256> dbPath(dir);
         llvm::sys::path::append(dbPath, "compile_commands.json");
@@ -592,7 +592,7 @@ int runInitCommand(int argc, const char **argv) {
             validateCompileDB(std::string(dbPath));
     }
 
-    // Step 3: starter config
+    // Starter config
     if (!noConfig)
         writeStarterConfig(dir);
 
