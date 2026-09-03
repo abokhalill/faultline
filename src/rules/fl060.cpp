@@ -161,9 +161,11 @@ public:
            << "B, " << cacheLines << " cache lines) with "
            << mutableCount << " mutable field(s) and thread-escape evidence. "
            << "On multi-socket systems, at least one socket accesses this "
-           << "structure via remote NUMA interconnect. Each remote cache line "
-           << "fetch adds ~100-300ns. Atomic operations on remote lines "
-           << "require interconnect round-trip. "
+           << "structure via remote NUMA interconnect. Each remote line "
+           << "fetch adds ~40ns over local, about 1.25x, and the cost is "
+           << "latency rather than bandwidth: one core reads both nodes at "
+           << "the same rate. Atomic operations on remote lines additionally "
+           << "pay ownership transfer to the remote home agent. "
            << "[Assumes: deployment target is multi-socket NUMA; single-socket systems are unaffected]";
         diag.hardwareReasoning = hw.str();
 
