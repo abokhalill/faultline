@@ -17,6 +17,7 @@
 #include "lshaz/hypothesis/pmu_trace.h"
 #include "lshaz/ir/refiner.h"
 #include "lshaz/ir/ir_analyzer.h"
+#include "lshaz/ir/opt_remark.h"
 
 #include <clang/Basic/Version.inc>
 #include <clang/Tooling/ArgumentsAdjusters.h>
@@ -47,6 +48,7 @@
 #include <vector>
 
 #include <csignal>
+#include <fnmatch.h>
 #include <cstring>
 #include <new>
 #include <sys/resource.h>
@@ -218,6 +220,7 @@ struct IRJob {
     std::vector<std::string> argv;
     std::string irFile;
     std::string errFile;
+    std::string remarkFile;
     bool cached = false;
 };
 
@@ -1020,7 +1023,8 @@ static void runIRPass(
         const std::vector<std::string> &sources,
         const std::unordered_set<std::string> &failedFiles,
         std::vector<Diagnostic> &diagnostics,
-        ExecutionMetadata &meta) {
+        ExecutionMetadata &meta,
+        std::vector<OptRemark> &remarks) {
 
     IRAnalyzer irAnalyzer;
     std::string optLevel = "-" + req.ir.optLevel;
@@ -1088,20 +1092,29 @@ static void runIRPass(
 
         llvm::SmallString<128> tmpDir;
         llvm::sys::path::system_temp_directory(true, tmpDir);
-        llvm::SmallString<128> irPath(tmpDir), errPath(tmpDir);
+        llvm::SmallString<128> irPath(tmpDir), errPath(tmpDir), remPath(tmpDir);
         llvm::sys::path::append(irPath,
             "lshaz-" + std::string(hashStr) + ".ll");
         llvm::sys::path::append(errPath,
             "lshaz-" + std::string(hashStr) + ".err");
+        llvm::sys::path::append(remPath,
+            "lshaz-" + std::string(hashStr) + ".opt.yaml");
 
-        bool cached = req.ir.cacheEnabled && llvm::sys::fs::exists(irPath);
+        // Both artifacts or neither: a hit on the IR alone would silently
+        // drop this TU's remarks, so the finding set would depend on what
+        // happened to be in /tmp.
+        bool cached = req.ir.cacheEnabled && llvm::sys::fs::exists(irPath) &&
+                      llvm::sys::fs::exists(remPath);
 
+        argv.push_back("-fsave-optimization-record");
+        argv.push_back("-foptimization-record-file=" + std::string(remPath));
         argv.push_back("-o");
         argv.push_back(std::string(irPath));
         argv.push_back(srcPath);
 
         jobs.push_back({srcPath, compilerPath, std::move(argv),
-                        std::string(irPath), std::string(errPath), cached});
+                        std::string(irPath), std::string(errPath),
+                        std::string(remPath), cached});
 
         // Track compilers.
         bool seen = false;
@@ -1174,12 +1187,27 @@ static void runIRPass(
                                  << (*errBuf)->getBuffer() << "\n";
                 }
             }
-            if (!jobs[idx].cached && result.exitCode != 0)
+            if (!jobs[idx].cached && result.exitCode != 0) {
                 llvm::sys::fs::remove(jobs[idx].irFile);
+                llvm::sys::fs::remove(jobs[idx].remarkFile);
+            }
             llvm::sys::fs::remove(jobs[idx].errFile);
+            if (result.exitCode == 0)
+                parseOptRemarks(jobs[idx].remarkFile, remarks);
         }
         irAnalyzer.mergeFrom(std::move(sr.analyzer));
     }
+
+    // Shards complete in scheduling order, so the stream is ordered here
+    // rather than relied on downstream.
+    std::sort(remarks.begin(), remarks.end(),
+              [](const OptRemark &a, const OptRemark &b) {
+                  if (a.file != b.file) return a.file < b.file;
+                  if (a.line != b.line) return a.line < b.line;
+                  if (a.column != b.column) return a.column < b.column;
+                  if (a.name != b.name) return a.name < b.name;
+                  return a.function < b.function;
+              });
 
     if (!irAnalyzer.profiles().empty()) {
         DiagnosticRefiner refiner(irAnalyzer.profiles(),
@@ -1661,6 +1689,90 @@ static unsigned emitStripedArrayFindings(
     return emitted;
 }
 
+// Findings from the compiler's own remark stream. Hot-filtered because one
+// mid-sized C file emits ~12.8k records.
+static unsigned emitOptRemarkFindings(
+        std::vector<Diagnostic> &out,
+        const std::vector<OptRemark> &remarks,
+        const std::map<std::string, HotnessSource> &globalHot,
+        const std::vector<std::string> &hotPatterns) {
+    // One finding per (function, kind): repeated records are one decision.
+    std::set<std::pair<std::string, std::string>> seen;
+    unsigned emitted = 0;
+
+    for (const auto &r : remarks) {
+        // Config patterns cover hot paths the call graph cannot reach,
+        // which is what function-pointer dispatch produces.
+        auto hot = globalHot.find(r.function);
+        HotnessSource src = HotnessSource::None;
+        if (hot != globalHot.end()) {
+            src = hot->second;
+        } else {
+            for (const auto &p : hotPatterns)
+                if (fnmatch(p.c_str(), r.function.c_str(), 0) == 0) {
+                    src = HotnessSource::Declared;
+                    break;
+                }
+            if (src == HotnessSource::None)
+                continue;
+        }
+        if (!seen.emplace(r.function, r.name).second)
+            continue;
+
+        Diagnostic d;
+        d.ruleID = "C002";
+        d.title = "Loop-Invariant Load Not Hoisted";
+        d.severity = Severity::Medium;
+        d.confidence = 0.80;
+        d.evidenceTier = EvidenceTier::Likely;
+        d.functionName = r.function;
+        d.location.file = r.file;
+        d.location.line = r.line;
+        d.location.column = r.column;
+        d.hotness = static_cast<uint8_t>(src);
+
+        d.hardwareReasoning =
+            "The address of this load does not change across the loop, but "
+            "LICM could not hoist it: some store in the body may alias it, so "
+            "the load repeats every iteration. The compiler is reporting that "
+            "its alias analysis lost here, which is weaker than a claim that "
+            "the pointers do alias.";
+
+        d.structuralEvidence = {
+            {"pass", r.pass},
+            {"remark", r.name},
+            {"function", r.function},
+            {"hotness", hotnessSourceName(src)},
+        };
+        if (r.count)
+            d.structuralEvidence["copies"] = std::to_string(r.count);
+        if (!r.detail.empty())
+            d.structuralEvidence["compiler_note"] = r.detail;
+
+        d.mitigation =
+            "Hoist the load into a local before the loop where the invariance "
+            "holds, or qualify the pointers with restrict if they genuinely "
+            "do not alias. Do not add restrict to silence this without "
+            "establishing that: it is a promise to the compiler, not a hint.";
+
+        d.mechanismClaims = {
+            {"a load repeated per iteration at a loop-invariant address",
+             "the compiler recorded the decision in its own remark stream",
+             true, Severity::Medium},
+            {std::string("this code runs often enough for the cost to recur (") +
+                 hotnessSourceName(src) + ", cross-TU)",
+             "hotness established by profile or declaration, not inferred "
+             "from shape alone",
+             src >= HotnessSource::Declared,
+             hotnessSupportedSeverity(src, Severity::Medium),
+             /*gating=*/true},
+        };
+        out.push_back(std::move(d));
+        ++emitted;
+    }
+    return emitted;
+}
+
 // FL092: unapplied in-tree mitigation. Synthesized when an FL002 with
 // cross-thread writer attribution sits in a codebase that demonstrably
 // applies cache-line isolation to other types. The precedent join is the
@@ -2007,6 +2119,7 @@ ScanResult ScanPipeline::run(
         const clang::tooling::CompilationDatabase &compDB,
         const std::vector<std::string> &sources) {
     ScanResult result;
+    std::vector<OptRemark> optRemarks;
     std::vector<FailedTU> failedTUsDetailed; // For header fingerprint detection
 
     result.metadata.toolVersion = kToolVersion;
@@ -2491,7 +2604,7 @@ ScanResult ScanPipeline::run(
         for (const auto &ftu : failedTUsDetailed)
             failedFiles.insert(ftu.file);
         runIRPass(request, compDB, sources, failedFiles,
-                  result.diagnostics, result.metadata);
+                  result.diagnostics, result.metadata, optRemarks);
     }
 
     // Cross-TU escape suppression using aggregated per-type escape summaries.
@@ -2575,6 +2688,14 @@ ScanResult ScanPipeline::run(
             report("hotness", std::to_string(resolved) +
                    " cross-TU candidate(s) confirmed hot, " +
                    std::to_string(dropped) + " dropped as cold");
+
+        unsigned fromRemarks = emitOptRemarkFindings(
+            result.diagnostics, optRemarks, globalHot,
+            request.config.hotFunctionPatterns);
+        if (!optRemarks.empty())
+            report("opt_remarks", std::to_string(fromRemarks) +
+                   " finding(s) from " + std::to_string(optRemarks.size()) +
+                   " reportable compiler remark(s)");
     }
 
     // Monomorphic virtual calls. Nothing overrides the callee anywhere in the

@@ -263,6 +263,28 @@ void testStripeIndexIdentity(const std::string &bin,
           "a subscript through a handed-in object reads as owner identity");
 }
 
+// The channel rides the IR pass, so every other canary run here misses it:
+// they all pass --no-ir.
+void testOptRemarkChannel(const std::string &bin,
+                          const std::string &canaryFixture) {
+    std::cerr << "test: compiler remarks reach findings on a hot function\n";
+    if (canaryFixture.empty()) {
+        check(false, "canary fixture present for the remark gate");
+        return;
+    }
+    auto tmp = isolateFixture(canaryFixture, "remarks");
+    auto r = run(bin + " scan " + (tmp / "project").string() +
+                 " --format json");
+    fs::remove_all(tmp);
+
+    check(contains(r.out, "\"C002\""),
+          "a licm remark on a hot function becomes a finding");
+    check(contains(r.out, "canary_scale_into"),
+          "the finding names the function the compiler reported");
+    check(!contains(r.out, "Error while parsing"),
+          "no remark container failed to parse");
+}
+
 void testMechanismClaimsBoundSeverity(const std::string &bin,
                                       const std::string &fixture,
                                       const std::string &canaryFixture) {
@@ -917,6 +939,7 @@ int main() {
     testEveryRuleHasCanary(bin, fixture, canaryPath());
     testCLanguageCanary(bin, canaryPath());
     testStripeIndexIdentity(bin, canaryPath());
+    testOptRemarkChannel(bin, canaryPath());
     testMechanismClaimsBoundSeverity(bin, fixture, canaryPath());
 
     // Hazard detection.

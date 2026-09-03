@@ -9,6 +9,13 @@
 #include <cstdint>
 #include <thread>
 
+extern "C" {
+// Reached from a thread body so the cross-TU hot verdict covers the C
+// fixtures. The remark channel keys on that verdict, not a local attribute.
+long canary_scale_into(long *out, const long *bound, long n);
+int canary_drain_pending(int id);
+}
+
 namespace canary {
 
 // FL060. NUMA-unfriendly shared structure: >=256B, escapes, mutable.
@@ -87,7 +94,10 @@ void dispatch(int opcode, uint64_t v) {
 }
 
 static void worker(int id) {
+    long buf[64] = {0}, bound = 3;
     for (int i = 0; i < 1000; ++i) {
+        canary_scale_into(buf, &bound, 64);
+        canary_drain_pending(id);
         record_pool_event(i & 1);
         g_amplified.head.fetch_add(1);
         g_amplified.tail.fetch_add(1);
@@ -120,6 +130,13 @@ struct SeedSum {
 static SeedSum g_seed_sum;
 
 } // namespace canary
+
+extern "C" {
+// Reachable from main so the cross-TU hot verdict covers the C fixtures;
+// the remark channel keys on that verdict rather than on a local attribute.
+long canary_scale_into(long *out, const long *bound, long n);
+int canary_drain_pending(int id);
+}
 
 int main() {
     canary::run();

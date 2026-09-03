@@ -127,6 +127,7 @@ set(LSHAZ_SOURCES
     src/rules/fl061.cpp
     src/ir/ir_analyzer.cpp
     src/ir/refiner.cpp
+    src/ir/opt_remark.cpp
     src/hypothesis/template.cpp
     src/hypothesis/hypothesis.cpp
     src/hypothesis/measurement.cpp

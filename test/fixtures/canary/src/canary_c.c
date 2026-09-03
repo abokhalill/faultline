@@ -84,3 +84,15 @@ int canary_drain_pending(int id) {
     pthread_mutex_unlock(&canary_handoff_mutex[id]);
     return n;
 }
+
+// C002. The bound load is loop-invariant but a store through `out` may alias
+// it, so LICM cannot hoist and it reloads every iteration.
+__attribute__((noinline))
+long canary_scale_into(long *out, const long *bound, long n) {
+    long hits = 0;
+    for (long i = 0; i < n; i++) {
+        out[i] = *bound + i;
+        if (out[i] > *bound) hits++;
+    }
+    return hits;
+}

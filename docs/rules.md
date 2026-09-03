@@ -824,6 +824,37 @@ inline on main or offloaded to a worker) do not produce escalations.
 
 ---
 
+## Compiler-observed findings
+
+### C002, Loop-Invariant Load Not Hoisted
+
+**Severity:** Medium, hot-path bounded &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Source:** LLVM optimization remarks
+
+LICM could not hoist a load whose address does not change across the loop,
+because a store in the body may alias it, so the load repeats every
+iteration. The compiler recorded the decision; the analyzer did not infer it.
+
+This class asserts no hardware effect, which is why it needs no workload to
+be true. Every FL0xx rule claims a cost and has to defend it against a
+machine the tool does not have.
+
+**Collection.** The remark file rides the clang invocation the IR pass
+already forks, via `-fsave-optimization-record`, and is read with
+`llvm::remarks`. `--no-ir` disables this class with it. Findings are limited
+to functions the cross-TU hot verdict reaches or that match
+`hot_function_patterns`, one per (function, remark kind): a redis-sized
+corpus emits 155 MB of records, so the hot filter is load-bearing.
+
+**Not collected.** `gvn/LoadClobbered` is 4822 of one file's 8264 missed
+remarks and reports imprecise alias analysis rather than lost work.
+`regalloc/LoopSpillReloadCopies` is a backend pass, and `-S -emit-llvm`
+stops before codegen.
+
+**Mitigation:** hoist the load into a local before the loop, or qualify the
+pointers with `restrict` if they genuinely do not alias. `restrict` is a
+promise to the compiler, so establish it rather than adding it to silence
+the finding.
+
 ## Scan-health diagnostics
 
 ### B001, Broken scan
