@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Write-attribution runtime: ground truth for cache-line sharing without a PMU.
+// Write-attribution runtime. Records cache-line sharing without a PMU; says
+// nothing about whether that sharing costs anything.
 //
 // Clang's ThreadSanitizer instrumentation emits ordinary calls to __tsan_*.
 // Linking this instead of libtsan keeps the instrumentation and discards the

@@ -115,8 +115,10 @@ means nothing.
 ## How much should you trust a finding?
 
 A finding says **the preconditions for a hazard are present in your source**.
-It does not say the hazard costs you anything on your workload; that depends
-on how often the code runs and how many cores touch it.
+It does not say the hazard costs you anything on your workload. That depends
+on how close together in time the accesses land: coherence cost collapses once
+writes are more than a few hundred nanoseconds apart within a socket, so
+software doing anything substantial per operation rarely reaches it.
 
 So lshaz grades rather than just reports. Each finding carries a severity, a
 confidence, and the specific hardware claims behind it, and **severity is
@@ -128,8 +130,10 @@ lifts the cap, an inference from loop structure doesn't.
 Read Critical as *worth measuring*, not *known to be slow*.
 
 For measuring, `tools/wattr/` records which threads actually wrote which cache
-line at runtime and joins that against a scan, so you can confirm a finding
-before you act on it.
+line at runtime and joins that against a scan. That confirms the sharing is
+real. Whether it costs anything is a separate question with a much higher bar:
+a counter written 235k times a second by two threads still produced no
+measurable coherence traffic, because the writes were microseconds apart.
 
 ## Good to know
 

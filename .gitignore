@@ -27,3 +27,6 @@ regress/
 .claude/
 CLAUDE.md
 llvm.sh
+
+__pycache__/
+*.pyc
