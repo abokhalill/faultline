@@ -221,7 +221,7 @@ void testCLanguageCanary(const std::string &bin,
     }
 
     check(!firedInC.empty(), "the C translation unit was analyzed at all");
-    for (const char *id : {"FL013"}) {
+    for (const char *id : {"FL012", "FL013"}) {
         std::string label = std::string(id) +
                             " fires on a C translation unit";
         check(firedInC.count(id) != 0, label.c_str());

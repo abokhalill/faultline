@@ -4,6 +4,7 @@
 // fixtures here were C++. A rule matching only C++ spellings therefore
 // satisfied the gate while reporting nothing on any C codebase, which is
 // how FL013 came to miss every spin loop in redis.
+#include <pthread.h>
 #include <stdatomic.h>
 
 #define CANARY_UNPAUSED 0
@@ -30,4 +31,23 @@ void canary_wait_paused(int id) {
 void canary_release(int id) {
     atomic_store_explicit(&canary_io_threads[id].paused, CANARY_UNPAUSED,
                           memory_order_seq_cst);
+}
+
+// FL012. POSIX lock through a free function, which arrives as a CallExpr
+// and not a member call. Two sequential lock/unlock pairs, so a depth
+// tracker that ignores unlock reports the second as nested.
+static pthread_mutex_t canary_handoff_mutex[4];
+static int canary_pending[4];
+
+__attribute__((hot))
+int canary_drain_pending(int id) {
+    pthread_mutex_lock(&canary_handoff_mutex[id]);
+    int n = canary_pending[id];
+    canary_pending[id] = 0;
+    pthread_mutex_unlock(&canary_handoff_mutex[id]);
+
+    pthread_mutex_lock(&canary_handoff_mutex[id]);
+    canary_pending[id] += n;
+    pthread_mutex_unlock(&canary_handoff_mutex[id]);
+    return n;
 }

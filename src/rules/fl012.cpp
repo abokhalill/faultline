@@ -68,6 +68,47 @@ public:
         return true;
     }
 
+    // POSIX locks are free functions and arrive as CallExpr. The member-call
+    // arm above cannot reach them at all: pthread_mutex_t is a union with no
+    // methods, so nothing can name it as a member's parent.
+    bool VisitCallExpr(clang::CallExpr *E) {
+        const auto *FD = E->getDirectCallee();
+        if (!FD || !FD->getIdentifier())
+            return true;
+        llvm::StringRef n = FD->getName();
+        if (!n.starts_with("pthread_"))
+            return true;
+
+        // RAII releases at scope exit, which TraverseCompoundStmt restores.
+        // An explicit pair does not, so without this two sequential
+        // lock/unlock pairs in one block report the second as nested.
+        if (n == "pthread_mutex_unlock" || n == "pthread_spin_unlock" ||
+            n == "pthread_rwlock_unlock") {
+            if (lockDepth_ > 0)
+                --lockDepth_;
+            return true;
+        }
+
+        static const char *kAcquire[] = {
+            "pthread_mutex_lock",         "pthread_mutex_trylock",
+            "pthread_mutex_timedlock",    "pthread_spin_lock",
+            "pthread_spin_trylock",       "pthread_rwlock_rdlock",
+            "pthread_rwlock_wrlock",      "pthread_rwlock_tryrdlock",
+            "pthread_rwlock_trywrlock",   "pthread_rwlock_timedrdlock",
+            "pthread_rwlock_timedwrlock",
+        };
+        for (const char *a : kAcquire) {
+            if (n != a)
+                continue;
+            sites_.push_back({E->getBeginLoc(), n.str(), lockDepth_ > 0,
+                              inLoop_});
+            ++lockDepth_;
+            ++scopeLockIncrements_;
+            break;
+        }
+        return true;
+    }
+
     bool VisitCXXConstructExpr(clang::CXXConstructExpr *E) {
         const auto *CD = E->getConstructor();
         if (!CD)
