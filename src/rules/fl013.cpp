@@ -227,6 +227,21 @@ public:
     }
 };
 
+// break/return/goto that leaves THIS loop. Nested loops and switches own
+// their own break, so their bodies are not searched.
+class EarlyExitFinder : public clang::RecursiveASTVisitor<EarlyExitFinder> {
+public:
+    bool found = false;
+    bool VisitBreakStmt(clang::BreakStmt *) { found = true; return true; }
+    bool VisitReturnStmt(clang::ReturnStmt *) { found = true; return true; }
+    bool VisitGotoStmt(clang::GotoStmt *) { found = true; return true; }
+    bool TraverseForStmt(clang::ForStmt *) { return true; }
+    bool TraverseWhileStmt(clang::WhileStmt *) { return true; }
+    bool TraverseDoStmt(clang::DoStmt *) { return true; }
+    bool TraverseCXXForRangeStmt(clang::CXXForRangeStmt *) { return true; }
+    bool TraverseSwitchStmt(clang::SwitchStmt *) { return true; }
+};
+
 struct SpinSite {
     clang::SourceLocation loc;
     std::vector<std::string> polledVars;
@@ -258,6 +273,7 @@ unsigned countStmts(const clang::Stmt *S) {
 class SpinLoopVisitor : public clang::RecursiveASTVisitor<SpinLoopVisitor> {
 public:
     const std::vector<std::string> *cfgAtomics = nullptr;
+    const clang::ASTContext *ctx = nullptr;
     inline static const std::vector<std::string> kNoAtomics{};
 
     std::vector<SpinSite> sites;
@@ -272,6 +288,18 @@ public:
         return true;
     }
     bool VisitForStmt(clang::ForStmt *S) {
+        // A counted loop exits on its induction variable whatever the poll
+        // returns, so it is an aggregation sweep and not a wait. An early
+        // exit puts termination back under the polled value: that is a
+        // bounded retry and still spins. for(;;) has no increment and
+        // reaches inspect() unchanged.
+        if (S->getInc()) {
+            EarlyExitFinder exit;
+            if (S->getBody())
+                exit.TraverseStmt(S->getBody());
+            if (!exit.found)
+                return true;
+        }
         inspect(S->getCond(), S->getBody(), S->getForLoc());
         return true;
     }
@@ -285,6 +313,14 @@ private:
         unsigned bodyStmts = countStmts(body);
         if (bodyStmts > kMaxSpinBodyStmts)
             return;
+
+        // A condition that folds to zero runs the body once. That is the
+        // do/while(0) single-evaluation macro, and every atomicGet in a
+        // C codebase is one.
+        if (cond && ctx)
+            if (auto v = cond->getIntegerConstantExpr(*ctx))
+                if (v->isZero())
+                    return;
 
         PollReadFinder poll(cfgAtomics ? *cfgAtomics : kNoAtomics);
         if (cond)
@@ -351,6 +387,7 @@ public:
         SpinLoopVisitor visitor;
         visitor.relaxPatterns = &Cfg.relaxFunctionPatterns;
         visitor.cfgAtomics = &Cfg.atomicTypeNames;
+        visitor.ctx = &Ctx;
         visitor.TraverseStmt(FD->getBody());
         if (visitor.sites.empty())
             return;
