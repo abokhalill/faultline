@@ -58,7 +58,7 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # --- Embedded harness templates ---
 # Single-sourced: the template is a real compilable header, unit-tested by
-# pipeline_unit_test and embedded verbatim here, so the code under test and the
+# pipeline_test and embedded verbatim here, so the code under test and the
 # code emitted into a bundle are the same text.
 find_package(Threads REQUIRED)
 set(LSHAZ_PMU_CALIB_TEMPLATE ${CMAKE_SOURCE_DIR}/src/hypothesis/templates/pmu_calib.h)
@@ -176,19 +176,19 @@ target_link_libraries(lshaz
 )
 
 # --- Output contract tests ---
-add_executable(output_contract_test
-    test/output_contract_test.cpp
+add_executable(output_test
+    test/output_test.cpp
     src/output/json.cpp
     src/output/sarif.cpp
     src/output/cli.cpp
     src/core/diagnostic.cpp
     src/core/severity.cpp
 )
-target_link_libraries(output_contract_test PRIVATE ${LSHAZ_LLVM_LIBS})
+target_link_libraries(output_test PRIVATE ${LSHAZ_LLVM_LIBS})
 
 # --- Pipeline unit test ---
-add_executable(pipeline_unit_test
-    test/pipeline_unit_test.cpp
+add_executable(pipeline_test
+    test/pipeline_test.cpp
     src/pipeline/filter.cpp
     src/pipeline/compile_db.cpp
     src/pipeline/repo.cpp
@@ -196,12 +196,12 @@ add_executable(pipeline_unit_test
     src/analysis/striped_array_summary.cpp
     ${CMAKE_BINARY_DIR}/generated/PMUCalibration.cpp
 )
-target_link_libraries(pipeline_unit_test PRIVATE ${LSHAZ_LLVM_LIBS} Threads::Threads)
-target_include_directories(pipeline_unit_test PRIVATE ${CMAKE_SOURCE_DIR}/src/hypothesis/templates)
+target_link_libraries(pipeline_test PRIVATE ${LSHAZ_LLVM_LIBS} Threads::Threads)
+target_include_directories(pipeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src/hypothesis/templates)
 
 # --- Analysis ground truth test ---
-add_executable(analysis_ground_truth_test
-    test/analysis_ground_truth_test.cpp
+add_executable(analysis_test
+    test/analysis_test.cpp
     src/analysis/cache_line.cpp
     src/analysis/call_graph.cpp
     src/analysis/escape.cpp
@@ -211,7 +211,7 @@ add_executable(analysis_ground_truth_test
     src/core/hot_path.cpp
     src/core/config.cpp
 )
-target_link_libraries(analysis_ground_truth_test PRIVATE
+target_link_libraries(analysis_test PRIVATE
     clangTooling
     clangFrontend
     clangSerialization
@@ -229,7 +229,7 @@ target_link_libraries(analysis_ground_truth_test PRIVATE
 )
 
 # --- Scan E2E test ---
-add_executable(scan_e2e_test
-    test/scan_e2e_test.cpp
+add_executable(scan_test
+    test/scan_test.cpp
 )
-target_link_libraries(scan_e2e_test PRIVATE ${LSHAZ_LLVM_LIBS})
+target_link_libraries(scan_test PRIVATE ${LSHAZ_LLVM_LIBS})

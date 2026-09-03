@@ -1,12 +1,7 @@
-// Analytical ground truth tests for CacheLineMap.
-//
-// Parses C++ source fragments via Clang tooling, constructs CacheLineMap,
-// and asserts exact field offsets, cache line assignments, atomic counts,
-// straddle flags, and bucket populations against compiler-verified values.
-//
-// These tests guarantee that CacheLineMap agrees with ASTRecordLayout.
-// Any refactoring that silently changes field offset computation will
-// fail here before reaching production.
+// Checks CacheLineMap against ASTRecordLayout. Parses C++ fragments through
+// Clang tooling and asserts exact field offsets, line assignments, atomic
+// counts, straddle flags and bucket populations, so a refactor that changes
+// offset computation fails here rather than in a scan.
 
 #include "lshaz/analysis/cache_line.h"
 #include "lshaz/analysis/call_graph.h"

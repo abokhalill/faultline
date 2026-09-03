@@ -1,15 +1,10 @@
-// End-to-end integration test for the lshaz scan pipeline.
+// Drives the scan subcommand end to end: compile DB autodiscovery, config
+// driven hot-path classification, every output format, filtering, exit codes
+// and determinism.
 //
-// Tests the complete path: scan subcommand dispatch, compile DB
-// autodiscovery, cmake generation, config-driven hot path classification,
-// all output formats, filtering guardrails, exit code semantics,
-// and output determinism.
-//
-// Fixture: test/fixtures/hft_core, realistic HFT order book, matching
-// engine, and feed handler. No synthetic annotations. Hot paths
-// classified via lshaz.config.yaml pattern matching.
-//
-// Requires: lshaz binary, cmake on PATH.
+// Fixture is test/fixtures/hft_core, which carries no synthetic annotations;
+// hot paths come from lshaz.config.yaml patterns. Needs the lshaz binary and
+// cmake on PATH.
 
 #include <unistd.h>
 #include <sys/wait.h>
@@ -136,14 +131,10 @@ fs::path isolateFixture(const std::string &fixture, const std::string &suffix) {
     return tmp;
 }
 
-// Every registered rule must fire on some canary fixture.
-//
-// A rule that stops firing is a silent recall loss: output identical to a
-// clean scan. The FL002/FL041 audit turned up two such rules, and both were
-// caught by a hand-written fixture rather than by any gate. Enumerating the
-// registry through `explain --list` rather than a hardcoded list means a new
-// rule cannot be added without a canary, and a rule cannot be silently
-// removed from coverage.
+// Every registered rule must fire on some canary fixture. A rule that stops
+// firing produces output identical to a clean scan, so nothing else catches
+// it. The registry is enumerated through `explain --list` rather than a
+// hardcoded list, so a new rule cannot ship without a canary.
 void testEveryRuleHasCanary(const std::string &bin,
                             const std::string &hftFixture,
                             const std::string &canaryFixture) {

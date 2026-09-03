@@ -3,7 +3,7 @@
 // FL010 asserts: on x86-64 only the seq_cst STORE costs anything (XCHG vs
 // plain MOV). A load is already a MOV and an RMW is LOCK-prefixed at every
 // ordering, so neither weakens into different machine code. That claim sets
-// FL010's severity and drives the arm64 variant in verify/run.sh, and has
+// FL010's severity and drives the arm64 variant in regress/run.sh, and has
 // never been measured.
 //
 // Single-threaded and uncontended by design: this measures instruction cost,

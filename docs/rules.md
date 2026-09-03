@@ -54,7 +54,7 @@ established mechanism carries the finding. A **gating** claim is a conjunct
 and caps the result instead. Hotness is the canonical gating claim, since no
 mechanism costs anything in code that never runs.
 
-`scan_e2e_test` fails if any emitted finding omits its claims, or if a
+`scan_test` fails if any emitted finding omits its claims, or if a
 severity outranks an established one.
 
 ### Hot-path gating caps severity

@@ -36,10 +36,10 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 | Binary | Purpose |
 |---|---|
 | `build/lshaz` | The analyzer |
-| `build/analysis_ground_truth_test` | Layout / cache-line / escape ground truth (needs full Clang link) |
-| `build/output_contract_test` | JSON / SARIF / CLI output contracts |
-| `build/pipeline_unit_test` | Pipeline, IPC, escape summary, cross-TU suppression |
-| `build/scan_e2e_test` | End-to-end scan behavior |
+| `build/analysis_test` | Layout / cache-line / escape ground truth (needs full Clang link) |
+| `build/output_test` | JSON / SARIF / CLI output contracts |
+| `build/pipeline_test` | Pipeline, IPC, escape summary, cross-TU suppression |
+| `build/scan_test` | End-to-end scan behavior |
 
 ## Testing
 
@@ -47,10 +47,10 @@ Four hand-rolled harnesses (own `main()`, no framework, no arguments, each
 runs its full suite; narrow a run by editing the harness's `main()`):
 
 ```bash
-./build/analysis_ground_truth_test   # 88 tests
-./build/output_contract_test         # 55 tests
-./build/pipeline_unit_test           # 73 tests
-./build/scan_e2e_test                # 71 tests
+./build/analysis_test   # 88 tests
+./build/output_test         # 55 tests
+./build/pipeline_test           # 73 tests
+./build/scan_test                # 71 tests
 ```
 
 **All four must pass before committing.** CI
@@ -143,7 +143,7 @@ docs/                          # this documentation
    file.
 3. Add the `.cpp` to `LSHAZ_SOURCES` in `CMakeLists.txt` (the list is
    explicit, not globbed).
-4. Add fixtures under `test/fixtures/` and extend `scan_e2e_test`.
+4. Add fixtures under `test/fixtures/` and extend `scan_test`.
 
 Constraints that are not optional:
 

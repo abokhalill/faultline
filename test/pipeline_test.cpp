@@ -1,7 +1,5 @@
-// Unit tests for pipeline components.
-//
-// Tests: matchesGlob, filterSources, CompileDBResolver, RepoProvider.
-// No subprocess invocations. Isolated, deterministic.
+// Covers matchesGlob, filterSources, CompileDBResolver and RepoProvider.
+// No subprocesses, so these stay isolated and deterministic.
 
 #include "pmu_calib.h"
 

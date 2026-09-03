@@ -1,7 +1,5 @@
-// Output schema contract tests.
-//
-// Validates JSON, SARIF, and CLI formatters produce deterministic,
-// schema-versioned output with all required fields. Standalone binary.
+// Checks the JSON, SARIF and CLI formatters emit deterministic,
+// schema-versioned output with every required field.
 
 #include "lshaz/core/diagnostic.h"
 #include "lshaz/core/metadata.h"

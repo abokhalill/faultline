@@ -22,7 +22,8 @@ reports/
 *-fork/
 valkey-base/
 results/
-verify/
+scans/
+regress/
 .claude/
 CLAUDE.md
 llvm.sh

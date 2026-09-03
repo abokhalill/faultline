@@ -1,7 +1,7 @@
 // Known-positive canary for rules the hft_core fixture does not reach.
 //
 // Every registered rule must fire on some canary, enforced by
-// scan_e2e_test. A rule that stops firing is a silent recall loss, and both
+// scan_test. A rule that stops firing is a silent recall loss, and both
 // defects found in the FL002/FL041 audit were exactly that: caught by a
 // fixture, never by a gate.
 #include <atomic>

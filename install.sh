@@ -77,7 +77,7 @@ cmake --build "$WORK_DIR/lshaz/build" -j"$(nproc)" \
 
 # Run contract tests.
 info "running contract tests..."
-"$WORK_DIR/lshaz/build/output_contract_test" \
+"$WORK_DIR/lshaz/build/output_test" \
     > "$WORK_DIR/test.log" 2>&1 \
     || { cat "$WORK_DIR/test.log"; die "contract tests failed"; }
 

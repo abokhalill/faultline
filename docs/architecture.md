@@ -334,7 +334,7 @@ that never runs. This distinction is load-bearing rather than decorative, a
 cap combined with `max` is a no-op, which is exactly what the first
 implementation did.
 
-`scan_e2e_test` gates the contract shut: every emitted finding must declare
+`scan_test` gates the contract shut: every emitted finding must declare
 its claims, and severity may never outrank an established one.
 
 ### Grading principles
@@ -348,7 +348,7 @@ its claims, and severity may never outrank an established one.
 - **A claim being constant is not a defect.** A rule's own entry condition is
   legitimately always true and supports only the floor grade. What matters is
   that the claim is *computed*, which a gate cannot verify, see
-  `verify/claim_discrimination.py`.
+  `regress/claim_discrimination.py`.
 
 ## Determinism
 

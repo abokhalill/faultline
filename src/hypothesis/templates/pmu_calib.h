@@ -3,7 +3,7 @@
 // Coherence-counter election for generated experiment bundles.
 //
 // Embedded verbatim into every bundle by PMUCalibration.cpp; also compiled
-// directly by pipeline_unit_test, so the emitted harness and the tested code
+// directly by pipeline_test, so the emitted harness and the tested code
 // are the same text. The embedding wraps this file in a raw string literal
 // delimited by LSHAZ_TPL; CMake refuses to configure if that delimiter's
 // closing form ever appears below.
