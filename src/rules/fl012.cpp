@@ -251,9 +251,13 @@ public:
             std::ostringstream hw;
             hw << "'" << site.kind << "' in hot function '"
                << FD->getQualifiedNameAsString()
-               << "'. Under contention, blocking mutex triggers futex "
-               << "syscall and context switch (~1-10us). Even uncontended, "
-               << "LOCK CMPXCHG on mutex state drains store buffer. "
+               << "'. Acquisition costs ~14ns uncontended, about 8ns over an "
+               << "atomic doing the same work, since the LOCK-prefixed RMW on "
+               << "the lock word drains the store buffer. Contention at two "
+               << "cores measured 7x that. A futex sleep costs microseconds, "
+               << "but glibc spins adaptively before blocking, so that term "
+               << "is set by how long the section is held and not by the lock "
+               << "being on this path. "
                << "[Assumes: lock is contended under production load]";
             diag.hardwareReasoning = hw.str();
 
