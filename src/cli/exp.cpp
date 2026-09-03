@@ -72,7 +72,7 @@ int runExpCommand(int argc, const char **argv) {
         if (!hyp) {
             llvm::errs() << "lshaz exp: no hypothesis template for "
                          << d.ruleID << " at " << d.location.file << ":"
-                         << d.location.line << " — skipped\n";
+                         << d.location.line << ", skipped\n";
             ++skipped;
             continue;
         }

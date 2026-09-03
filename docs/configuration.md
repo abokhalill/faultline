@@ -150,7 +150,7 @@ cloned to a temp directory; build-system execution on clones requires
 | | `--ir-batch-size <N>` | TUs per IR shard (default: 1) |
 | | `--no-ir-cache` | Disable the content-addressed IR cache (recommended in CI) |
 | | `--perf-profile <path>` | Perf profile for hot-path selection |
-| | `--allocator <name>` | `tcmalloc`, `jemalloc`, `mimalloc` — shapes FL020 |
+| | `--allocator <name>` | `tcmalloc`, `jemalloc`, `mimalloc`, shapes FL020 |
 | | `--calibration-store <path>` | Calibration feedback store (JSON). Absent file = empty store; unparseable file = exit 3. |
 | | `--pmu-trace <file>` | Production PMU trace ingestion |
 | | `--pmu-priors <file>` | Persist/load Bayesian hazard priors |
@@ -162,10 +162,10 @@ cloned to a temp directory; build-system execution on clones requires
 
 | Code | Meaning |
 |---|---|
-| 0 | Clean — no diagnostics |
+| 0 | Clean, no diagnostics |
 | 1 | Findings emitted |
-| 2 | Parse errors — one or more TUs failed to compile (and no findings) |
-| 3 | Fatal — infrastructure failure: bad arguments, missing files, unreadable calibration store |
+| 2 | Parse errors. One or more TUs failed to compile (and no findings) |
+| 3 | Fatal. Infrastructure failure: bad arguments, missing files, unreadable calibration store |
 
 When some TUs fail and findings are still emitted, the exit code is 1.
 
@@ -229,7 +229,7 @@ lshaz init [path] [options]
 Detects the build system (CMake, Meson, Make via `bear`), generates
 `compile_commands.json`, and writes a starter `lshaz.config.yaml`.
 
-For CMake/Meson projects only the **configure** step runs by default — no
+For CMake/Meson projects only the **configure** step runs by default, no
 project dependencies need to be installed, and the compilation database is
 used even if configure exits non-zero. Use `--build` when the project
 generates headers (`configure_file()`, `custom_target()`) that TUs include.
@@ -260,7 +260,7 @@ and per-severity distribution shifts, and new / resolved / unchanged findings.
 Diff key: `(ruleID, file, line)`. Remote-scan temp paths are normalized
 automatically.
 
-Exit 0 when no new findings; exit 1 on regressions — usable directly as a CI
+Exit 0 when no new findings; exit 1 on regressions, usable directly as a CI
 gate:
 
 ```bash

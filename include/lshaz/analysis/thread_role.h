@@ -35,7 +35,7 @@ struct ThreadRoleSummary {
 
     // Virtual methods some class actually overrides, qualified names. A call
     // to a method absent here is monomorphic program-wide, which is the
-    // difference between paying ~1ns and ~9ns. Only the merged set can say —
+    // difference between paying ~1ns and ~9ns. Only the merged set can say,
     // the override usually lives in another TU than the call.
     std::set<std::string> overriddenVirtuals;
 

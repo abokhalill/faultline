@@ -480,7 +480,7 @@ public:
                        << "' in '" << FD->getQualifiedNameAsString()
                        << "': lowers to LOCK-prefixed instruction on x86-64. "
                        << "On TSO, acq_rel RMW emits the same LOCK-prefixed op "
-                       << "— no runtime cost difference, but seq_cst prevents "
+                       << ", no runtime cost difference, but seq_cst prevents "
                        << "compiler reordering across the operation.";
                 }
             }

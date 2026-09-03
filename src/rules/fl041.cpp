@@ -83,13 +83,9 @@ public:
             containsCI(structName, "mpmc") ||
             containsCI(structName, "mpsc");
 
-        // Plain indices need a far tighter signal than atomic ones. "read"
-        // and "write" as substrings match bytes_read/bytes_written on every
-        // stats struct in a server; on atomic fields that was rare enough to
-        // carry, on all mutable fields it matches everything. Demand instead
-        // what actually defines a queue: one head-like and one tail-like
-        // index, and demand they be the co-located pair rather than merely
-        // present somewhere in the record.
+        // "read"/"write" as substrings match bytes_read on every stats struct,
+        // so plain indices need the queue shape itself: a head-like and a
+        // tail-like index that are the co-located pair.
         auto endName = [](const std::string &n, bool headSide) {
             static const char *head[] = {"head", "front", "dequeue", "cons", "pop"};
             static const char *tail[] = {"tail", "back", "enqueue", "prod", "push"};
@@ -157,7 +153,7 @@ public:
         if (!fromAtomics)
             escalations.push_back(
                 "indices are not atomic: single-writer-per-index needs no "
-                "atomicity, so the coherence cost is unchanged — what is "
+                "atomicity, so the coherence cost is unchanged, what is "
                 "unproven is that producer and consumer run concurrently");
 
         for (const auto &pair : atomicPairs) {

@@ -75,7 +75,7 @@ public:
 
         std::string parent = CD->getParent()->getQualifiedNameAsString();
 
-        // RAII lock wrappers — resolve through template specializations.
+        // RAII lock wrappers. Resolve through template specializations.
         std::string resolvedName = parent;
         if (const auto *CTSD = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(
                 CD->getParent())) {
@@ -157,7 +157,7 @@ public:
                "over an atomic doing the same work. A futex sleep and context "
                "switch costs microseconds, but modern mutexes spin adaptively "
                "and only block when the critical section is long enough to "
-               "make spinning wasteful — so that term applies to the length of "
+               "make spinning wasteful, so that term applies to the length of "
                "the section held, not to the presence of a lock.";
     }
 
@@ -199,7 +199,7 @@ public:
             }
 
             escalations.push_back(
-                "the convoy cost — futex wait and context switch, ~1-10us — "
+                "the convoy cost (futex wait and context switch, ~1-10us) "
                 "requires a second thread contending this lock, which is not "
                 "established here; severity reflects acquisition frequency "
                 "and critical-section width only");

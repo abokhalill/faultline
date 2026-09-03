@@ -5,7 +5,7 @@
 // all output formats, filtering guardrails, exit code semantics,
 // and output determinism.
 //
-// Fixture: test/fixtures/hft_core — realistic HFT order book, matching
+// Fixture: test/fixtures/hft_core, realistic HFT order book, matching
 // engine, and feed handler. No synthetic annotations. Hot paths
 // classified via lshaz.config.yaml pattern matching.
 //
@@ -414,7 +414,7 @@ void testMultipleTUs(const std::string &bin, const std::string &fixture) {
     fs::remove_all(tmp);
 }
 
-// Fixture: test/fixtures/thread_roles — SharedStats has its two atomic
+// Fixture: test/fixtures/thread_roles, SharedStats has its two atomic
 // counters written by main (main.cpp) and a pthread worker (worker.cpp);
 // LocalStats is the same layout with main-only writers. The escalation
 // must attribute the first pair as disjoint and leave the control alone.
@@ -666,7 +666,7 @@ void testLostShardIsNotACleanScan(const std::string &bin,
 
     // Records are written per TU, so a shard that dies partway still hands
     // back what it finished. Without that, one fatal TU discards every TU the
-    // shard already completed — the difference between 3/4 and 2/4 here was
+    // shard already completed. The difference between 3/4 and 2/4 here was
     // 354/354 and 0/354 on rocksdb.
     auto midKill = run("LSHAZ_FAULT_KILL_SHARD=0:1 " + scan);
     check(contains(summary(midKill.err), "3/4") &&
@@ -784,7 +784,6 @@ void testConfigAutodiscoveryAbsent(const std::string &bin, const std::string &fi
     auto tmp = isolateFixture(fixture, "noconf");
     auto project = (tmp / "project").string();
 
-    // Remove the config file.
     fs::remove(fs::path(project) / "lshaz.config.yaml");
 
     auto r = run(bin + " scan " + project + " --no-ir --format json");
@@ -802,7 +801,7 @@ void testExitCodeClean(const std::string &bin, const std::string &fixture) {
     auto tmp = isolateFixture(fixture, "clean");
     auto project = (tmp / "project").string();
 
-    // Use min-severity Critical — may or may not have Critical findings.
+    // Use min-severity Critical, may or may not have Critical findings.
     // The key contract: exit 0 = no findings, exit 1 = findings.
     auto r = run(bin + " scan " + project + " --no-ir --min-severity Critical");
     check(r.exitCode == 0 || r.exitCode == 1,

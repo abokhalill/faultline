@@ -19,11 +19,11 @@ bool RepoProvider::isRemoteURL(const std::string &target) {
 
 bool RepoProvider::isSafeURL(const std::string &url) {
     // Only HTTPS is safe for untrusted input. Reject:
-    //   file://  — local filesystem exfiltration
-    //   git://   — unauthenticated, MITM-able
-    //   ssh://   — may trigger unexpected key prompts
-    //   git@     — SSH shorthand, same concerns
-    //   http://  — MITM-able, no transport security
+    //   file://, local filesystem exfiltration
+    //   git://, unauthenticated, MITM-able
+    //   ssh://, may trigger unexpected key prompts
+    //   git@, SSH shorthand, same concerns
+    //   http://, MITM-able, no transport security
     if (url.find("https://") != 0)
         return false;
     // Reject URLs with embedded credentials (user:pass@host).

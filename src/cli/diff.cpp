@@ -349,7 +349,7 @@ int runDiffCommand(int argc, const char **argv) {
         llvm::outs() << "New findings (" << newFindings.size() << "):\n";
         for (const auto *e : newFindings) {
             llvm::outs() << "  + [" << e->severity << "] " << e->key.ruleID
-                         << " — " << e->title << "\n"
+                         << ", " << e->title << "\n"
                          << "    " << e->key.file << ":" << e->key.line << "\n";
         }
         llvm::outs() << "\n";
@@ -359,7 +359,7 @@ int runDiffCommand(int argc, const char **argv) {
         llvm::outs() << "Resolved findings (" << resolved.size() << "):\n";
         for (const auto *e : resolved) {
             llvm::outs() << "  - [" << e->severity << "] " << e->key.ruleID
-                         << " — " << e->title << "\n"
+                         << ", " << e->title << "\n"
                          << "    " << e->key.file << ":" << e->key.line << "\n";
         }
         llvm::outs() << "\n";

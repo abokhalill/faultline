@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# lshaz PR Analysis — runs lshaz on the PR diff and gates on new findings.
+# lshaz PR Analysis. Runs lshaz on the PR diff and gates on new findings.
 #
 # Usage: Copy this file to .github/workflows/ in any project that uses lshaz.
 # Requires compile_commands.json in the repo (run lshaz init first).

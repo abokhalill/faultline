@@ -82,7 +82,7 @@ public:
         const FieldLineEntry *b;
         uint64_t lineIndex;
         // a == b: two ELEMENTS of one array share the line. Consumers must
-        // gate this on writer evidence for distinct indices — co-residency
+        // gate this on writer evidence for distinct indices, co-residency
         // alone does not establish that two writers target different slots.
         bool intraArray = false;
     };

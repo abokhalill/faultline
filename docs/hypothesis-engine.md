@@ -12,7 +12,7 @@ scan → hyp → exp → build/run → feedback → scan (with suppression)
 Every stage is a standalone CLI subcommand operating on files; flags are in
 [configuration.md](configuration.md).
 
-## Stage 1: `lshaz hyp` — hypothesis construction
+## Stage 1: `lshaz hyp`, hypothesis construction
 
 Maps each diagnostic to a `LatencyHypothesis`:
 
@@ -30,10 +30,10 @@ Every hazard class the rules emit has a hypothesis template. Evidence tier is
 inferred from the structural evidence: AST-provable layout facts → `Proven`,
 concurrency signals → `Likely`, otherwise `Speculative`.
 
-Input is scan JSON. Hypothesis JSON is an output artifact — passing it back
+Input is scan JSON. Hypothesis JSON is an output artifact, passing it back
 into `hyp` or `exp` is rejected with an actionable error.
 
-## Stage 2: `lshaz exp` — experiment synthesis
+## Stage 2: `lshaz exp`, experiment synthesis
 
 Generates one self-contained directory per hypothesis:
 
@@ -44,17 +44,17 @@ Generates one self-contained directory per hypothesis:
 | `src/control.cpp` | The same kernel with the hazard removed (aligned, sharded, direct-dispatch, …) |
 | `src/harness.cpp` | Warmup → measurement loop, core pinning, binary sample output; dispatches variants via `--variant` |
 | `analyze` (built by the Makefile) | Bootstraps the (1−α) percentile CI of the **relative p99.9 effect** between arms (percentile-method bootstrap; `--bootstrap` reps, α configurable) |
-| `Makefile` | Treatment and control compiled as **separate TUs**, linked into one binary — the compiler cannot optimize across the comparison boundary |
+| `Makefile` | Treatment and control compiled as **separate TUs**, linked into one binary. The compiler cannot optimize across the comparison boundary |
 | `scripts/setup_env.sh` | Disables turbo/THP/ASLR/C-states, sets performance governor, records the achieved environment to `results/env.json` |
 | `scripts/run_all.sh` | Preflight (`perf_event_paranoid` check) → build → per-variant runs with guarded PMU passes; any failed pass tears the environment down and exits non-zero rather than reporting partial results |
 | `scripts/run_perf_stat.sh` / `run_perf_c2c.sh` | Counter collection partitioned to PMU limits; `perf c2c` for sharing/contention classes |
 | `hypothesis.json` | Machine-readable hypothesis, including the structural features required by `feedback` |
 | `README.md` | Human-readable design with the statistical parameters |
-| `src/pmu_calib.h`, `pmu_sweep` | FL003 only — coherence-counter election and the stride sweep that carries the verdict (below) |
+| `src/pmu_calib.h`, `pmu_sweep` | FL003 only. Coherence-counter election and the stride sweep that carries the verdict (below) |
 
 13 hazard classes have dedicated treatment/control kernel generators.
 CentralizedDispatch, HazardAmplification, and SynthesizedInteraction emit
-editable stubs — compound hazards need context a generator cannot invent.
+editable stubs. Compound hazards need context a generator cannot invent.
 
 ### The coherence endpoint (FL003)
 
@@ -75,11 +75,11 @@ mechanism, `pmu_sweep` calibrates before it measures:
 
 1. **Candidates** are enumerated as `(event × umask)` pairs, not event names.
    On Zen the discrimination lives in a single umask bit, and an all-sources
-   OR folds local-L2 and DRAM fills into the same counter — roughly 10× worse
+   OR folds local-L2 and DRAM fills into the same counter, roughly 10× worse
    signal-to-background, with the collapse smeared away. `LSHAZ_PMU_CANDIDATES`
    appends raw configs for silicon the built-in table predates; they are
    shape-tested like any other.
-2. **Stage 1** is a two-point ratio against a known-shared line — a necessary
+2. **Stage 1** is a two-point ratio against a known-shared line, a necessary
    condition, cheap, and not sufficient.
 3. **Stage 2** requires the count to collapse at exactly the configured line
    size, sampled as the median of repeats. The two arms differ in prefetch
@@ -88,7 +88,7 @@ mechanism, `pmu_sweep` calibrates before it measures:
    at the line is what lets calibration *reject* a discriminating
    non-coherence event; a test that can only confirm is not a test.
 4. **Ranking** uses a Poisson lower bound on the count ratio. A zero control
-   arm widens the interval rather than being clamped to 1 — clamping turns
+   arm widens the interval rather than being clamped to 1, clamping turns
    "below the measurement floor" into an unbounded score computed from a data
    point that does not exist, which ranks rare noise-driven events above the
    real one.
@@ -99,7 +99,7 @@ configured line size is wrong for the host. This is the only check in the
 tool that can catch a mis-set target line size, which otherwise corrupts
 FL001/FL002/FL003 verdicts uniformly and invisibly.
 
-Every failure path withholds the verdict and names its remediation — no PMU
+Every failure path withholds the verdict and names its remediation, no PMU
 access, no known encoding for the vendor, no candidate reproducing the
 mechanism, or a multiplexed counter (refused, since a scaled estimate is
 indistinguishable from a count in the value alone). None of them fall back to
@@ -118,12 +118,12 @@ sudo sysctl --system                                      # permanent
 `setup_env.sh`/`teardown_env.sh` require root (frequency scaling, core
 isolation).
 
-## Stage 3: `lshaz feedback` — verdict ingestion
+## Stage 3: `lshaz feedback`, verdict ingestion
 
 Reads `hypothesis.json`, `results/{treatment,control}_samples.bin`, and
 `results/env.json`; computes per-arm percentile statistics, Welch's t-test,
 and the **achieved power** at the observed sample sizes (two-sample z
-approximation — target power is a design parameter, achieved power is what
+approximation. Target power is a design parameter, achieved power is what
 gates the verdict).
 
 | Verdict | Criterion |
@@ -137,7 +137,7 @@ gates the verdict).
 Each verdict is stored as a labeled record with a quality score:
 
 - Power factor (capped at 1.0)
-- Environment quality from `results/env.json` — penalties for missing
+- Environment quality from `results/env.json`, penalties for missing
   confound controls: turbo enabled −0.15, non-performance governor −0.10, no
   core pinning −0.20
 - Confound risk margin
@@ -149,9 +149,9 @@ effect is not evidence of absence. Bundles missing structural features
 
 ### Calibration store
 
-A versioned JSON file, written atomically (temp file + rename — a crashed
+A versioned JSON file, written atomically (temp file + rename, a crashed
 write cannot corrupt the store). An absent file is a valid empty store; an
-unparseable file is a **hard error** (scan exits 3) — scanning with silently
+unparseable file is a **hard error** (scan exits 3), scanning with silently
 disabled calibration would misreport findings the user believes are
 calibrated.
 

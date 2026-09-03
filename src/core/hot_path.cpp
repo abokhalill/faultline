@@ -134,7 +134,7 @@ bool HotPathOracle::hasHotAnnotation(const clang::FunctionDecl *FD) const {
             if (Ann->getAnnotation() == "lshaz_hot")
                 return true;
         }
-        // __attribute__((hot)) — GCC/Clang standard hot attribute
+        // __attribute__((hot)), GCC/Clang standard hot attribute
         if (llvm::isa<clang::HotAttr>(A))
             return true;
     }

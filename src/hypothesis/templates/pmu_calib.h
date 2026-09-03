@@ -53,7 +53,7 @@ enum lshaz_pmu_status {
     LSHAZ_PMU_NO_DISCRIMINATOR  // candidates exist, none reproduces the mechanism
 };
 
-// ---------------------------------------------------------------- pure math
+// pure math
 
 // Lower bound of the count ratio. A zero control arm must widen the interval,
 // never be clamped to 1: clamping turns "below the measurement floor" into an
@@ -83,7 +83,7 @@ inline size_t lshaz_pmu_cliff_index(const uint64_t *curve, size_t n) {
     return 0;
 }
 
-// ---------------------------------------------------------------- counters
+// counters
 
 struct lshaz_pmu_read { uint64_t value, enabled, running; };
 
@@ -138,7 +138,7 @@ struct lshaz_pmu_scope {
     ~lshaz_pmu_scope() { if (fd >= 0) close(fd); }
 };
 
-// ---------------------------------------------------------------- candidates
+// candidates
 
 inline void lshaz_pmu_push(std::vector<lshaz_pmu_candidate> &v,
                            uint64_t ev, uint64_t umask) {
@@ -168,7 +168,7 @@ inline std::vector<lshaz_pmu_candidate> lshaz_pmu_candidates() {
         for (uint64_t ev : {0x43ull, 0x44ull})
             for (int b = 0; b < 8; ++b) lshaz_pmu_push(v, ev, 1ull << b);
     } else if (std::strcmp(vendor, "GenuineIntel") == 0) {
-        // MEM_LOAD_L3_HIT_RETIRED.XSNP_* — the umask is renamed across
+        // MEM_LOAD_L3_HIT_RETIRED.XSNP_*. The umask is renamed across
         // generations (HITM pre-Ice Lake, FWD after), so sweep the bits
         // rather than encode a generation table.
         for (uint64_t ev : {0xD2ull, 0xD3ull})
@@ -194,7 +194,7 @@ inline std::vector<lshaz_pmu_candidate> lshaz_pmu_candidates() {
     return v;
 }
 
-// ---------------------------------------------------------------- one arm
+// one arm
 
 // The measured thread writes offset 0 in every arm, so its instruction stream
 // is bit-identical across strides and only the peer's target moves.
@@ -244,7 +244,7 @@ inline bool lshaz_pmu_arm(uint64_t cfg, long stride, int peer_cpu,
     return ok;
 }
 
-// ---------------------------------------------------------------- election
+// election
 
 inline lshaz_pmu_instrument
 lshaz_pmu_calibrate(uint64_t line_bytes, int peer_cpu, lshaz_pmu_status *st) {
@@ -271,13 +271,13 @@ lshaz_pmu_calibrate(uint64_t line_bytes, int peer_cpu, lshaz_pmu_status *st) {
 
         // Stage 2: the mechanism signature. A two-point ratio shows only that
         // a counter separates the arms, and the arms also differ in prefetch,
-        // store-buffer occupancy and page locality — so counters sensitive to
+        // store-buffer occupancy and page locality, so counters sensitive to
         // those pass stage 1. Requiring the collapse at the line size is what
         // lets calibration REJECT a discriminating non-coherence event; a test
         // that can only confirm is not a test.
         //
         // Median of repeats, because one sample per stride lets a single
-        // descheduled window invent or erase a collapse — and the shape test
+        // descheduled window invent or erase a collapse, and the shape test
         // is the only thing standing between a wrong counter and the verdict,
         // so it must be sampled at least as carefully as the measurement it
         // gates.

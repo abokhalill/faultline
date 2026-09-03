@@ -25,7 +25,7 @@ struct Config;
 // How a function came to be considered hot. Ordered weakest to strongest:
 // an operator's explicit assertion and a real profile are evidence, a
 // structural inference is a hypothesis the shape of the code supports.
-// Rules must not treat these alike — see supportedCeiling().
+// Rules must not treat these alike, see supportedCeiling().
 enum class HotnessSource : uint8_t {
     None = 0,
     Candidate,        // externally visible, unresolved: only the merged
@@ -60,15 +60,10 @@ public:
     // call edges are marked hot.
     void propagateViaCallGraph(const CallGraph &cg, unsigned maxDepth = 8);
 
-    // Derive hotness from code shape when nothing else supplies it.
-    //
-    // Repetition is what turns a cache miss into a steady-state cost, and a
-    // loop is where repetition is written down. Seeded from the TU's thread
-    // entries and main, a callee inherits its caller's hotness plus the loop
-    // nesting at the call site; recursion is self-repetition and counts.
-    // Nothing here names a project symbol, so it cannot overfit to one
-    // codebase — but it is per-TU: a function looped over from another
-    // translation unit is invisible here and must be resolved by
+    // Derive hotness from code shape when nothing else supplies it. Seeded
+    // from this TU's thread entries and main; a callee inherits its caller's
+    // hotness plus the loop nesting at the call site, and recursion counts as
+    // self-repetition. Per-TU, so a function looped over from elsewhere needs
     // inferGlobalHotness over the merged graph.
     void inferFromCodeShape(const CallGraph &cg);
 

@@ -2,7 +2,7 @@
 # The inverse of everything else in this directory.
 #
 # Every other harness asks: we flagged this, does it cost anything? That is
-# precision. This asks the question we have never asked — here is real
+# precision. This asks the question we have never asked, here is real
 # coherence cost in a running binary, did lshaz find it? Without it the
 # false-negative rate is unknown, and that is the number the project is
 # actually graded on.
@@ -38,7 +38,7 @@ echo "HITM observed: ${TOTAL:-0} local, ${REMOTE:-0} remote"
 if [ "$(( ${TOTAL:-0} + ${REMOTE:-0} ))" -eq 0 ]; then
     # Not a pass. A workload with no coherence cost measures nothing about
     # recall; it means this workload cannot answer the question.
-    echo "NO HITM UNDER THIS WORKLOAD — inconclusive, not a clean bill"
+    echo "NO HITM UNDER THIS WORKLOAD, inconclusive, not a clean bill"
     exit 3
 fi
 
@@ -72,7 +72,7 @@ for ln in open(report, errors='ignore'):
         continue
     # Userspace only, and only the binary under test. Kernel coherence traffic
     # dominates every server workload we have measured, and lshaz neither
-    # analyses the kernel nor claims to — scoring against it measures nothing.
+    # analyses the kernel nor claims to, scoring against it measures nothing.
     if parts[i] != '[.]':
         continue
     obj = parts[i + 2] if i + 2 < len(parts) else ''
@@ -99,7 +99,7 @@ for f in found:
             flagged.add(v.split('::')[-1])
 
 if not hot:
-    print(f"\nNo HITM attributable to '{target}' — all of it is kernel or other objects.")
+    print(f"\nNo HITM attributable to '{target}'. All of it is kernel or other objects.")
     print("Recall is UNANSWERABLE for this workload: there is no userspace")
     print("coherence cost to have found or missed. That is a result about the")
     print("workload, not a score for the analyser.")

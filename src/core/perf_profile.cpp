@@ -62,7 +62,7 @@ bool PerfProfileParser::parseFlat(const std::string &content) {
         if (funcName.empty() || countStr.empty())
             continue;
 
-        // Parse count — must be numeric.
+        // Parse count, must be numeric.
         uint64_t count = 0;
         bool numeric = true;
         for (char c : countStr) {

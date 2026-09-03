@@ -62,7 +62,7 @@ bool EscapeAnalysis::isAtomicType(clang::QualType QT) const {
     if (QT.getCanonicalType()->isAtomicType())
         return true;
 
-    // std::atomic<T> — match via template specialization.
+    // std::atomic<T>, match via template specialization.
     const clang::CXXRecordDecl *RD = getUnderlyingRecord(QT);
     if (isQualifiedNameOneOf(RD, {"std::atomic", "std::atomic_ref"}))
         return true;
@@ -785,13 +785,10 @@ private:
                     ++rec.loopSites;
                 if (currentFn)
                     rec.writers.insert(currentFn->getCanonicalDecl());
-                // How the writer reached the object is what separates
-                // sharing from a handoff. `g_stats.hits++` reaches a fixed
-                // object every thread can name; `io->len = n` operates on
-                // whatever this call was handed, and a queue hands each
-                // request to one owner at a time. Both look identical to a
-                // writer count, which is why per-request objects graded as
-                // contended.
+                // Reach separates sharing from handoff: `g_stats.hits++` names
+                // a fixed object, `io->len = n` touches whatever was handed
+                // in, and a queue hands each request to one owner. A writer
+                // count cannot tell them apart.
                 if (rootsAtGlobal(ME->getBase()))
                     rec.standingSites++;
                 else

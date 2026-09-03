@@ -195,11 +195,11 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                     "higher-severity contributor first.";
 
                 compound.escalations.push_back(
-                    "Contributing: " + dA.ruleID + " — " + dA.title);
+                    "Contributing: " + dA.ruleID + ", " + dA.title);
                 compound.escalations.push_back(
-                    "Contributing: " + dB.ruleID + " — " + dB.title);
+                    "Contributing: " + dB.ruleID + ", " + dB.title);
                 compound.escalations.push_back(
-                    "Interaction template: " + tmpl->id + " — " +
+                    "Interaction template: " + tmpl->id + ", " +
                     tmpl->amplificationMechanism);
 
                 synthesized.push_back(std::move(compound));
@@ -285,11 +285,11 @@ void synthesizeInteractions(std::vector<Diagnostic> &diagnostics) {
                     "latency impact exceeds the sum of individual effects.";
 
                 compound.escalations.push_back(
-                    "Contributing: " + dA.ruleID + " — " + dA.title);
+                    "Contributing: " + dA.ruleID + ", " + dA.title);
                 compound.escalations.push_back(
-                    "Contributing: " + dB.ruleID + " — " + dB.title);
+                    "Contributing: " + dB.ruleID + ", " + dB.title);
                 compound.escalations.push_back(
-                    "Contributing: " + dC.ruleID + " — " + dC.title);
+                    "Contributing: " + dC.ruleID + ", " + dC.title);
                 compound.escalations.push_back(
                     "Interaction template: " + tmpl.id);
 

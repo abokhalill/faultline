@@ -78,7 +78,7 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "}\n\n"
        << "/* Contending writer on a sibling-distinct physical core. Without a\n"
        << "   second core mutating the co-located field there is no remote RFO,\n"
-       << "   hence no false sharing to measure — a single-writer 'experiment'\n"
+       << "   hence no false sharing to measure. A single-writer 'experiment'\n"
        << "   can only ever refute the hazard it was built to test. An smt sibling\n"
        << "   shares l1d and would not ping-pong, so the core choice excludes the\n"
        << "   measured core's thread_siblings and fails loud if none remains. */\n"
@@ -128,7 +128,7 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "            for (int c = 0; c < n; ++c) if (c != measured) {\n"
        << "                std::fprintf(stderr, \"[lshaz] WARN: smt topology unreadable; \"\n"
        << "                    \"aggressor cpu=%d may be an smt sibling of measured cpu=%d \"\n"
-       << "                    \"— coherence effect may be understated.\\n\", c, measured);\n"
+       << "                    \". Coherence effect may be understated.\\n\", c, measured);\n"
        << "                return c;\n"
        << "            }\n"
        << "        } else {\n"
@@ -141,7 +141,7 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "                }\n"
        << "        }\n"
        << "        std::fprintf(stderr, \"[lshaz] FATAL: no physical core distinct from \"\n"
-       << "            \"cpu %d — false sharing is unreproducible on one physical core.\\n\",\n"
+       << "            \"cpu %d. False sharing is unreproducible on one physical core.\\n\",\n"
        << "            measured);\n"
        << "        std::abort();\n"
        << "    }\n"
@@ -160,7 +160,7 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
           an unpinned thread is a snapshot that goes stale the moment the
           scheduler migrates it, and a measured thread that wanders off
           the core the peer set was built around records the uncontended
-          floor — indistinguishable from a real negative. */
+          floor. Indistinguishable from a real negative. */
        << "        int measured = sched_getcpu();\n"
        << "        cpu_set_t self; CPU_ZERO(&self); CPU_SET(measured, &self);\n"
        << "        if (sched_setaffinity(0, sizeof(self), &self) != 0) {\n"
@@ -186,7 +186,7 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        /* the constructor must not return until every peer is pinned and
           writing. thread spawn costs more than a short measured loop, so
           returning early lets the loop finish against a quiet line and
-          report no contention — a false negative produced by a race, which
+          report no contention. A false negative produced by a race, which
           is indistinguishable from a real negative in the output. */
        << "        while (ready_.load(std::memory_order_acquire) < (int)cores.size()) ;\n"
        << "    }\n"
@@ -215,7 +215,7 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "        long n = sysconf(_SC_NPROCESSORS_ONLN);\n"
        << "        std::vector<int> out;\n"
        /* one thread per PHYSICAL core: two peers on one core share l1d,
-          never ping-pong each other, and contend for issue ports —
+          never ping-pong each other, and contend for issue ports,
           execution-resource noise dressed up as coherence cost. claim
           the whole physical core when a peer is chosen. */
        << "        std::set<int> claimed = sib;\n"
@@ -229,7 +229,7 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "        }\n"
        << "        if (out.empty()) {\n"
        << "            std::fprintf(stderr, \"[lshaz] FATAL: no physical core on \"\n"
-       << "                \"node %d distinct from cpu %d — striped false sharing \"\n"
+       << "                \"node %d distinct from cpu %d, striped false sharing \"\n"
        << "                \"is unreproducible here.\\n\", node, measured);\n"
        << "            std::abort();\n"
        << "        }\n"
@@ -239,7 +239,7 @@ ExperimentFile ExperimentSynthesizer::generateCommonHeader(
        << "        if ((int)out.size() < want - 1 && !warned) {\n"
        << "            warned = true;\n"
        << "            std::fprintf(stderr, \"[lshaz] WARN: %d same-node PHYSICAL peer core(s) \"\n"
-       << "                \"available, %d requested — contention understated.\\n\",\n"
+       << "                \"available, %d requested, contention understated.\\n\",\n"
        << "                (int)out.size(), want - 1);\n"
        << "        }\n"
        << "        return out;\n"
@@ -266,7 +266,7 @@ ExperimentFile ExperimentSynthesizer::generateHarness(
        << "#include <sched.h>\n"
        << "#include <thread>\n"
        << "#include <vector>\n\n"
-       << "/* Kernels linked from separate TUs — prevents cross-variant optimization. */\n"
+       << "/* Kernels linked from separate TUs. Prevents cross-variant optimization. */\n"
        << "extern void treatment_kernel(uint64_t iteration);\n"
        << "extern void control_kernel(uint64_t iteration);\n"
        << "extern void treatment_setup();\n"
@@ -420,7 +420,7 @@ ExperimentFile ExperimentSynthesizer::generateRunAll(
        << "fi\n"
        << "echo \"[lshaz] Experiment complete. Results in results/\"\n"
        << "# Non-zero == not CONFIRMED above the mde (refuted/inconclusive/confounded/\n"
-       << "# error). Never masked — the caller sees system truth.\n"
+       << "# error). Never masked. The caller sees system truth.\n"
        << "exit $VERDICT_STATUS\n";
 
     return {"scripts/run_all.sh", os.str()};
@@ -475,13 +475,13 @@ ExperimentFile ExperimentSynthesizer::generateReadme(
        << "- Evidence tier: " << evidenceTierName(hyp.evidenceTier) << "\n\n"
        << "## Verdict\n\n"
        << "`analyze` bootstraps the (1−α) percentile CI of the relative p99.9 "
-       << "effect — distribution-free, because latency is heavy-tailed and a "
+       << "effect. Distribution-free, because latency is heavy-tailed and a "
        << "point compare of two tail quantiles cannot hold the false-positive "
        << "rate at α. A within-control split-half drift CI first gates runs "
        << "where machine drift is aliased with the arm label.\n\n"
        << "Exit codes (mirroring `ExperimentVerdict`): `0` confirmed (CI lower "
        << "bound > mde), `1` refuted (CI upper bound < mde), `2` error, `3` "
-       << "inconclusive (CI straddles mde — under-powered at this sample count), "
+       << "inconclusive (CI straddles mde, under-powered at this sample count), "
        << "`4` confounded (control tail drifted ≥ mde within the run).\n\n"
        << "## Running\n\n"
        << "```bash\n"
@@ -577,7 +577,7 @@ ExperimentFile ExperimentSynthesizer::generateAnalyze(
        << "// percentile-method bootstrap of the relative effect (qA - qB)/qB at\n"
        << "// quantile q. distribution-free: correct for the heavy-tailed, skewed\n"
        << "// latency law where a t-test's normality assumption is invalid. scratch\n"
-       << "// buffers are reused across reps — no per-rep heap churn.\n"
+       << "// buffers are reused across reps, no per-rep heap churn.\n"
        << "CI boot_rel(const std::vector<uint64_t> &A, const std::vector<uint64_t> &B,\n"
        << "            double q, double alpha, int reps, std::mt19937_64 &rng) {\n"
        << "    if (A.empty() || B.empty()) return {0, 0, 0};\n"
@@ -616,7 +616,7 @@ ExperimentFile ExperimentSynthesizer::generateAnalyze(
        << "    std::vector<uint64_t> t, c;  /* time-ordered */\n"
        << "    if (!load(tp, t) || !load(cp, c)) return 2;\n"
        << "    if (t.empty() || c.empty()) {\n"
-       << "        fprintf(stderr, \"[lshaz] FATAL: empty sample set — cannot judge.\\n\");\n"
+       << "        fprintf(stderr, \"[lshaz] FATAL: empty sample set, cannot judge.\\n\");\n"
        << "        return 2;\n"
        << "    }\n\n"
        << "    std::mt19937_64 rng(seed);\n"
@@ -675,7 +675,7 @@ ExperimentFile ExperimentSynthesizer::generateAnalyze(
  * from optimizing across the comparison boundary.
  *
  * Invariant: every kernel defines exactly {setup, teardown, kernel}.
- * The harness calls them via function pointer — no devirtualization.
+ * The harness calls them via function pointer, no devirtualization.
  */
 
 namespace {
@@ -701,7 +701,7 @@ unsigned padToLine(unsigned sz) { return ((sz + 63u) / 64u) * 64u; }
 
 } // anonymous namespace
 
-/* FL001 — CacheGeometry: multi-line struct vs single-line aligned. */
+/* FL001. CacheGeometry: multi-line struct vs single-line aligned. */
 static ExperimentFile genTreatmentCacheGeometry(const LatencyHypothesis &hyp) {
     unsigned sz = evidenceUnsigned(hyp, "sizeof", 128);
     unsigned nlines = evidenceUnsigned(hyp, "lines_spanned", 2);
@@ -788,7 +788,7 @@ static ExperimentFile genTreatmentFalseSharing(const LatencyHypothesis &hyp) {
        << "/* RMW, not store: a relaxed store retires into the store buffer and\n"
        << "   lfence does not drain it, so the rdtsc bracket never sees the RFO\n"
        << "   stall and treatment reads identical to control. A locked fetch_add\n"
-       << "   cannot retire until it owns the line — that exposes the invalidation\n"
+       << "   cannot retire until it owns the line. That exposes the invalidation\n"
        << "   latency this finding is about. Measured +50% p99.9 on Zen4. */\n"
        << "void treatment_kernel(uint64_t /*iteration*/) {\n"
        << "    shared->a.fetch_add(1, std::memory_order_relaxed);\n"
@@ -811,10 +811,10 @@ static ExperimentFile genControlFalseSharing(const LatencyHypothesis &hyp) {
        << "void control_setup() {\n"
        << "    la = new LineA;\n"
        << "    lb = new LineB;\n"
-       << "    agg = new lshaz_aggressor(&lb->b);  /* distinct line — no contention */\n"
+       << "    agg = new lshaz_aggressor(&lb->b);  /* distinct line, no contention */\n"
        << "}\n\n"
        << "void control_teardown() { delete agg; delete la; delete lb; }\n\n"
-       << "/* same RMW as treatment — the only changed variable is line residence. */\n"
+       << "/* same RMW as treatment. The only changed variable is line residence. */\n"
        << "void control_kernel(uint64_t /*iteration*/) {\n"
        << "    la->a.fetch_add(1, std::memory_order_relaxed);\n"
        << "    lshaz_do_not_optimize(la->a);\n"
@@ -848,7 +848,7 @@ static std::string slotStructFor(unsigned elemSize, bool aligned) {
     return os.str();
 }
 
-/* FL003 — StripedArray: packed per-thread slots vs line-strided. */
+/* FL003. StripedArray: packed per-thread slots vs line-strided. */
 static ExperimentFile genTreatmentStripedArray(const LatencyHypothesis &hyp) {
     unsigned es  = evidenceUnsigned(hyp, "elem_size", 8);
     unsigned n   = evidenceUnsigned(hyp, "elem_count", 16);
@@ -873,7 +873,7 @@ static ExperimentFile genTreatmentStripedArray(const LatencyHypothesis &hyp) {
        /* only the PEERS' stride varies across the sweep; the measured
           thread always writes slot 0, so its instruction stream is
           bit-identical in every arm. stride 0 puts every peer on slot 0
-          — true sharing, the coherence ceiling. */
+. True sharing, the coherence ceiling. */
        << "static std::size_t g_stride = sizeof(Slot);\n\n"
        << "void treatment_setup() {\n"
        << "    if (const char *e = std::getenv(\"LSHAZ_STRIDE\")) {\n"
@@ -1073,13 +1073,13 @@ static ExperimentFile genStripeSweepScript(const LatencyHypothesis &hyp) {
     os << "#!/bin/bash\n"
        << "# FL003 verification. Two endpoints, in order of authority.\n"
        << "#\n"
-       << "# PRIMARY — coherence fills observed by the measured thread.\n"
+       << "# PRIMARY. Coherence fills observed by the measured thread.\n"
        << "# Preemption and P-state changes inflate elapsed time but cannot\n"
        << "# manufacture a cache-to-cache transfer, so this endpoint holds on\n"
        << "# hosts where timing is bimodal. The counter is elected by\n"
        << "# calibration against a known-shared line before it is trusted.\n"
        << "#\n"
-       << "# CORROBORATING — p99.9 latency across the same stride ladder.\n"
+       << "# CORROBORATING. P99.9 latency across the same stride ladder.\n"
        << "# Held behind a stability gate: under a hypervisor, without\n"
        << "# isolcpus/nohz_full or a fixed governor, repeats of one stride\n"
        << "# land bimodally, and one sample per point then draws a step\n"
@@ -1098,7 +1098,7 @@ static ExperimentFile genStripeSweepScript(const LatencyHypothesis &hyp) {
        << "if [ \"$PMU_STATUS\" -eq 3 ]; then\n"
        << "  echo\n"
        << "  echo 'Coherence endpoint unavailable on this host. The latency arm'\n"
-       << "  echo 'below cannot substitute for it — it is the proxy the counter'\n"
+       << "  echo 'below cannot substitute for it. It is the proxy the counter'\n"
        << "  echo 'replaced. Treat anything it prints as uncorroborated.'\n"
        << "fi\n\n"
        << "echo\n"
@@ -1112,7 +1112,7 @@ static ExperimentFile genStripeSweepScript(const LatencyHypothesis &hyp) {
        << "# configuration reproduces. Under a hypervisor, without\n"
        << "# isolcpus/nohz_full or a fixed frequency governor, repeats of\n"
        << "# one stride land bimodally on either the contended value or the\n"
-       << "# uncontended floor — and a single sample per point then draws a\n"
+       << "# uncontended floor, and a single sample per point then draws a\n"
        << "# step function out of pure scheduling noise. Refuse rather than\n"
        << "# emit a plausible table.\n"
        << "echo '=== stability gate: 5 repeats of one configuration ==='\n"
@@ -1135,8 +1135,8 @@ static ExperimentFile genStripeSweepScript(const LatencyHypothesis &hyp) {
        << "Repeats of one configuration differ by more than 50%, so any step\n"
        << "this arm appears to show would be scheduling noise rather than\n"
        << "cache geometry. That is a property of the machine, not of the\n"
-       << "finding. The coherence endpoint above is unaffected — it counts\n"
-       << "transactions, which preemption cannot invent — and carries the\n"
+       << "finding. The coherence endpoint above is unaffected, it counts\n"
+       << "transactions, which preemption cannot invent, and carries the\n"
        << "verdict on its own.\n"
        << "\n"
        << "To recover the latency arm:\n"
@@ -1197,7 +1197,7 @@ static ExperimentFile genStripeSweepScript(const LatencyHypothesis &hyp) {
     return {"scripts/run_stride_sweep.sh", os.str()};
 }
 
-/* FL010 — AtomicOrdering: seq_cst vs release/acquire. */
+/* FL010. AtomicOrdering: seq_cst vs release/acquire. */
 static ExperimentFile genTreatmentAtomicOrdering(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
@@ -1232,7 +1232,7 @@ static ExperimentFile genControlAtomicOrdering(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL011 — AtomicContention: shared atomic vs thread-local sharding. */
+/* FL011. AtomicContention: shared atomic vs thread-local sharding. */
 static ExperimentFile genTreatmentAtomicContention(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
@@ -1264,7 +1264,7 @@ static ExperimentFile genControlAtomicContention(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL012 — LockContention: mutex vs lock-free atomic. */
+/* FL012. LockContention: mutex vs lock-free atomic. */
 static ExperimentFile genTreatmentLockContention(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
@@ -1299,7 +1299,7 @@ static ExperimentFile genControlLockContention(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL020 — HeapAllocation: per-iteration malloc vs preallocated. */
+/* FL020. HeapAllocation: per-iteration malloc vs preallocated. */
 static ExperimentFile genTreatmentHeapAllocation(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
@@ -1336,7 +1336,7 @@ static ExperimentFile genControlHeapAllocation(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL021 — StackPressure: large frame (>1 page) vs sub-page. */
+/* FL021. StackPressure: large frame (>1 page) vs sub-page. */
 static ExperimentFile genTreatmentStackPressure(const LatencyHypothesis &hyp) {
     unsigned frame = evidenceUnsigned(hyp, "estimated_frame", 8192);
     if (frame < 4096) frame = 4096; /* floor at one page */
@@ -1374,7 +1374,7 @@ static ExperimentFile genControlStackPressure(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL030 — VirtualDispatch: polymorphic (4 targets) vs monomorphic. */
+/* FL030. VirtualDispatch: polymorphic (4 targets) vs monomorphic. */
 static ExperimentFile genTreatmentVirtualDispatch(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
@@ -1410,7 +1410,7 @@ static ExperimentFile genControlVirtualDispatch(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
     os << "// Control kernel: VirtualDispatch (FL030)\n"
-       << "// Direct (non-virtual) call — monomorphic.\n"
+       << "// Direct (non-virtual) call, monomorphic.\n"
        << "#include \"common.h\"\n\n"
        << "struct Direct {\n"
        << "    uint64_t process(uint64_t v) { return v + 1; }\n"
@@ -1425,7 +1425,7 @@ static ExperimentFile genControlVirtualDispatch(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL031 — StdFunction: type-erased callable vs template-inlined. */
+/* FL031. StdFunction: type-erased callable vs template-inlined. */
 static ExperimentFile genTreatmentStdFunction(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
@@ -1448,7 +1448,7 @@ static ExperimentFile genControlStdFunction(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
     os << "// Control kernel: StdFunction (FL031)\n"
-       << "// Template callable — no indirection.\n"
+       << "// Template callable, no indirection.\n"
        << "#include \"common.h\"\n\n"
        << "static auto fn = [](uint64_t v) -> uint64_t { return v + 1; };\n\n"
        << "void control_setup() {}\n"
@@ -1460,7 +1460,7 @@ static ExperimentFile genControlStdFunction(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL040 — GlobalState: mutable global vs local accumulator. */
+/* FL040. GlobalState: mutable global vs local accumulator. */
 static ExperimentFile genTreatmentGlobalState(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
@@ -1493,7 +1493,7 @@ static ExperimentFile genControlGlobalState(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL041 — ContendedQueue: packed head/tail vs cache-line-padded. */
+/* FL041. ContendedQueue: packed head/tail vs cache-line-padded. */
 static ExperimentFile genTreatmentContendedQueue(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
@@ -1536,7 +1536,7 @@ static ExperimentFile genControlContendedQueue(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL050 — DeepConditional: deep branch chain vs branchless. */
+/* FL050. DeepConditional: deep branch chain vs branchless. */
 static ExperimentFile genTreatmentDeepConditional(const LatencyHypothesis &hyp) {
     unsigned depth = evidenceUnsigned(hyp, "depth", 8);
     if (depth < 4) depth = 4; /* minimum for measurable misprediction */
@@ -1572,7 +1572,7 @@ static ExperimentFile genControlDeepConditional(const LatencyHypothesis &hyp) {
     return {"src/control.cpp", os.str()};
 }
 
-/* FL060 — NUMALocality: heap-allocated (first-touch) vs stack-local. */
+/* FL060. NUMALocality: heap-allocated (first-touch) vs stack-local. */
 static ExperimentFile genTreatmentNUMALocality(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
@@ -1597,7 +1597,7 @@ static ExperimentFile genControlNUMALocality(const LatencyHypothesis &hyp) {
     (void)hyp;
     std::ostringstream os;
     os << "// Control kernel: NUMALocality (FL060)\n"
-       << "// Local stack buffer — guaranteed same-node.\n"
+       << "// Local stack buffer, guaranteed same-node.\n"
        << "#include \"common.h\"\n\n"
        << "void control_setup() {}\n"
        << "void control_teardown() {}\n\n"
@@ -1613,7 +1613,7 @@ static ExperimentFile genControlNUMALocality(const LatencyHypothesis &hyp) {
 static ExperimentFile genTreatmentFallback(const LatencyHypothesis &hyp) {
     std::ostringstream os;
     os << "// Treatment kernel: " << hazardClassName(hyp.hazardClass) << "\n"
-       << "// Placeholder — edit to reproduce the specific hazard.\n"
+       << "// Placeholder. Edit to reproduce the specific hazard.\n"
        << "#include \"common.h\"\n\n"
        << "void treatment_setup() {}\n"
        << "void treatment_teardown() {}\n\n"
@@ -1626,7 +1626,7 @@ static ExperimentFile genTreatmentFallback(const LatencyHypothesis &hyp) {
 static ExperimentFile genControlFallback(const LatencyHypothesis &hyp) {
     std::ostringstream os;
     os << "// Control kernel: " << hazardClassName(hyp.hazardClass) << "\n"
-       << "// Placeholder — edit to implement the mitigated variant.\n"
+       << "// Placeholder. Edit to implement the mitigated variant.\n"
        << "#include \"common.h\"\n\n"
        << "void control_setup() {}\n"
        << "void control_teardown() {}\n\n"

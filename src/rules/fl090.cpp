@@ -82,7 +82,7 @@ public:
             escalations.push_back(
                 "deliberate cache-line layout detected (explicit alignment "
                 "or trailing line padding): co-located atomics are often "
-                "single-writer by design — verify write ownership before "
+                "single-writer by design, verify write ownership before "
                 "acting");
         }
 

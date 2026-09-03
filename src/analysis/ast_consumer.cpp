@@ -57,7 +57,7 @@ LshazASTConsumer::LshazASTConsumer(
 }
 
 void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
-    // Skip TUs that had fatal parse errors — partial ASTs contain
+    // Skip TUs that had fatal parse errors, partial ASTs contain
     // error-recovery types that crash Clang's layout computation.
     if (Ctx.getDiagnostics().hasFatalErrorOccurred())
         return;
@@ -81,7 +81,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                     collect(LS);
                     continue;
                 }
-                // Skip dependent or invalid decls — getASTRecordLayout
+                // Skip dependent or invalid decls, getASTRecordLayout
                 // crashes on records with unresolved template parameters.
                 if (D->isInvalidDecl())
                     continue;
@@ -101,7 +101,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
                         collect(RD);
                 }
                 // Recurse into class templates to visit implicit
-                // specializations — without this, struct-level rules
+                // specializations, without this, struct-level rules
                 // never see instantiated template types.
                 if (auto *CTD = llvm::dyn_cast<clang::ClassTemplateDecl>(D)) {
                     for (auto *Spec : CTD->specializations()) {
@@ -155,7 +155,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
         }
     }
 
-    // Per-TU EscapeAnalysis — owned here, injected into rules.
+    // Per-TU EscapeAnalysis, owned here, injected into rules.
     // This eliminates the ASTContext pointer-reuse cache invalidation
     // bug that caused FL040 non-determinism across forked children.
     EscapeAnalysis escape(Ctx);

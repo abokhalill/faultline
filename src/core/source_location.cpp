@@ -12,7 +12,7 @@ SourceLocation resolveSourceLocation(clang::SourceLocation loc,
         return result;
 
     // For macro-expanded tokens (especially token-pasting via ##),
-    // getSpellingLoc() points into <scratch space> — a per-TU virtual
+    // getSpellingLoc() points into <scratch space>, a per-TU virtual
     // buffer whose offsets are non-deterministic across shards.
     // getFileLoc() walks up the entire macro instantiation stack to
     // the physical file where the macro was invoked. For non-macro

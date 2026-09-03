@@ -84,14 +84,14 @@ inline bool canComputeTypeSizeImpl(clang::QualType QT,
 
 } // namespace detail
 
-/// Cached variant — pass a LayoutSafetyCache that persists across calls
+/// Cached variant. Pass a LayoutSafetyCache that persists across calls
 /// within a single TU for amortized O(1) per repeated type.
 inline bool canComputeTypeSize(clang::QualType QT, clang::ASTContext &Ctx,
                                LayoutSafetyCache &cache) {
     return detail::canComputeTypeSizeImpl(QT, Ctx, &cache);
 }
 
-/// Uncached variant — backward compatible, allocates no external state.
+/// Uncached variant. Backward compatible, allocates no external state.
 inline bool canComputeTypeSize(clang::QualType QT, clang::ASTContext &Ctx) {
     return detail::canComputeTypeSizeImpl(QT, Ctx, nullptr);
 }

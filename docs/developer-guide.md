@@ -43,7 +43,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 
 ## Testing
 
-Four hand-rolled harnesses (own `main()`, no framework, no arguments — each
+Four hand-rolled harnesses (own `main()`, no framework, no arguments, each
 runs its full suite; narrow a run by editing the harness's `main()`):
 
 ```bash
@@ -61,7 +61,7 @@ Clang link.
 When changing analysis semantics, validate against a real corpus as well: a
 full scan of a pinned OSS tree before and after the change, with every count
 or severity delta attributed to the change that caused it. Determinism is part
-of the bar — `md5sum` over timestamp-stripped JSON from `--jobs 1` and
+of the bar. `md5sum` over timestamp-stripped JSON from `--jobs 1` and
 `--jobs N` must match.
 
 ## Codebase layout
@@ -71,13 +71,13 @@ src/
   main.cpp                     # flat strcmp subcommand dispatch
   cli/                         # one file per subcommand
     scan.cpp            #   scan (incl. single-file mode)
-    init.cpp            #   init — build-system detection, compile_commands.json
-    diff.cpp            #   diff — scan comparison / CI gate
-    fix.cpp             #   fix — mechanical remediation
-    explain.cpp         #   explain — rule mechanisms
-    hyp.cpp             #   hyp — hypothesis construction
-    exp.cpp             #   exp — experiment synthesis
-    feedback.cpp        #   feedback — verdict ingestion, statistics
+    init.cpp            #   init. Build-system detection, compile_commands.json
+    diff.cpp            #   diff, scan comparison / CI gate
+    fix.cpp             #   fix, mechanical remediation
+    explain.cpp         #   explain, rule mechanisms
+    hyp.cpp             #   hyp, hypothesis construction
+    exp.cpp             #   exp, experiment synthesis
+    feedback.cpp        #   feedback, verdict ingestion, statistics
     result_parser.cpp       #   scan-JSON parser shared by hyp/exp
   analysis/
     ast_consumer.cpp       # TU walk, rule dispatch, inline suppression

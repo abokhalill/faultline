@@ -23,8 +23,8 @@ public:
 
     std::string_view getHardwareMechanism() const override {
         return "A line written by many cores serialises: per-operation cost "
-               "grows about linearly with writer count — ~18ns per added "
-               "thread, reaching 31x the uncontended cost at 14 — so "
+               "grows about linearly with writer count, ~18ns per added "
+               "thread, reaching 31x the uncontended cost at 14, so "
                "aggregate throughput stays flat and extra cores buy nothing. "
                "That is the scalability collapse, and it needs the writes "
                "close together in time: the cost vanishes entirely once they "
@@ -67,7 +67,7 @@ public:
                        !llvm::isa<clang::ImplicitValueInitExpr>(
                            VD->getInit()->IgnoreImplicit());
 
-        // Tentative severity — reduce phase may reclassify.
+        // Tentative severity, reduce phase may reclassify.
         Severity sev = hasAtomics ? Severity::Critical : Severity::High;
         std::vector<std::string> escalations;
 

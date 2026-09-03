@@ -59,7 +59,7 @@ void applyStripeROI(StripeVerdict &v, const StripedArraySite &s,
         return;
     }
     if (alignedOwnerAvailable) {
-        // same isolation, zero added footprint — strictly dominates
+        // same isolation, zero added footprint, strictly dominates
         // padding wherever an aligned per-thread owner already exists.
         v.fixShape = StripeFixShape::RelocateToOwner;
         v.fixRationale = "an already line-aligned per-thread structure "

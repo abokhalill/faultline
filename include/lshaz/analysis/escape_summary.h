@@ -54,7 +54,7 @@ struct TypeEscapeSignals {
         accessorCount  += other.accessorCount;
     }
 
-    // Structural signals only — no TU-specific publication evidence.
+    // Structural signals only, no TU-specific publication evidence.
     bool hasStructuralEscape() const {
         return hasAtomics || hasSyncPrims || hasSharedOwner || hasVolatile;
     }

@@ -249,7 +249,7 @@ public:
                    << "): no arena lock and no new page mapping, so neither "
                    << "contention nor TLB reach is at issue here. The cost is "
                    << "the allocate/free round trip and the loss of locality "
-                   << "against inline or stack storage — the returned chunk "
+                   << "against inline or stack storage, the returned chunk "
                    << "is typically cold in L1D.";
             } else if (ac == AllocatorClass::Syscall) {
                 hw << "Large allocation triggers mmap syscall. "

@@ -56,7 +56,7 @@ struct Config {
     // Vendored third-party trees, skipped unless --include-vendored or
     // skip_vendored: false. Directory naming is convention, not fact, so a
     // project whose own code lives under one of these names must be able to
-    // replace the list — set vendor_path_patterns to the trees that really
+    // replace the list. Set vendor_path_patterns to the trees that really
     // are vendored. A non-empty list replaces these defaults; use
     // skip_vendored to turn the behaviour off, since YAML's empty sequence
     // is indistinguishable from an absent key here.
@@ -68,7 +68,7 @@ struct Config {
     };
 
     // Deployment socket count. Unlike the preconditions other rules assume,
-    // this one genuinely cannot be read from source; it is a property of
+    // this one cannot be read from source; it is a property of
     // where the binary runs. 0 means unknown, and FL060 then reports with
     // the assumption labelled.
     unsigned numaSockets = 0;

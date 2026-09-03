@@ -11,7 +11,7 @@ namespace lshaz {
 // field type ArrayType(element), so every predicate that inspects the field
 // type directly sees an array and not an atomic. Arrays of atomics are the
 // dominant striped-counter shape in threaded servers, which made them
-// invisible to atomic, sync and volatile detection alike — and therefore to
+// invisible to atomic, sync and volatile detection alike, and therefore to
 // every rule gated on those.
 inline clang::QualType peelArrays(clang::QualType QT) {
     while (const clang::ArrayType *AT = QT->getAsArrayTypeUnsafe())

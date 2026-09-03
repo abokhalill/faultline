@@ -495,7 +495,7 @@ void validateCompileDB(const std::string &dbPath, unsigned maxProbes = 5) {
 
     if (failures > 0)
         llvm::errs() << "lshaz init: " << failures << "/" << entries.size()
-                     << " sample TU(s) failed — the project may need a full "
+                     << " sample TU(s) failed. The project may need a full "
                         "build before scanning (generated headers)\n";
 }
 

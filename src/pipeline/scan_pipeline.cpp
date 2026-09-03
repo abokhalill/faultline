@@ -1384,7 +1384,7 @@ static unsigned applyThreadRoleEscalation(
             "cross-TU thread-role attribution: '" + fieldA +
             "' written only from " + roleMaskName(ra) + " code, '" + fieldB +
             "' only from " + roleMaskName(rb) +
-            " code — concurrent cross-thread writes evidenced, not assumed");
+            " code. Concurrent cross-thread writes evidenced, not assumed");
         ++escalated;
     }
     return escalated;
@@ -1431,7 +1431,7 @@ static unsigned applyPagingRespect(std::vector<Diagnostic> &diagnostics,
         d.confidence = std::max(d.confidence - 0.10, 0.05);
         d.escalations.push_back(
             "paging policy managed in-tree (madvise/mallopt observed): "
-            "hugepage inference demoted — verify against the author's "
+            "hugepage inference demoted, verify against the author's "
             "policy");
         ++demoted;
     }
@@ -1455,7 +1455,7 @@ static unsigned applyAffinityRespect(std::vector<Diagnostic> &diagnostics,
         d.confidence = std::max(d.confidence - 0.10, 0.05);
         d.escalations.push_back(
             "explicit placement management in-tree (" + api +
-            "): first-touch inference demoted — the author is already "
+            "): first-touch inference demoted. The author is already "
             "steering affinity; verify against their policy, not the "
             "default model");
         ++demoted;
@@ -1523,7 +1523,7 @@ static unsigned emitStripedArrayFindings(
                                              : Severity::Medium;
             d.escalations.push_back(
                 "write frequency unestablished: no hot-path signal reaches "
-                "these writers — supply hot_function_patterns or "
+                "these writers, supply hot_function_patterns or "
                 "--perf-profile to grade the fix against real call rate");
         } else {
             d.severity = Severity::Medium;
@@ -1549,7 +1549,7 @@ static unsigned emitStripedArrayFindings(
            << "slots on the same line: every write takes the line in "
            << "Modified state and invalidates it in the other core.";
         if (!s.elementIsAtomic)
-            hw << " Elements are non-atomic — striping makes each slot "
+            hw << " Elements are non-atomic, striping makes each slot "
                   "single-writer, so this is coherence traffic without a "
                   "data race.";
         d.hardwareReasoning = hw.str();
@@ -1585,7 +1585,7 @@ static unsigned emitStripedArrayFindings(
                 "isolated, slots 1.. still share lines");
 
         // Striping guarantees single-writer-per-slot, so atomicity is not
-        // what establishes contention here — index provenance and distinct
+        // what establishes contention here, index provenance and distinct
         // writers are. The write-frequency tier is the other precondition:
         // unestablished it must not carry the top grade, which is the same
         // discipline FL040 and FL011 now follow.
@@ -1664,7 +1664,7 @@ static unsigned synthesizeUnappliedMitigation(
     std::vector<Diagnostic> compounds;
     std::set<std::string> emittedTypes;
     for (const auto &d : diagnostics) {
-        // FL002 joins at pair granularity; FL090 at struct granularity —
+        // FL002 joins at pair granularity; FL090 at struct granularity,
         // large structs put the disjoint pair beyond FL002's pair-evidence
         // cap, and FL090's uncapped type-level attribution catches those.
         // One compound per type: FL002 wins the tie by sort order.
@@ -1752,7 +1752,7 @@ static unsigned applySharingRouteVerdict(std::vector<Diagnostic> &diagnostics,
         auto it = d.structuralEvidence.find("type_name");
         if (it == d.structuralEvidence.end() || it->second.empty()) continue;
         // ';'-separated: a compound may name several types. Any one of them
-        // being genuinely shared leaves the finding alone.
+        // being shared leaves the finding alone.
         bool anyShared = false, anyKnown = false;
         const std::string &ts = it->second;
         for (size_t start = 0; start < ts.size();) {
@@ -2004,7 +2004,7 @@ ScanResult ScanPipeline::run(
 
     auto profileHotFuncs = loadProfileHotFunctions(request);
 
-    // AST analysis — parallel when multiple TUs and jobs > 1.
+    // AST analysis. Parallel when multiple TUs and jobs > 1.
     unsigned jobs = request.analysisJobs;
     if (jobs == 0)
         jobs = std::max(1u, std::thread::hardware_concurrency());
@@ -2115,14 +2115,10 @@ ScanResult ScanPipeline::run(
             }
 
             if (pid == 0) {
-                // --- Child process ---
-                // Shard-loss handling is only as good as its test, and the
-                // realistic trigger (the OOM killer) cannot be summoned on
-                // demand. This makes the death deterministic. Announced on
-                // stderr so an injected run can never be mistaken for a real
-                // one; unset, it costs one getenv per shard.
-                // "<shard>" kills before any TU; "<shard>:<n>" kills after n
-                // TUs, which is what exercises partial recovery.
+                // Deterministic stand-in for the OOM killer, which cannot be
+                // summoned on demand. Announced on stderr so an injected run
+                // is never mistaken for a real one. "<shard>" kills before any
+                // TU; "<shard>:<n>" kills after n, exercising partial recovery.
                 unsigned faultShard = ~0u, faultAfterTUs = 0;
                 if (const char *f = ::getenv("LSHAZ_FAULT_KILL_SHARD")) {
                     faultShard = static_cast<unsigned>(atoi(f));
@@ -2359,7 +2355,7 @@ ScanResult ScanPipeline::run(
     // Shards emitted raw facts (tu_write_count, has_init). We sum writes across
     // all TUs for each (var, type) and apply the write-once threshold globally.
     // This must run before dedup so all duplicate instances get reclassified
-    // consistently — dedup then collapses them to a single canonical instance.
+    // consistently. Dedup then collapses them to a single canonical instance.
     {
         // Accumulate: key = "var|type", value = {total_writes, any_has_init}
         struct FL040Agg {
@@ -2411,7 +2407,7 @@ ScanResult ScanPipeline::run(
             const auto &agg = it->second;
             // Same logic as EscapeAnalysis::isWriteOnceGlobal, but on
             // the global sum across all TUs instead of a single TU.
-            // One site inside a loop is one *site*, not one write —
+            // One site inside a loop is one *site*, not one write,
             // never write-once.
             bool writeOnce = false;
             if (agg.loopWrites == 0) {
@@ -2441,7 +2437,7 @@ ScanResult ScanPipeline::run(
                 d.evidenceTier = EvidenceTier::Speculative;
                 d.escalations.push_back(
                     "write-once (global): across all TUs, at most one write "
-                    "site — negligible runtime contention");
+                    "site, negligible runtime contention");
             } else if (!atomicVar && agg.totalWrites <= 1) {
                 // single in-loop site on a plain type: repeated writes but
                 // one write path; concurrent writers would be a data race,
@@ -2467,7 +2463,7 @@ ScanResult ScanPipeline::run(
     }
 
     // IR analysis pass. gating on toolRet==0 meant one broken TU anywhere
-    // silently disabled refinement for the entire scan — confidence on
+    // silently disabled refinement for the entire scan, confidence on
     // every finding shifted because of an unrelated file. refine what
     // parsed; failures are already reported per-TU.
     if (request.ir.enabled && sources.size() > failedTUsDetailed.size()) {
@@ -2760,7 +2756,7 @@ ScanResult ScanPipeline::run(
     }
 
     // Emit warnings for headers missing from >= 3 TUs. B001 reports a
-    // broken scan, so it bypasses severity/evidence filters by design —
+    // broken scan, so it bypasses severity/evidence filters by design,
     // but it must not break the sorted-output contract (re-sort below).
     bool b001Emitted = false;
     for (const auto &[header, count] : missingHeaderCounts) {

@@ -89,7 +89,7 @@ printf "  info  %-14s %s movable irq(s) still reaching isolated cores\n" \
        "irq_spread" "$moved"
 
 if [ "$fail" -ne 0 ]; then
-    echo "PREFLIGHT FAILED — run tune.sh, do not trust any measurement until green" >&2
+    echo "PREFLIGHT FAILED. Run tune.sh, do not trust any measurement until green" >&2
     exit 1
 fi
 echo "PREFLIGHT OK"

@@ -86,11 +86,9 @@ const lshaz::FieldLineEntry *findField(const lshaz::CacheLineMap &map,
     return nullptr;
 }
 
-// ============================================================
-// Test 1: Simple POD struct — no padding, no atomics.
+// Simple POD struct, no padding, no atomics.
 // struct Simple { int a; int b; char c; };
-// sizeof = 12 (with 0 padding between a,b,c — but trailing pad to 4 → 12)
-// ============================================================
+// sizeof = 12 (with 0 padding between a,b,c, but trailing pad to 4 → 12)
 void testSimplePOD() {
     std::cerr << "test: simple POD struct layout\n";
     const char *src = R"(
@@ -122,11 +120,9 @@ void testSimplePOD() {
     });
 }
 
-// ============================================================
-// Test 2: Struct with padding — natural alignment of double.
+// Struct with padding, natural alignment of double.
 // struct Padded { char x; double y; int z; };
 // x at 0 (1B), 7B pad, y at 8 (8B), z at 16 (4B), 4B tail pad → 24B
-// ============================================================
 void testPaddedStruct() {
     std::cerr << "test: padded struct layout\n";
     const char *src = R"(
@@ -150,11 +146,9 @@ void testPaddedStruct() {
     });
 }
 
-// ============================================================
-// Test 3: Struct spanning 2 cache lines.
+// Struct spanning 2 cache lines.
 // struct Wide { char data[65]; };
 // 65 bytes → spans lines 0 and 1.
-// ============================================================
 void testCacheLineSpanning() {
     std::cerr << "test: cache line spanning struct\n";
     const char *src = R"(
@@ -176,9 +170,7 @@ void testCacheLineSpanning() {
     });
 }
 
-// ============================================================
-// Test 4: Struct with std::atomic fields — atomic detection.
-// ============================================================
+// Struct with std::atomic fields, atomic detection.
 void testAtomicDetection() {
     std::cerr << "test: atomic field detection\n";
     const char *src = R"(
@@ -218,12 +210,10 @@ void testAtomicDetection() {
     });
 }
 
-// ============================================================
-// Test 5: Inheritance — base class fields at base offset.
+// Inheritance, base class fields at base offset.
 // struct Base { int x; int y; };
 // struct Derived : Base { int z; };
 // Layout: x@0, y@4, z@8 → 12B
-// ============================================================
 void testInheritanceLayout() {
     std::cerr << "test: inheritance layout\n";
     const char *src = R"(
@@ -246,11 +236,9 @@ void testInheritanceLayout() {
     });
 }
 
-// ============================================================
-// Test 6: alignas — forced alignment changes offset layout.
+// Alignas. Forced alignment changes offset layout.
 // struct Aligned { char a; alignas(64) int b; };
 // a@0, b@64 → sizeof at least 128 (64-byte aligned b, then tail pad)
-// ============================================================
 void testAlignasLayout() {
     std::cerr << "test: alignas layout\n";
     const char *src = R"(
@@ -273,12 +261,10 @@ void testAlignasLayout() {
     });
 }
 
-// ============================================================
-// Test 7: Nested struct — sub-fields are recursively collected.
+// Nested struct, sub-fields are recursively collected.
 // struct Inner { int a; int b; };
 // struct Outer { Inner inner; int c; };
 // inner.a@0, inner.b@4, c@8 → 12B
-// ============================================================
 void testNestedStruct() {
     std::cerr << "test: nested struct recursive field collection\n";
     const char *src = R"(
@@ -309,13 +295,11 @@ void testNestedStruct() {
     });
 }
 
-// ============================================================
-// Test 8: Mixed atomic/non-atomic on same line → false sharing candidate.
+// Mixed atomic/non-atomic on same line → false sharing candidate.
 // struct MixedLine {
 //     std::atomic<int> counter;   // 0-3, line 0, atomic
 //     int               plain;    // 4-7, line 0, non-atomic mutable
 // };
-// ============================================================
 void testFalseSharingCandidate() {
     std::cerr << "test: false sharing candidate detection\n";
     const char *src = R"(
@@ -347,13 +331,11 @@ void testFalseSharingCandidate() {
     });
 }
 
-// ============================================================
-// Test 9: Field straddling cache line boundary.
+// Field straddling cache line boundary.
 // Pack to defeat natural alignment padding so the int lands at offset 62.
 // #pragma pack(1):
 //     pad[62]@0 + straddler(4)@62 + tail(1)@66 = 67B
 //     straddler bytes 62-65 span line 0 (0-63) and line 1 (64-127).
-// ============================================================
 void testFieldStraddling() {
     std::cerr << "test: field straddling cache line boundary\n";
     const char *src = R"(
@@ -387,11 +369,9 @@ void testFieldStraddling() {
     });
 }
 
-// ============================================================
-// Test 10: Custom cache line size (128B for ARM64 Apple).
+// Custom cache line size (128B for ARM64 Apple).
 // struct Small { char data[100]; };
 // With 64B lines: 2 lines. With 128B lines: 1 line.
-// ============================================================
 void testCustomCacheLineSize() {
     std::cerr << "test: custom cache line size (128B)\n";
     const char *src = R"(
@@ -410,12 +390,10 @@ void testCustomCacheLineSize() {
     });
 }
 
-// ============================================================
-// Test 11: Empty base optimization.
+// Empty base optimization.
 // struct Empty {};
 // struct WithEmpty : Empty { int x; };
 // Layout: EBO applies, sizeof WithEmpty == 4.
-// ============================================================
 void testEmptyBaseOptimization() {
     std::cerr << "test: empty base optimization\n";
     const char *src = R"(
@@ -434,13 +412,11 @@ void testEmptyBaseOptimization() {
     });
 }
 
-// ============================================================
-// Test 12: Mutable keyword field detection.
+// Mutable keyword field detection.
 // struct WithMutable {
 //     mutable int cache;
 //     const int immutable;
 // };
-// ============================================================
 void testMutableFieldDetection() {
     std::cerr << "test: mutable keyword field detection\n";
     const char *src = R"(
@@ -462,14 +438,12 @@ void testMutableFieldDetection() {
     });
 }
 
-// ============================================================
-// Test 13: Bucket population — verify per-line field grouping.
+// Bucket population, verify per-line field grouping.
 // struct TwoLine {
 //     char line0[64];   // exactly fills line 0
 //     int  line1_a;     // line 1, offset 64
 //     int  line1_b;     // line 1, offset 68
 // };
-// ============================================================
 void testBucketPopulation() {
     std::cerr << "test: bucket population per cache line\n";
     const char *src = R"(
@@ -510,13 +484,11 @@ void testBucketPopulation() {
     });
 }
 
-// ============================================================
-// Test 14: Alignment-aware bucketing — struct not cache-line-aligned.
+// Alignment-aware bucketing, struct not cache-line-aligned.
 // struct NearBoundary { int a; char pad[52]; int b; };
 // sizeof = 60, alignof = 4. Best case: 1 line. Worst case (shift=60):
 // a at absolute 60 (line 0), b at absolute 116 (line 1).
 // Fields that look co-located under best-case split under worst-case.
-// ============================================================
 void testAlignmentAwareBucketing() {
     std::cerr << "test: alignment-aware bucketing (non-cache-line-aligned)\n";
     const char *src = R"(
@@ -549,9 +521,7 @@ void testAlignmentAwareBucketing() {
     });
 }
 
-// ============================================================
-// Test 15: alignas(64) struct — best-case == worst-case.
-// ============================================================
+// Alignas(64) struct, best-case == worst-case.
 void testCacheLineAlignedBucketing() {
     std::cerr << "test: cache-line-aligned struct (alignas(64))\n";
     const char *src = R"(
@@ -573,11 +543,9 @@ void testCacheLineAlignedBucketing() {
     });
 }
 
-// ============================================================
 // Thread-role fact collection: entry detection through
 // pthread_create / std::thread, name-keyed call edges, and
-// field-writer names — the map half of the cross-TU reduce.
-// ============================================================
+// field-writer names. The map half of the cross-TU reduce.
 void testThreadRoleFactCollection() {
     std::cerr << "test: thread-role fact collection\n";
     const std::string src = R"cpp(

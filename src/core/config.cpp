@@ -11,7 +11,7 @@
 #include <sstream>
 
 // YAML mapping for Config via llvm::yaml.
-// Using LLVM's built-in YAML support — no third-party dependency.
+// Using LLVM's built-in YAML support, no third-party dependency.
 
 namespace llvm {
 namespace yaml {

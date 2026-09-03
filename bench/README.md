@@ -1,4 +1,4 @@
-# bench — hardware validation rig
+# bench, hardware validation rig
 
 lshaz rules assert hardware mechanisms. This directory measures whether those
 mechanisms produce the cost the rule claims, and at what threshold. Every
@@ -12,7 +12,7 @@ maintainer before anyone measured it.
 
 ## Requirements
 
-Bare metal. Not a VM, not a cloud instance short of `.metal` — `perf c2c`
+Bare metal. Not a VM, not a cloud instance short of `.metal`, `perf c2c`
 needs PEBS (Intel) or IBS (AMD), and hypervisors do not pass either through.
 Verify in one command:
 
@@ -23,7 +23,7 @@ Verify in one command:
     sudo ./tune.sh          # pins the machine to a repeatable operating point
     ./preflight.sh          # non-zero on drift; gate every measurement on this
 
-`tune.sh` is not idempotent across reboots by accident of design — every
+`tune.sh` is not idempotent across reboots by accident of design, every
 setting it writes lives in sysfs or sysctl and is lost on restart. Install it
 as a boot unit, and run `preflight.sh` before each measurement anyway. An
 untuned run produces numbers that look exactly like tuned ones.
@@ -47,7 +47,7 @@ memory that holds something else.
 
     gdb -p $PID -batch -ex 'p &server.stat_net_input_bytes'
 
-Exact write counts come from a hardware watchpoint, not sampling — a sampled
+Exact write counts come from a hardware watchpoint, not sampling, a sampled
 zero is not a zero:
 
     perf stat -e mem:0xADDR:w -p $PID -- sleep 5

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Minimal memcached load generator for the recall harness. Not a benchmark —
+// Minimal memcached load generator for the recall harness. Not a benchmark,
 // it never reports throughput. Its only job is to drive enough concurrent
 // traffic that whatever coherence cost the server has becomes visible to c2c.
 //

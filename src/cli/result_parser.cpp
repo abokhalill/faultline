@@ -201,7 +201,6 @@ bool parseScanResultFile(const std::string &path,
     std::string json = ss.str();
     size_t i = 0;
 
-    // Find the "diagnostics" array.
     auto pos = json.find("\"diagnostics\"");
     if (pos == std::string::npos) {
         // Detect common misuse: hypothesis output fed to exp/hyp.
@@ -227,7 +226,7 @@ bool parseScanResultFile(const std::string &path,
         if (!expect(json, i, '{')) break;
         auto d = parseDiagnostic(json, i);
         ++rawCount;
-        /* Reject entries with no ruleID — indicates malformed input. */
+        /* Reject entries with no ruleID, indicates malformed input. */
         if (!d.ruleID.empty())
             out.push_back(std::move(d));
         expect(json, i, ',');
@@ -235,7 +234,7 @@ bool parseScanResultFile(const std::string &path,
 
     if (rawCount > 0 && out.empty()) {
         error = "parsed " + std::to_string(rawCount) +
-                " diagnostic(s) but none had a valid ruleID — "
+                " diagnostic(s) but none had a valid ruleID, "
                 "input is likely malformed: " + path;
         return false;
     }

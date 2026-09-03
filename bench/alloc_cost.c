@@ -2,7 +2,7 @@
 //
 // FL020/FL021 assert that concurrent malloc/free serializes on allocator
 // state. Modern allocators use per-thread arenas or caches, so the claim may
-// simply not fire — the same failure mode FL002 had.
+// not fire. The same failure mode FL002 had.
 //
 // Scaling test: k threads each doing malloc/free at a fixed size. Perfect
 // per-thread caching => ns/op flat in k. Serialization => ns/op rises with k.

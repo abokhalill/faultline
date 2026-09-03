@@ -125,13 +125,10 @@ public:
             wev = std::max(wev, level);
         }
 
-        // Atomicity is not the gate. Striped and role-partitioned fields
-        // guarantee single-writer-per-slot, so the dominant false-sharing
-        // idiom is deliberately non-atomic: no data race, pure coherence
-        // traffic. Gating on atomics scores zero on exactly that shape.
-        // What must be established instead is concurrent independent
-        // writes, which is what the escape verdict plus distinct writers
-        // provide.
+        // Striped and role-partitioned fields are single-writer-per-slot, so
+        // the dominant false-sharing idiom is deliberately non-atomic and a
+        // gate on atomics scores zero against it. Gate on concurrent
+        // independent writes: escape verdict plus distinct writers.
         const bool anyAtomics = hasAtomicPairs || map.totalAtomicFields() > 0;
         if (!anyAtomics && wev != kMultiWriter)
             return;
@@ -155,7 +152,7 @@ public:
         // explicit line alignment / trailing pad-to-line = the author
         // already reasons in cache lines; co-located atomics under that
         // idiom are typically single-writer by design (IOThread,
-        // used_memory_entry). structurally true, so report — but not at
+        // used_memory_entry). structurally true, so report, but not at
         // strike severity. FL041 deliberately exempt: head/tail naming
         // implies multi-writer roles where this idiom IS the bug.
         bool deliberateLayout =
@@ -167,14 +164,14 @@ public:
         if (!anyAtomics)
             escalations.push_back(
                 "no atomic fields: co-located plain fields written by "
-                "distinct functions. The coherence cost is identical — what "
+                "distinct functions. The coherence cost is identical, what "
                 "is unproven is that the writers run concurrently");
         if (deliberateLayout) {
             sev = Severity::Medium;
             escalations.push_back(
                 "deliberate cache-line layout detected (explicit alignment "
                 "or trailing line padding): co-located atomics are often "
-                "single-writer by design — verify write ownership before "
+                "single-writer by design, verify write ownership before "
                 "acting");
         }
 
@@ -182,7 +179,7 @@ public:
         // benign layout: writes under that lock are already serialized, so
         // co-location adds no coherence cost beyond the lock's own line.
         // Per-field lock association is not available here, so this can be
-        // proven neither way — mark it rather than either suppressing the
+        // proven neither way. Mark it rather than either suppressing the
         // finding or asserting a hazard.
         if (!anyAtomics && ev.hasSyncPrims) {
             sev = Severity::Medium;
@@ -236,13 +233,13 @@ public:
                 "line " + std::to_string(lineIdx) + ": " +
                 std::to_string(bucket.atomicCount) + " atomic + " +
                 std::to_string(bucket.mutableCount - bucket.atomicCount) +
-                " non-atomic mutable field(s) — mixed write surface");
+                " non-atomic mutable field(s), mixed write surface");
         }
 
         // The strongest TU wins cross-TU dedup through confidence.
         // Severity is impact if real; confidence is how likely it is real.
         // A non-atomic record has the same mechanism and the same cost, and
-        // weaker proof of concurrency — so it moves confidence, not severity.
+        // weaker proof of concurrency, so it moves confidence, not severity.
         double confidence = 0.55;
         if (hasAtomicPairs)
             confidence = exactLayout ? 0.88 : 0.80;
@@ -268,7 +265,7 @@ public:
         if (densePair) {
             escalations.push_back(
                 "write density: " + std::to_string(denseSites) +
-                " in-loop write site(s) to the flagged pair — spacing can "
+                " in-loop write site(s) to the flagged pair, spacing can "
                 "reach the sub-microsecond range where coherence cost is real");
         }
         // The decay is a single-socket property. Cross-socket ownership is a
@@ -362,14 +359,9 @@ public:
              !(sparsePair && !densePair && decayApplies),
              (sparsePair && !densePair && decayApplies) ? Severity::Medium : sev,
              /*gating=*/true},
-            // Deliberately NOT gated on ev.hasSharingRoute, twice measured:
-            // it demotes stats_state (the one adjudicated TP) while keeping
-            // every FP. hasGlobalInstance is a per-TU fact and the record
-            // lives in a header, so the TU defining the global is not the TU
-            // most findings come from. The instance gate is right, but it
-            // has to be a reduce-phase verdict over the escape summary, not
-            // a rule-time query. FL090 can use it because it needs only the
-            // weaker "some route exists" form.
+            // Not gated on ev.hasSharingRoute: it is a per-TU fact, and for a
+            // header-declared record the TU defining the global is rarely the
+            // TU reporting. The gate belongs in the reduce phase.
         };
         diag.escalations = std::move(escalations);
         out.push_back(std::move(diag));

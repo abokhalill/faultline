@@ -1,7 +1,7 @@
 #!/bin/bash
 # Determinism tuning for the lshaz measurement rig.
 # Every setting here removes a variance source that would otherwise swamp a
-# sub-1% effect. Re-run after every reboot — sysfs state is not durable.
+# sub-1% effect. Re-run after every reboot, sysfs state is not durable.
 #
 # Topology is derived, never assumed. The previous version hardcoded a 6-core
 # single-socket layout; on a dual-socket box those constants isolate the wrong
@@ -11,7 +11,7 @@ fail() { echo "TUNE-FAIL: $*" >&2; exit 1; }
 
 # --- topology -------------------------------------------------------------
 # Isolate whole physical cores with their SMT siblings. Isolating one thread of
-# a pair leaves the sibling schedulable, and the two share L1/L2 — the noise
+# a pair leaves the sibling schedulable, and the two share L1/L2, the noise
 # arrives anyway, through the cache instead of the runqueue.
 nodes=$(ls -d /sys/devices/system/node/node[0-9]* 2>/dev/null | sed 's/.*node//' | sort -n)
 [ -n "$nodes" ] || nodes=0
@@ -45,7 +45,7 @@ HK=$(csv $HOUSEKEEPING); ISO=$(csv $ISOLATED)
 [ -n "$HK" ] || fail "no housekeeping cpus derived"
 
 # default_smp_affinity takes a hex mask, not a list. Writing a list here looks
-# like it worked and silently never applies — it cost a whole session once.
+# like it worked and silently never applies. It cost a whole session once.
 HK_MASK=$(python3 -c "
 m=0
 for c in '$HK'.split(','):

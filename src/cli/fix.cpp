@@ -38,7 +38,7 @@ void printFixUsage() {
         << "  -h, --help               Show this help\n"
         << "\n"
         << "Supported rules:\n"
-        << "  FL001  Cache Line Spanning Struct — adds alignas(64)\n"
+        << "  FL001  Cache Line Spanning Struct, adds alignas(64)\n"
         << "\n"
         << "Exit Codes:\n"
         << "  0  No fixable findings\n"
@@ -140,7 +140,7 @@ bool generateFL001Fix(const Diagnostic &diag, SourceEdit &edit) {
     llvm::StringRef srcLine = lines[diag.location.line - 1];
     std::string lineStr = srcLine.str();
 
-    // Already has alignas — skip.
+    // Already has alignas, skip.
     if (lineStr.find("alignas") != std::string::npos)
         return false;
 

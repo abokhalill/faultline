@@ -151,10 +151,10 @@ public:
     std::string_view getHardwareMechanism() const override {
         return "A working set spanning more base pages than the dTLB "
                "covers (~64 L1 / ~1-2K L2 entries at 4KB) turns strided "
-               "access into page walks — 4-level lookups, each a potential "
+               "access into page walks, 4-level lookups, each a potential "
                "cache-miss chain (dtlb_load_misses.walk_completed). The walk "
                "costs ~8-24ns per access. It bites hardest when the working "
-               "set fits in cache but outruns TLB reach — there the access "
+               "set fits in cache but outruns TLB reach, there the access "
                "itself is cheap and the walk is most of the latency, doubling "
                "it; past last-level cache the same walk is a smaller share of "
                "a DRAM hit. Size alone therefore points the wrong way: the "
@@ -204,7 +204,7 @@ public:
                    << (bytes / (1024 * 1024)) << "MB, " << (bytes / 4096)
                    << " base pages) is referenced from hot code";
                 if (!hugeAligned)
-                    hw << " and lacks 2MB base alignment — khugepaged "
+                    hw << " and lacks 2MB base alignment, khugepaged "
                           "cannot collapse the unaligned edges, so THP "
                           "coverage is forfeited where it matters most";
                 hw << ".";
@@ -235,7 +235,7 @@ public:
             }
         }
 
-        // Path 2: allocation sites with provable sizes. Not hot-gated —
+        // Path 2: allocation sites with provable sizes. Not hot-gated,
         // the mapping outlives the allocating function; grading carries
         // the uncertainty instead.
         AllocVisitor allocs(Ctx);
@@ -273,7 +273,7 @@ public:
             else if (thpAllocator)
                 hw << ". Linked allocator (" << Cfg.linkedAllocator
                    << ") chunks large allocations 2MB-aligned and "
-                      "THP-aware — residual risk is policy, not layout";
+                      "THP-aware, residual risk is policy, not layout";
             hw << ".";
             diag.hardwareReasoning = hw.str();
 

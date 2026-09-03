@@ -61,8 +61,8 @@ struct MechanismClaim {
 
     // Ordinary claims are alternatives: any one established mechanism can
     // carry the finding, so they combine with max. A gating claim is a
-    // conjunct — hotness is the example, since no mechanism costs anything
-    // in code that never runs — so it caps the result whether or not it is
+    // conjunct. Hotness is the example, since no mechanism costs anything
+    // in code that never runs, so it caps the result whether or not it is
     // established. Combining a cap with max would silently do nothing.
     bool        gating      = false;
 };
@@ -125,7 +125,7 @@ struct Diagnostic {
 // strict-weak content order for diagnostics whose location keys collide
 // (macro-generated twins: one line, two symbols/types). every sort and
 // dedup tiebreak must bottom out here or shard arrival order leaks into
-// the output — std::sort is unstable.
+// the output, std::sort is unstable.
 bool diagnosticContentLess(const Diagnostic &a, const Diagnostic &b);
 
 } // namespace lshaz

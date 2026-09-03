@@ -109,7 +109,7 @@ void IRAnalyzer::analyzeFunction(llvm::Function &F) {
                             AI->getArraySize())) {
                         info.sizeBytes = tySize * CI->getZExtValue();
                     } else {
-                        info.sizeBytes = tySize; // VLA — unknown, use element size
+                        info.sizeBytes = tySize; // VLA, unknown, use element size
                     }
                 } else {
                     info.sizeBytes = tySize;

@@ -10,7 +10,7 @@ namespace lshaz {
 
 class DiagnosticRefiner {
 public:
-    // stackFrameWarnBytes: same threshold the AST rule (FL021) used —
+    // stackFrameWarnBytes: same threshold the AST rule (FL021) used,
     // suppression must not judge against a different bar than emission.
     explicit DiagnosticRefiner(const IRAnalyzer::ProfileMap &profiles,
                                uint64_t stackFrameWarnBytes = 2048);

@@ -1,7 +1,7 @@
 # Rules Reference
 
 lshaz ships 16 rules. Each targets one microarchitectural hazard class, and
-each must map to a concrete hardware mechanism — cache, coherence, store
+each must map to a concrete hardware mechanism, cache, coherence, store
 buffer, TLB, branch predictor, NUMA, or allocator.
 
 This document states, per rule: what fires it, what raises or lowers its
@@ -44,7 +44,7 @@ These behaviors apply across rules and are documented once.
 ### Mechanism claims bound severity
 
 No rule asserts a hazard as an opaque verdict. Each decomposes its hardware
-argument into claims — an `effect`, the `precondition` that effect requires,
+argument into claims. An `effect`, the `precondition` that effect requires,
 whether that precondition was `established`, and the severity it `supports`.
 The pipeline clamps every finding to what its claims establish, so a rule
 cannot grade Critical on a mechanism it never showed.
@@ -81,8 +81,8 @@ hasSharingRoute = hasPublication || hasThreadWriters
                 || (hasGlobalInstance && anyWriterOnThread)
 ```
 
-Rules also distinguish **standing** writes (`g_stats.hits++` — a fixed object
-every thread can name) from **handed-over** writes (`io->len = n` — whatever
+Rules also distinguish **standing** writes (`g_stats.hits++`, a fixed object
+every thread can name) from **handed-over** writes (`io->len = n`, whatever
 the caller passed in). A queue hands each request to one owner at a time, so
 a per-request object is never falsely shared however many functions write it.
 Writer counts cannot express this difference; the base-expression root can.
@@ -92,7 +92,7 @@ Writer counts cannot express this difference; the base-expression root can.
 A thread entry spawned inside a loop, or from more than one call site, runs on
 several threads at once. One writer function is then sufficient for two cores
 to contend, so rules do not require two distinct writer functions when a pool
-role is involved — that requirement rejected the commonest thread-pool shape.
+role is involved. That requirement rejected the commonest thread-pool shape.
 
 ### Atomic operation coverage
 
@@ -121,8 +121,8 @@ cache lines:
 2. A trailing byte-array pad that brings the record to an exact line multiple
    (the `used_memory_entry` idiom).
 
-Either signal caps the finding at **Medium**. The finding is still reported —
-single-writer discipline is an assumption the analyzer cannot verify — and the
+Either signal caps the finding at **Medium**. The finding is still reported,
+single-writer discipline is an assumption the analyzer cannot verify, and the
 demotion reason is stated in the escalation trace. FL041 is deliberately
 exempt: head/tail naming implies producer/consumer roles, where an aligned
 struct with unpadded indices is precisely the bug.
@@ -142,12 +142,12 @@ alignment" (sub-line alignment).
 
 ## Structural cache risks
 
-### FL001 — Cache Line Spanning Struct
+### FL001, Cache Line Spanning Struct
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** struct &nbsp;|&nbsp; **Gate:** none
 
 **Hardware mechanism:** L1/L2 footprint expansion and eviction probability.
-Under multi-core writes, every occupied line is a coherence unit — a 5-line
+Under multi-core writes, every occupied line is a coherence unit, a 5-line
 struct can generate 5× the invalidation traffic of a packed one.
 
 **Detection:** Record layout is mapped field-by-field onto 64-byte lines using
@@ -157,8 +157,8 @@ thresholds (`cache_line_span_warn` / `cache_line_span_crit`).
 
 **Escalations:**
 - Fields that straddle a line boundary with an access granule wider than one
-  byte (a split load/store costs two line accesses). Byte arrays — pads,
-  buffers — span lines geometrically but cannot split a single access, and are
+  byte (a split load/store costs two line accesses). Byte arrays, pads,
+  buffers. Span lines geometrically but cannot split a single access, and are
   not reported as straddlers.
 - Atomic or mutable fields with thread-escape evidence.
 
@@ -168,7 +168,7 @@ atomics.
 **Mitigation:** Split hot/cold fields. AoS → SoA. `alignas(64)` where the
 sharing analysis (FL002) justifies it.
 
-### FL002 — False Sharing Candidate
+### FL002, False Sharing Candidate
 
 **Base severity:** Critical &nbsp;|&nbsp; **Scope:** struct &nbsp;|&nbsp; **Gate:** none
 
@@ -180,19 +180,19 @@ serialized by geometry.
 **Detection:** Requires all of:
 1. Thread-escape evidence for the type (atomics, sync primitives, publication
    to threads/globals, or a record written from ≥2 functions one of which is
-   spawned as a thread — see [architecture.md](architecture.md)),
+   spawned as a thread. See [architecture.md](architecture.md)),
 2. At least one mutable co-resident pair (per the pair co-residency contract),
 3. Concurrency evidence: either an atomic field, or proven distinct writer
    functions for the pair.
 
 **Atomicity is not the gate.** Striped and role-partitioned fields guarantee
 single-writer-per-slot, so the dominant false-sharing idiom is deliberately
-non-atomic — no data race, pure coherence traffic. An atomicity precondition
+non-atomic, no data race, pure coherence traffic. An atomicity precondition
 scored zero on exactly that shape. A non-atomic record keeps the severity, since
 the mechanism and cost are identical, and takes a lower confidence, since
 concurrent execution of the writers is not proven.
 
-A pair may be **intra-array** — two elements of one array on one line. An array
+A pair may be **intra-array**. Two elements of one array on one line. An array
 is a single `FieldDecl`, so pairing distinct decls alone can never express it.
 Because co-residency is not contention (padding arrays share lines by
 construction and are never written), an intra-array pair additionally requires
@@ -200,10 +200,10 @@ distinct writers reaching the array.
 
 Two records are reported but demoted, never suppressed:
 
-- **Refcount-only** — a single atomic whose name matches a refcount pattern,
+- **Refcount-only**. A single atomic whose name matches a refcount pattern,
   sharing lines only with immutable data. COW/`shared_ptr` control blocks do
   not false-share.
-- **Self-guarded** — a record carrying its own sync primitive with no atomics.
+- **Self-guarded**. A record carrying its own sync primitive with no atomics.
   A mutex co-located with the data it guards is a deliberate, benign layout:
   writes under that lock are already serialized. Per-field lock coverage is not
   provable here, so the finding is marked rather than dropped.
@@ -220,12 +220,12 @@ Two records are reported but demoted, never suppressed:
 **Write-evidence grading** (applied on top of the ladder): geometry cannot
 distinguish parallel writers from an init-only pattern, so the analyzer
 collects per-field write sites within the TU, attributed to the enclosing
-function (constructor member-init lists excluded — initialization is not
+function (constructor member-init lists excluded, initialization is not
 contention):
 
 - Both fields of a pair written, from **distinct functions**: +0.06
   confidence (cap 0.95), writer counts stated in the escalation.
-- Both written by a single function, or only one side written: unchanged —
+- Both written by a single function, or only one side written: unchanged,
   the init-pattern signature must not boost.
 - **No observed writes** to any co-resident pair: Critical caps at High,
   −0.08 confidence, stated as "structural evidence only". Writers in another
@@ -252,14 +252,14 @@ struct Counters {
 };
 ```
 
-### FL003 — Per-Thread Array False Sharing
+### FL003, Per-Thread Array False Sharing
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** array (struct member or file-static) &nbsp;|&nbsp; **Gate:** none
 
 **Hardware mechanism:** an array of `N` slots with element size `S < 64`
 packs `⌊64/S⌋` slots per cache line. When slot `i` is written by one core
 and slot `j` on the same line by another, each write takes the line in
-Modified state and invalidates the other core's copy — a full RFO per
+Modified state and invalidates the other core's copy, a full RFO per
 update, on a line neither core needs the rest of.
 
 **Detection gate is index provenance, not element atomicity.** Striping
@@ -268,11 +268,11 @@ scalars; requiring atomic elements would miss the cleanest instances of
 the pattern. A slot write counts as *striped* only when its subscript is
 thread-derived:
 
-- `thread_local` storage class on the index variable — the value *is* the
+- `thread_local` storage class on the index variable, the value *is* the
   thread's identity; no heuristic involved
 - a narrow identifier set (`tid`, `thread_index`, `*_tid`, `sched_getcpu`, …)
 
-Loop-induction subscripts classify as **aggregation sweeps** — bulk resets
+Loop-induction subscripts classify as **aggregation sweeps**, bulk resets
 and total-summing loops are single-threaded traversals and never count as
 multi-thread evidence.
 
@@ -295,17 +295,17 @@ against both write frequency and cost:
 
 | condition | recommended fix |
 |---|---|
-| a line-aligned per-thread structure already exists in-tree | **relocate** — identical isolation, zero added footprint |
+| a line-aligned per-thread structure already exists in-tree | **relocate**. Identical isolation, zero added footprint |
 | hot-path writes, padding costs ≤10% of L1D | full padding |
 | hot-path writes, padding costs >10% of L1D | head padding (isolate the hottest slot) |
-| non-hot writes, padding costs >10% of L1D | **none** — reported Informational, the coherence traffic is real but the fix costs more than it saves |
+| non-hot writes, padding costs >10% of L1D | **none**. Reported Informational, the coherence traffic is real but the fix costs more than it saves |
 
 Write frequency comes from the hot-path oracle, refined by
 `dispatch_path_patterns` and `tick_path_patterns` (fnmatch). Named
 tiers outrank oracle hotness: the oracle reaches most functions via a
 file glob or transitive propagation, which cannot separate a
 per-connection setup routine from the per-command path in the same
-file. **Unknown frequency does not demote** — unestablished is not
+file. **Unknown frequency does not demote**, unestablished is not
 proven-low, and such findings keep their evidence severity while
 carrying an escalation naming what would refine them.
 
@@ -316,7 +316,7 @@ quarter of L1D is Informational.
 
 **Mitigation respect:** an element stride that is a multiple of the line
 size is full isolation and never fires. A line-aligned base **plus a
-padded index origin** isolates slot 0 only — slots 1.. still pack — and
+padded index origin** isolates slot 0 only (slots 1.. still pack) and
 caps at Medium with the residual stated. Base alignment *alone* is not
 mitigation: it separates slot 0 from the preceding symbol and does
 nothing for slot 0 versus slot 1.
@@ -325,17 +325,17 @@ nothing for slot 0 versus slot 1.
 
 ## Synchronization risks
 
-### FL010 — Overly Strong Atomic Ordering
+### FL010, Overly Strong Atomic Ordering
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
 **Hardware mechanism:** On x86-64 TSO, a `seq_cst` store lowers to `XCHG` (or
-`MOV`+`MFENCE`) — a full store-buffer drain. A `release` store is a plain
+`MOV`+`MFENCE`). A full store-buffer drain. A `release` store is a plain
 `MOV`: free. On ARM64, `seq_cst` costs real barriers (`DMB ISH`) on every
 operation class, including loads (`LDAR`).
 
 **Detection:** All atomic operation forms (see shared contract) whose
-effective ordering is `seq_cst` — including implicit `seq_cst` from
+effective ordering is `seq_cst`, including implicit `seq_cst` from
 argument-less `store()`, C11 `_Atomic` operators, and `__sync_*` builtins.
 The ordering argument participates only when it is a genuine
 `memory_order` enum or a constant that evaluates to one; runtime-variable
@@ -356,12 +356,12 @@ drain per iteration); data-flow evidence that an atomic load feeds a branch
 loads, `relaxed` for counters with no ordering role. State the invariant that
 makes the weaker order correct.
 
-### FL011 — Atomic Contention Hotspot
+### FL011, Atomic Contention Hotspot
 
 **Base severity:** Critical &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
 **Hardware mechanism:** Every atomic RMW takes exclusive line ownership. N
-cores incrementing one counter serialize on line ownership transfer —
+cores incrementing one counter serialize on line ownership transfer,
 throughput collapses to coherence latency, not core count.
 
 **Detection:** Atomic **write** sites (all forms; loads and pure fences
@@ -380,7 +380,7 @@ in the same struct.
 **Mitigation:** Shard per-core and aggregate on read. Batch updates. A
 contended counter is a design smell, not a tuning knob.
 
-### FL012 — Lock in Hot Path
+### FL012, Lock in Hot Path
 
 **Base severity:** Critical &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
@@ -396,15 +396,15 @@ acquisition in a hot function.
 **Mitigation:** Single-writer designs, partitioned state, lock-free structures
 where the invariants allow.
 
-### FL013 — Spin-Wait Without Pause
+### FL013, Spin-Wait Without Pause
 
 **Severity:** High &nbsp;|&nbsp; **Scope:** function (hot-path gated)
 
-Fires on a tight loop (≤4 body statements — larger bodies are work
+Fires on a tight loop (≤4 body statements, larger bodies are work
 loops, not spins) that polls an atomic or volatile in its condition or
 body with **no de-speculation or descheduling** in the loop. Poll forms
 covered: `load`/`compare_exchange_*`, the **implicit conversion
-operator** (`while (flag)` desugars to a `CXXConversionDecl` call —
+operator** (`while (flag)` desugars to a `CXXConversionDecl` call,
 name matching alone misses the most common spin), atomic operator
 overloads (RMW-as-poll), `std::atomic_flag::test`/`test_and_set` (the
 TAS spinlock idiom, C++ and C11 spellings), `__atomic_load*`, C11
@@ -413,12 +413,12 @@ every polled variable. Relax family: `_mm_pause`/
 `__builtin_ia32_pause`, `umwait`/`tpause`/`monitor`/`mwait` (the
 modern *designed* wait), `std::this_thread::yield`/`sleep_*`,
 `sched_yield`, `nanosleep`, C++20 blocking waits (`wait`/`wait_for`/
-`wait_until` — matched by bare name deliberately: a method named
+`wait_until`. Matched by bare name deliberately: a method named
 `wait` declares descheduling intent, and a custom one that internally
 bare-spins is flagged once inside its own body, not at every caller),
 DPDK `rte_pause`/`rte_delay_us`, blocking demultiplexers
-(`epoll_wait`, `poll`, `select` — an event loop is not a spin), or any
-inline `asm` (opaque semantics — `cpu_relax()` and hand-rolled pause
+(`epoll_wait`, `poll`, `select`. An event loop is not a spin), or any
+inline `asm` (opaque semantics, `cpu_relax()` and hand-rolled pause
 both arrive as asm, so the benefit of the doubt goes to the author).
 Bespoke backoff vocabularies (folly `Sleeper`, in-house
 `Backoff::pause`) are declared once via `relax_function_patterns`
@@ -426,16 +426,16 @@ Bespoke backoff vocabularies (folly `Sleeper`, in-house
 
 Mechanism: the pauseless spin speculates polled loads far ahead; the
 writer's eventual invalidation triggers a memory-order machine clear
-(full pipeline flush — `machine_clears.memory_ordering`), and the
+(full pipeline flush. `machine_clears.memory_ordering`), and the
 spinning logical core monopolizes issue ports its SMT sibling needs.
-Grading: TAS spin 0.78 (each iteration is an RFO **write** — contenders
+Grading: TAS spin 0.78 (each iteration is an RFO **write**, contenders
 trade the line in Modified state where a TTAS spins on a Shared copy),
 load-spin 0.75, CAS-retry 0.62 (short retry bursts are often
 acceptable; unbounded ones need runtime data).
 
 `smt_enabled: false` (config) models BIOS-disabled Hyper-Threading:
 the sibling-starvation clause drops from the reasoning and severity
-drops to Medium — one mechanism instead of two, not silence. The
+drops to Medium. One mechanism instead of two, not silence. The
 mitigation states the PAUSE trade honestly (~140 cycles of wake-up
 latency on Skylake+-derived cores); a deliberate bare spin on a
 sub-microsecond signaling path is what `// lshaz-suppress FL013` is
@@ -445,7 +445,7 @@ for, and the diagnostic says so.
 
 ## Memory allocation risks
 
-### FL020 — Heap Allocation in Hot Path
+### FL020, Heap Allocation in Hot Path
 
 **Base severity:** Critical &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
@@ -466,7 +466,7 @@ a field, returned) or flows into a loop body.
 
 **Mitigation:** Preallocate; arena/slab allocators; object pools.
 
-### FL021 — Large Stack Frame
+### FL021, Large Stack Frame
 
 **Base severity:** Medium &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** none
 
@@ -484,7 +484,7 @@ entries and evicts L1D lines on every call/return cycle through it.
 
 ## Dispatch risks
 
-### FL030 — Virtual Dispatch in Hot Path
+### FL030, Virtual Dispatch in Hot Path
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
@@ -498,7 +498,7 @@ surviving indirect calls are confirmed (+0.10).
 **Mitigation:** CRTP, `std::variant` + visitation, or sealed hierarchies that
 enable devirtualization.
 
-### FL031 — std::function in Hot Path
+### FL031, std::function in Hot Path
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
@@ -515,21 +515,21 @@ for stateless callbacks.
 
 ## Structural design risks
 
-### FL040 — Centralized Mutable Global State
+### FL040, Centralized Mutable Global State
 
 **Base severity:** High (Critical when atomic) &nbsp;|&nbsp; **Scope:** variable &nbsp;|&nbsp; **Gate:** none
 
 **Hardware mechanism:** One global written by many threads is one contended
-cache line for the whole process — plus guaranteed remote-node access for all
+cache line for the whole process, plus guaranteed remote-node access for all
 but one socket under NUMA.
 
 **Detection:** Global or namespace-scope mutable variables. Write sites are
 counted per TU across **all** write forms (plain assignment, `++`/`--`,
-member writes through the global, and every atomic form — an `atomicIncr`
+member writes through the global, and every atomic form, an `atomicIncr`
 macro expanding to `__atomic_add_fetch` counts), with loop context recorded
 per site.
 
-**Severity grades on write pressure, not site count** — write rate is what
+**Severity grades on write pressure, not site count**, write rate is what
 coherence sees:
 
 | Evidence (global aggregate) | Verdict |
@@ -540,7 +540,7 @@ coherence sees:
 | Plain type, single in-loop site (one write path; concurrent writers would be a data race) | Informational |
 | At most one flat write total (write-once: configuration, not contention) | Informational |
 
-A single site inside a loop is never write-once — one *site* is not one
+A single site inside a loop is never write-once, one *site* is not one
 *write*.
 
 **Cross-TU aggregation:** FL040 is map/reduce. Each TU emits candidates
@@ -551,13 +551,13 @@ shard count.
 **Mitigation:** Per-thread/per-core partitions with read-time aggregation;
 dependency injection over ambient state.
 
-### FL041 — Contended Queue Pattern
+### FL041, Contended Queue Pattern
 
 **Base severity:** High (Critical when the pair is confirmed) &nbsp;|&nbsp; **Scope:** struct &nbsp;|&nbsp; **Gate:** none
 
 **Hardware mechanism:** In an SPSC/MPMC ring, producers own `head` and
 consumers own `tail`. On one line, every enqueue invalidates every consumer's
-cached `tail` and vice versa — the queue serializes on coherence instead of
+cached `tail` and vice versa. The queue serializes on coherence instead of
 running concurrently.
 
 **Detection, atomic path:** Atomic fields whose names match
@@ -566,7 +566,7 @@ co-residency contract). Line-aligned records rate `Proven` (0.82); sub-line
 alignment rates `Likely` (0.76).
 
 **Detection, plain path:** A ring whose head and tail are plain indices is the
-canonical contended queue — single-writer-per-index needs no atomicity — so
+canonical contended queue (single-writer-per-index needs no atomicity) so
 atomics are not required. This path is gated far harder, because scanning all
 mutable fields for the name list matches `bytes_read`/`bytes_written` on every
 stats struct in a server. It requires:
@@ -576,12 +576,12 @@ stats struct in a server. It requires:
 2. one head-like *and* one tail-like index, and
 3. those two to be the co-located pair, not merely present in the record.
 
-A queue-ish type name alone does not qualify without atomics — `buffer` and
+A queue-ish type name alone does not qualify without atomics, `buffer` and
 `cache` name plenty of non-queues. Confidence drops by 0.14, and the finding
 reports only the head/tail pair so queue-index language is never attached to
 unrelated arrays sharing the line.
 
-**Not demoted by deliberate layout** — an aligned queue struct whose indices
+**Not demoted by deliberate layout**. An aligned queue struct whose indices
 still share a line is the bug this rule exists to catch.
 
 **Mitigation:** Pad each index to its own line; per-core queues.
@@ -590,7 +590,7 @@ still share a line is the bug this rule exists to catch.
 
 ## Branching risks
 
-### FL050 — Deep Conditional Tree in Hot Path
+### FL050, Deep Conditional Tree in Hot Path
 
 **Base severity:** Medium &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
@@ -607,7 +607,7 @@ decision outcomes.
 
 ## NUMA risks
 
-### FL060 — NUMA-Unfriendly Shared Structure
+### FL060, NUMA-Unfriendly Shared Structure
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** struct &nbsp;|&nbsp; **Gate:** none
 
@@ -629,13 +629,13 @@ notch (−0.10 confidence) with the reason stated: the author is already
 steering placement, and the first-touch default model must defer to
 their policy. Same contract deliberate layout earns from FL002/FL090.
 
-### FL070 — TLB Pressure
+### FL070, TLB Pressure
 
 **Base severity:** Medium &nbsp;|&nbsp; **Scope:** mixed &nbsp;|&nbsp; **Gate:** globals hot-gated, allocation sites ungated
 
 **Hardware mechanism:** a working set spanning more base pages than the
 dTLB covers (~64 L1 / ~1–2K L2 entries at 4KB) turns strided access into
-page walks — 4-level lookups, each a potential cache-miss chain
+page walks. 4-level lookups, each a potential cache-miss chain
 (`dtlb_load_misses.walk_completed`). One 2MB hugepage entry covers 512×
 the reach, but khugepaged collapses only 2MB-**aligned** virtual
 extents: a 4MB array misaligned by a page backs 1 huge page instead of
@@ -652,20 +652,20 @@ extents: a 4MB array misaligned by a page backs 1 huge page instead of
   `aligned_alloc` with sub-2MB alignment) with compile-time-provable
   sizes. When the exonerating argument (mmap flags, memalign alignment)
   is **not** compile-time evaluable, the site grades Speculative 0.30
-  with the unprovable argument named — it may resolve safe at runtime,
+  with the unprovable argument named. It may resolve safe at runtime,
   and unprovable is a tier, never a Medium assertion.
 - With `--allocator jemalloc|tcmalloc`, allocation-path findings demote:
   those allocators chunk large allocations 2MB-aligned and THP-aware.
 - In-tree `madvise`/`posix_madvise`/`mallopt` demotes all FL070 findings
-  in post-processing (paging policy is author-managed) — the same
+  in post-processing (paging policy is author-managed), the same
   respect contract FL060 gives explicit affinity.
 
-### FL061 — Centralized Dispatcher Bottleneck
+### FL061, Centralized Dispatcher Bottleneck
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path
 
 **Hardware mechanism:** A single dispatch site routing to many targets is a
-worst case for indirect branch prediction — the BTB entry is retrained on
+worst case for indirect branch prediction. The BTB entry is retrained on
 every target change.
 
 **Detection:** High fan-out dispatcher functions in hot paths.
@@ -677,7 +677,7 @@ message set is closed.
 
 ## Compound risks
 
-### FL090 — Hazard Amplification
+### FL090, Hazard Amplification
 
 **Base severity:** Critical &nbsp;|&nbsp; **Scope:** struct &nbsp;|&nbsp; **Gate:** none
 
@@ -691,20 +691,20 @@ lines, contains atomic fields, and has thread-escape evidence. Confidence is
 per-line atomic distribution, wide-granule straddlers, and mutable write
 surface.
 
-**Demotions:** deliberate-layout contract — the compound never outranks its
+**Demotions:** deliberate-layout contract. The compound never outranks its
 mitigation-adjusted components (FL001/FL002 demote → FL090 demotes with
 them).
 
-### FL091 — Synthesized Interaction
+### FL091, Synthesized Interaction
 
 **Severity:** derived &nbsp;|&nbsp; **Scope:** synthesized in post-processing
 
 FL091 findings are not emitted by a rule; the pipeline joins existing
-diagnostics that share an **entity** — the same `file:line` site, the same
+diagnostics that share an **entity**. The same `file:line` site, the same
 `type_name` (this is how a struct-level FL002 joins a function-level FL011
 that writes that struct's fields), or the same function.
 
-Pairs take `max(parent severities)` — a demoted parent demotes the compound —
+Pairs take `max(parent severities)`, a demoted parent demotes the compound,
 and `min(parent confidences) × (1 + interaction threshold)`, capped at 1.0.
 Triples rate Critical. One compound is emitted per (template, participant
 set), regardless of how many entity keys the participants share.
@@ -721,17 +721,17 @@ Seven interaction templates:
 | IX-006 | VirtualDispatch × DeepConditional | Compounding branch misprediction |
 | IX-007 | CacheGeometry × AtomicContention × NUMALocality | Full compound: geometry + contention + NUMA |
 
-### FL092 — Unapplied In-Tree Mitigation
+### FL092, Unapplied In-Tree Mitigation
 
 **Severity:** inherited from component &nbsp;|&nbsp; **Scope:** synthesized in post-processing
 
 Synthesized when three facts join: (1) an FL002 or FL090 finding carries
 **cross-TU thread-role attribution** (its fields are written from provably
-disjoint thread roles — see the thread-role reduce in
+disjoint thread roles, see the thread-role reduce in
 [architecture.md](architecture.md)); (2) the flagged type does **not** carry
 the deliberate-layout idiom (explicit line alignment or trailing pad-to-line);
 (3) the merged escape summary shows **other** types in the codebase that do.
-The finding names an exemplar and the count — the codebase itself validates
+The finding names an exemplar and the count. The codebase itself validates
 both the hazard class and the fix idiom; the flagged struct never received
 the treatment.
 
@@ -744,7 +744,7 @@ from the component, so mitigation-adjusted demotions are never outranked.
 Thread-role attribution roots come from thread-creation detection
 (`pthread_create`, `thrd_create`, `std::thread`/`std::jthread`,
 `std::async`) plus the `thread_entry_patterns` / `main_function_patterns`
-config globs — required in codebases whose workers dispatch through
+config globs. Required in codebases whose workers dispatch through
 function-pointer tables (see [configuration.md](configuration.md)).
 Attribution is deliberately strict: a function reachable from both roots
 attributes to both roles, and any unknown writer defeats disjointness, so
@@ -755,7 +755,7 @@ inline on main or offloaded to a worker) do not produce escalations.
 
 ## Scan-health diagnostics
 
-### B001 — Broken scan
+### B001, Broken scan
 
 Not a hazard. B001 reports that the **scan itself was unsound**, so the
 absence of findings in the affected translation units means nothing.
@@ -771,9 +771,9 @@ is valid, but the files it references do not yet.
 
 **Emission.** Location `<pipeline>:0`, severity Medium, confidence 1.0,
 evidence tier `speculative`. Evidence carries `missing_header` and
-`tu_count`. It deliberately bypasses severity and evidence filters — a
+`tu_count`. It deliberately bypasses severity and evidence filters, a
 report about a broken scan must not be filtered out by the flags used to
-narrow that scan — but is re-sorted afterwards so the ordering contract holds.
+narrow that scan, but is re-sorted afterwards so the ordering contract holds.
 
 **Action.** Build the project, then re-scan. Do not interpret a clean result
 alongside a B001 as clean.

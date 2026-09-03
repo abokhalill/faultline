@@ -58,11 +58,11 @@ void decodeBatch(const char *buffer, size_t len, FeedHandler &handler) {
 }
 
 // FL070 target: 4MB replay arena, page-aligned but NOT hugepage-aligned
-// — khugepaged cannot collapse the unaligned edges. Referenced from the
+//. Khugepaged cannot collapse the unaligned edges. Referenced from the
 // hot decodeBatch below via recordReplay.
 alignas(4096) static char g_replayArena[4 << 20];
 
-// Control: hugepage-aligned twin — author already thinks in 2MB units;
+// Control: hugepage-aligned twin, author already thinks in 2MB units;
 // must report at floor (Informational), not Medium.
 alignas(2 * 1024 * 1024) static char g_alignedArena[2 << 20];
 
@@ -74,7 +74,7 @@ void recordReplayForDecodeBatch(const char *src, size_t off, size_t n) {
     std::memcpy(g_alignedArena + (off % ((2u << 20) - 4096)), src, n);
 }
 
-// FL013 target: tight spin on an atomic with no pause — every
+// FL013 target: tight spin on an atomic with no pause, every
 // invalidation of readyFlag_'s line costs a memory-order machine clear.
 void FeedHandler::spinAwaitReady(const std::atomic<bool> &readyFlag_) {
     while (!readyFlag_.load(std::memory_order_acquire)) {
@@ -82,13 +82,13 @@ void FeedHandler::spinAwaitReady(const std::atomic<bool> &readyFlag_) {
 }
 
 // FL013 implicit-conversion form: `while (!flag)` desugars to the
-// atomic's conversion operator, not a named .load() — must also fire.
+// atomic's conversion operator, not a named.load(), must also fire.
 void FeedHandler::spinAwaitImplicit(const std::atomic<bool> &readyFlag_) {
     while (!readyFlag_) {
     }
 }
 
-// Control: identical spin with the pause hint — must NOT fire.
+// Control: identical spin with the pause hint, must NOT fire.
 void FeedHandler::spinAwaitReadyPaused(const std::atomic<bool> &readyFlag_) {
     while (!readyFlag_.load(std::memory_order_acquire)) {
         __builtin_ia32_pause();

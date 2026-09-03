@@ -35,7 +35,7 @@ const clang::FunctionDecl *entryArgToFunction(const clang::Expr *E) {
 
 // Unwrap the temporary/copy scaffolding std::thread's by-value functor
 // argument arrives in. Over-unwrapping a non-functor construct is
-// harmless: the result simply matches neither lambda nor bind.
+// harmless: the result matches neither lambda nor bind.
 const clang::Expr *stripFunctorWrapping(const clang::Expr *E) {
     while (E) {
         E = E->IgnoreParenImpCasts();

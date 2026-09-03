@@ -25,8 +25,8 @@ public:
         return "Footprint expansion. A record needing two lines where one "
                "would do doubles the cache it occupies, so an array of them "
                "outruns a given cache level at half the element count. Cost "
-               "is nil while the working set still fits — measured +2% at "
-               "256KB — and grows sharply as it stops: +36% at 4MB, +123% "
+               "is nil while the working set still fits, measured +2% at "
+               "256KB, and grows sharply as it stops: +36% at 4MB, +123% "
                "once the spread form exceeds last-level cache and the packed "
                "form does not. Extra lines per access are not themselves a "
                "cost: touching two resident lines measures the same as one. "
@@ -70,15 +70,10 @@ public:
         uint64_t minLines =
             (sizeBytes + Cfg.cacheLineBytes - 1) / Cfg.cacheLineBytes;
 
-        // Lines carrying at least one written field. Coherence traffic and
-        // hot-path L1D pressure scale with the lines a writer actually
-        // touches, not with the object's footprint: a 504B struct whose
-        // written fields share one line costs one line. Total span is
-        // footprint; this is the part layout can remove.
-        //
-        // Absence of write sites in THIS TU is not proof of no writers, so
-        // it never demotes — the same rule applied to unestablished write
-        // frequency in FL003 and to unprovable arguments in FL070.
+        // Coherence cost scales with the lines a writer touches, not the
+        // object's span: a 504B struct whose written fields share one line
+        // costs one line. Seeing no writes in this TU never demotes, since
+        // writers may live elsewhere.
         unsigned writerLines = 0;
         for (const auto &b : map.buckets()) {
             for (const auto *f : b.fields) {
@@ -138,7 +133,7 @@ public:
             // resident lines measures the same as one. Separating them is also
             // FL002's prescribed fix, so escalating on it graded the remedy as
             // the hazard. What this signals is a wider record, and width only
-            // costs once the instances outrun a cache level — which is a
+            // costs once the instances outrun a cache level, which is a
             // working-set fact, not a layout one.
             if (map.totalAtomicFields() >= 2 && atomicLines >= 2 &&
                 sev < Severity::High)
@@ -147,7 +142,7 @@ public:
                 std::to_string(map.totalAtomicFields()) +
                 " atomic field(s) across " + std::to_string(atomicLines) +
                 " line(s): a wider record, costing once an array of them "
-                "outruns cache — not per access");
+                "outruns cache, not per access");
 
             // Refcount-only structs: single atomic refcount with immutable
             // co-located data. demote; cache line spanning is real but

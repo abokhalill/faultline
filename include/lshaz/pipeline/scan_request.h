@@ -46,7 +46,7 @@ struct FilterOptions {
     // Vendored third-party trees, routinely a third of all findings in code
     // the project neither owns nor patches. Directory naming is a
     // convention, not a fact, so the patterns are config-driven rather than
-    // policy baked in here — a project whose own module happens to sit under
+    // policy baked in here. A project whose own module happens to sit under
     // external/ must be able to say so. Never silent: the skipped count is
     // reported and --include-vendored restores them.
     bool skipVendored = true;

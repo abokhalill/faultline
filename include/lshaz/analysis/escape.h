@@ -127,7 +127,7 @@ public:
     // Requires prior scanTranslationUnit() call.
     bool isWriteOnceGlobal(const clang::VarDecl *VD) const;
 
-    // Raw per-TU write count for a global. Does NOT include the initializer —
+    // Raw per-TU write count for a global. Does NOT include the initializer,
     // only explicit assignments/increments in function bodies within this TU.
     unsigned getGlobalWriteCount(const clang::VarDecl *VD) const;
 

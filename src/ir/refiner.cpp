@@ -198,7 +198,7 @@ void DiagnosticRefiner::refineFL010(Diagnostic &diag) const {
             diag.confidence + evidence::kOptimizedAway,
             evidence::kFloorOptimizedAway, evidence::kCeilingSiteProven);
         diag.escalations.push_back(
-            "IR refinement: no seq_cst instructions emitted — "
+            "IR refinement: no seq_cst instructions emitted, "
             "compiler may have optimized ordering");
     }
 
@@ -277,7 +277,7 @@ void DiagnosticRefiner::refineFL020(Diagnostic &diag) const {
             diag.confidence + evidence::kHeapEliminated,
             evidence::kFloorHeapEliminated, evidence::kCeilingSiteProven);
         diag.escalations.push_back(
-            "IR refinement: no heap alloc calls found after inlining — "
+            "IR refinement: no heap alloc calls found after inlining, "
             "allocation may have been optimized away");
     }
 }
@@ -296,7 +296,7 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
         diag.escalations.push_back(
             "IR suppressed: actual stack frame " + std::to_string(irStackSize) +
             "B (below " + std::to_string(threshold) +
-            "B threshold) — AST estimate was inaccurate");
+            "B threshold), AST estimate was inaccurate");
         return;
     }
 
@@ -334,7 +334,7 @@ void DiagnosticRefiner::refineFL021(Diagnostic &diag) const {
             diag.escalations.push_back(
                 "IR stack frame (" + std::to_string(irStackSize) +
                 "B) exceeds AST estimate (" + std::to_string(astEstimate) +
-                "B) — compiler-generated temporaries or alignment padding");
+                "B). Compiler-generated temporaries or alignment padding");
         }
     }
 }
@@ -358,7 +358,7 @@ void DiagnosticRefiner::refineFL030(Diagnostic &diag) const {
             diag.confidence + evidence::kFullyDevirtualized,
             evidence::kFloorDevirtualized, evidence::kCeilingSiteProven);
         diag.escalations.push_back(
-            "IR refinement: all calls devirtualized to direct — "
+            "IR refinement: all calls devirtualized to direct, "
             "BTB pressure eliminated by compiler");
     }
 }
@@ -375,13 +375,13 @@ void DiagnosticRefiner::refineFL031(Diagnostic &diag) const {
             evidence::kFloor, evidence::kCeilingFuncLevel);
         diag.escalations.push_back(
             "IR confirmed: " + std::to_string(profile->indirectCallCount) +
-            " indirect call(s) — type-erased dispatch not eliminated");
+            " indirect call(s), type-erased dispatch not eliminated");
     } else {
         diag.confidence = std::clamp(
             diag.confidence + evidence::kOptimizedAway,
             evidence::kFloorIndirectGone, evidence::kCeilingSiteProven);
         diag.escalations.push_back(
-            "IR refinement: no indirect calls found — "
+            "IR refinement: no indirect calls found, "
             "std::function may have been devirtualized or inlined");
     }
 }

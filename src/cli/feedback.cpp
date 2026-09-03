@@ -261,7 +261,7 @@ int runFeedbackCommand(int argc, const char **argv) {
     }
     if (features.empty()) {
         llvm::errs() << "lshaz feedback: hypothesis.json lacks "
-                        "structural_features — regenerate the bundle "
+                        "structural_features, regenerate the bundle "
                         "(lshaz exp); refusing to ingest into a feature "
                         "space the scanner cannot match\n";
         return 1;
@@ -335,10 +335,10 @@ int runFeedbackCommand(int argc, const char **argv) {
             llvm::errs() << "lshaz feedback: warning: unparseable "
                          << envPath << " ("
                          << llvm::toString(envParsed.takeError())
-                         << ") — label quality degraded\n";
+                         << "), label quality degraded\n";
         }
     } else {
-        llvm::errs() << "lshaz feedback: warning: no results/env.json — "
+        llvm::errs() << "lshaz feedback: warning: no results/env.json, "
                         "environment unverified, label quality degraded\n";
     }
 

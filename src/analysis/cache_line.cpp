@@ -167,7 +167,7 @@ void CacheLineMap::collectFields(const clang::RecordDecl *RD,
 
     const auto &layout = Ctx.getASTRecordLayout(RD);
 
-    // Base subobjects (C++ only — C structs have no bases).
+    // Base subobjects (C++ only, C structs have no bases).
     if (const auto *CXXRD = llvm::dyn_cast<clang::CXXRecordDecl>(RD)) {
         for (const auto &base : CXXRD->bases()) {
             if (base.isVirtual())

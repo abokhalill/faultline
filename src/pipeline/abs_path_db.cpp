@@ -56,7 +56,7 @@ AbsolutePathCompilationDatabase::resolveCommand(
     for (size_t i = 0; i < args.size(); ++i) {
         const auto &arg = args[i];
 
-        // argv[0] — compiler path, keep as-is.
+        // argv[0], compiler path, keep as-is.
         if (i == 0) {
             resolved.CommandLine.push_back(arg);
             continue;

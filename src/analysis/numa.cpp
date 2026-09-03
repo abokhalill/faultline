@@ -139,7 +139,7 @@ NUMAPlacement NUMATopology::classifyStruct(const clang::RecordDecl *RD,
     if (foundGlobal)
         return NUMAPlacement::MainThread;
 
-    // No global instances found — likely heap-allocated by worker threads.
+    // No global instances found. Likely heap-allocated by worker threads.
     return NUMAPlacement::AnyThread;
 }
 

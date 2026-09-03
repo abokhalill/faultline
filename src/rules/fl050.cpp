@@ -110,7 +110,7 @@ public:
                "costs the same at 4096 targets as at 2, so BTB capacity is "
                "not the mechanism and case count is not a severity signal. "
                "Cost requires the outcome to be data-dependent, which is a "
-               "runtime property — hence Medium without a profile.";
+               "runtime property, hence Medium without a profile.";
     }
 
     void analyze(const clang::Decl *D,
@@ -183,7 +183,7 @@ public:
                    << "target count: a predictable indirect branch costs the "
                    << "same at 4096 targets as at 2. Case count therefore does "
                    << "not indicate severity. "
-                   << "[Requires: the selector varies unpredictably at runtime — "
+                   << "[Requires: the selector varies unpredictably at runtime, "
                    << "not established statically]";
             } else {
                 hw << "Conditional nesting depth " << site.depth

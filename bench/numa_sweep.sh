@@ -4,7 +4,7 @@
 # measured-constants.md currently hedges: "Cross-socket and multi-CCD coherence
 # are more expensive; these figures are a lower bound for those topologies."
 # That is an admission, not a number. Same rmw_cost harness, same spacing sweep,
-# run twice — both threads inside one socket, then one per socket — turns the
+# run twice (both threads inside one socket, then one per socket) turns the
 # hedge into a multiplier.
 #
 # Placement is discovered from numactl rather than assumed: CPU numbering is
@@ -42,7 +42,7 @@ N0=$(node_cpus 0); N1=$(node_cpus 1)
 # Isolated cores only, and physical ones at that. Housekeeping cores carry the
 # IRQs we deliberately pinned there; measuring on them reads ~23ns for an
 # uncontended lock add that should cost 2-5ns, and the noise buries the
-# cross-socket signal entirely. SMT siblings are excluded separately — they
+# cross-socket signal entirely. SMT siblings are excluded separately, they
 # share L1/L2, which is a different mechanism that reads as "cheap".
 ISO=$(cat /sys/devices/system/cpu/isolated 2>/dev/null)
 [ -n "$ISO" ] || echo "WARNING: no isolated cpus; run tune.sh or results are noise" >&2

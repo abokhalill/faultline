@@ -102,7 +102,7 @@ static void note_write(uintptr_t addr, unsigned size) {
 // be attributed to the site that produced the object.
 //
 // Records are kept after free rather than removed. An address reused by a
-// pool genuinely belongs to several objects over the run, and with no
+// pool belongs to several objects over the run, and with no
 // timestamps that ambiguity cannot be resolved -- so it is surfaced as
 // POOL_REUSE instead of silently attributed to whichever record won.
 #define MAX_ALLOCS (1u << 20)

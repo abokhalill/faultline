@@ -254,7 +254,7 @@ double CalibrationFeedbackStore::computeLabelQuality(
 
     envQuality = std::max(envQuality, 0.0);
 
-    double confoundRisk = 0.05; /* TODO: check disasm diff size */
+    double confoundRisk = 0.05;  // flat estimate; a disasm diff would give a real one
 
     return powerFactor * envQuality * (1.0 - confoundRisk);
 }

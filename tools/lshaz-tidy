@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lshaz-tidy — clang-tidy-compatible wrapper for lshaz static analysis.
+# lshaz-tidy. Clang-tidy-compatible wrapper for lshaz static analysis.
 #
 # Usage:
 #   lshaz-tidy <project-path> [--rule FL001] [--min-severity High] [lshaz-opts...]
@@ -8,10 +8,10 @@
 # so CI systems (GitHub Actions, Jenkins, etc.) can consume output directly.
 #
 # Exit codes match clang-tidy convention:
-#   0 — no findings
-#   1 — findings emitted
-#   2 — parse errors
-#   3 — fatal (bad args, missing files)
+#   0, no findings
+#   1, findings emitted
+#   2, parse errors
+#   3, fatal (bad args, missing files)
 
 set -euo pipefail
 

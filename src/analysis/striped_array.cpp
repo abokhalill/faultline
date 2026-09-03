@@ -134,7 +134,7 @@ public:
             noteWrite(asSubscript(CE->getArg(0)));
         return true;
     }
-    // C11/GNU atomic builtins are AtomicExpr, not CallExpr — the shape
+    // C11/GNU atomic builtins are AtomicExpr, not CallExpr, the shape
     // every atomicIncr-style macro lowers to.
     bool VisitAtomicExpr(clang::AtomicExpr *E) {
         switch (E->getOp()) {

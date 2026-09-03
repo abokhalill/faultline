@@ -13,7 +13,7 @@ std::string CLIOutputFormatter::format(const std::vector<Diagnostic> &diagnostic
            << d.location.column << ": ";
 
         os << "[" << severityToString(d.severity) << "] "
-           << d.ruleID << " — " << d.title << "\n";
+           << d.ruleID << ", " << d.title << "\n";
 
         os << "  Hardware: " << d.hardwareReasoning << "\n";
         os << "  Evidence: " << d.serializeEvidence() << "\n";

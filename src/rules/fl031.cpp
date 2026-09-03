@@ -141,7 +141,7 @@ public:
         return "std::function uses type-erased callable storage, with three "
                "costs of very different size. The prevented inline is ~1ns "
                "and is always paid. Misprediction adds up to ~8ns, but only "
-               "when the stored target varies unpredictably — a call site "
+               "when the stored target varies unpredictably, a call site "
                "holding one callable costs the same as one holding eight in "
                "a predictable cycle, so BTB capacity is not the mechanism. "
                "Construction may heap-allocate when the callable exceeds the "
@@ -163,7 +163,7 @@ public:
         if (!Oracle.isFunctionHot(FD))
             return;
 
-        // Also flag std::function parameters — invocation in hot function body
+        // Also flag std::function parameters, invocation in hot function body
         // is the concern regardless of where it was constructed.
         bool hasStdFuncParam = false;
         for (const auto *param : FD->parameters()) {

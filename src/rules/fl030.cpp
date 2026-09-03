@@ -109,7 +109,7 @@ public:
                "to ~8ns but only when the receiver type varies unpredictably; "
                "a monomorphic site, or a predictable cycle over eight types, "
                "costs the same as one type. Candidate-type count is not the "
-               "signal — the dynamic distribution is, and it is not visible "
+               "signal. The dynamic distribution is, and it is not visible "
                "in the AST. Fixes differ: devirtualize (final, CRTP) for the "
                "barrier, type-partition the data for the misprediction.";
     }
@@ -168,7 +168,7 @@ public:
                << "receiver type varies unpredictably. Monomorphic dispatch "
                << "costs the same at 8 candidate types as at 1. "
                << "[Requires, for the larger term: polymorphic and "
-               << "data-dependent receivers — not established statically]";
+               << "data-dependent receivers, not established statically]";
             diag.hardwareReasoning = hw.str();
 
             diag.structuralEvidence = {

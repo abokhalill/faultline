@@ -20,8 +20,8 @@ namespace lshaz {
 // plain scalars. Requiring atomics misses the cleanest instances.
 enum class IndexProvenance : uint8_t {
     Unknown       = 0,
-    ConstantIdx   = 1,  // arr[0]        — one slot, not striping
-    LoopInduction = 2,  // for(i..) arr[i] — aggregation sweep / bulk reset
+    ConstantIdx   = 1,  // arr[0]. One slot, not striping
+    LoopInduction = 2,  // for(i..) arr[i], aggregation sweep / bulk reset
     ThreadIdent   = 3,  // arr[thread_index], arr[c->running_tid]
 };
 

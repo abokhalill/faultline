@@ -319,7 +319,7 @@ public:
 
         escalations.push_back(
             "cross-core RFO traffic would dominate this cost, but a second "
-            "writing core is not established here — severity reflects the "
+            "writing core is not established here, severity reflects the "
             "uncontended per-op cost only");
 
         std::vector<MechanismClaim> claims = {

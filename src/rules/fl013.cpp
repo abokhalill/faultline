@@ -84,7 +84,7 @@ public:
         return true;
     }
 
-    // RMW-as-poll: `while (pending--)`, `while (!(seq += 0))` — atomic
+    // RMW-as-poll: `while (pending--)`, `while (!(seq += 0))`, atomic
     // operator overloads arrive as CXXOperatorCallExpr, a distinct node
     // class from both member calls above.
     bool VisitCXXOperatorCallExpr(clang::CXXOperatorCallExpr *E) {
@@ -163,7 +163,7 @@ private:
 
 // Anything in the loop that de-speculates or deschedules: pause/yield
 // family by name or builtin, or any inline asm (its semantics are
-// opaque; cpu_relax() and hand-rolled pause both arrive as asm — the
+// opaque; cpu_relax() and hand-rolled pause both arrive as asm, the
 // benefit of the doubt goes to the author).
 class RelaxFinder : public clang::RecursiveASTVisitor<RelaxFinder> {
 public:
@@ -185,13 +185,9 @@ public:
             return true;
         std::string qn = FD->getQualifiedNameAsString();
         llvm::StringRef n = FD->getName();
-        // umwait/tpause/monitor are the modern deliberate spin.
-        // wait/wait_for/wait_until match by bare name on purpose:
-        // C++20 atomic::wait, condition_variable, futures, POSIX wait —
-        // a method named wait declares descheduling intent; if a custom
-        // one internally bare-spins, FL013 fires inside its body, once,
-        // instead of at every call site. rte_* is DPDK's relax family;
-        // blocking demultiplexer syscalls make an event loop, not a spin.
+        // Bare-name wait/wait_for/wait_until on purpose: anything named wait
+        // declares descheduling intent, and a custom one that bare-spins
+        // gets flagged inside its body rather than at every call site.
         if (n == "_mm_pause" || n == "sched_yield" || n == "pthread_yield" ||
             n == "nanosleep" || n == "usleep" || n == "sleep" ||
             n == "cpu_relax" || n == "futex" || n == "syscall" ||
@@ -389,14 +385,14 @@ public:
                   "cross-core invalidation of the polled line costs a "
                   "memory-order machine clear";
             if (s.tasForm)
-                hw << "; each iteration is additionally an RFO write — "
+                hw << "; each iteration is additionally an RFO write, "
                       "contenders trade the line in Modified state where "
                       "test-and-test-and-set would spin on a Shared copy";
             if (smt)
                 hw << "; the spin also starves the SMT sibling's issue "
                       "ports";
             else
-                hw << " (smt_enabled: false — sibling-starvation cost "
+                hw << " (smt_enabled: false, sibling-starvation cost "
                       "excluded from this verdict)";
             hw << ".";
             diag.hardwareReasoning = hw.str();
@@ -417,7 +413,7 @@ public:
                       "read loop. If the bare TAS is the design: "
                       "// lshaz-suppress FL013."
                     : "_mm_pause() costs ~140 cycles of wake-up latency "
-                      "on Skylake+-derived cores — for sub-microsecond "
+                      "on Skylake+-derived cores, for sub-microsecond "
                       "signaling prefer a bounded bare spin then "
                       "umwait/tpause where available, or yield/futex for "
                       "longer waits. If the bare spin is the design, say "

@@ -658,13 +658,13 @@ void testMechanismClaimCeiling() {
 // keeps the gate testable on hosts with no PMU.
 
 void testPMUCliffAtLineSize() {
-    // PMCx043 umask 0x02 (local-CCX cache fill) — a real coherence counter.
+    // PMCx043 umask 0x02 (local-CCX cache fill). A real coherence counter.
     const uint64_t curve[] = {43334, 43659, 48248, 65025, 1, 1, 1};
     check(lshaz_pmu_cliff_index(curve, 7) == 4, "coherence curve collapses at 64B");
 }
 
 void testPMUCliffRejectsWrongMechanism() {
-    // PMCx000 umask 0x10 — separates the two arms (nonzero shared, zero
+    // PMCx000 umask 0x10. Separates the two arms (nonzero shared, zero
     // isolated) and so passes a two-point ratio test, but collapses at 16B.
     // Whatever it counts is not cache-line coherence.
     const uint64_t curve[] = {736, 3196, 0, 0, 0, 0, 0};

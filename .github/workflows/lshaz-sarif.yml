@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# lshaz SARIF Upload — runs lshaz and uploads results to GitHub Code Scanning.
+# lshaz SARIF Upload. Runs lshaz and uploads results to GitHub Code Scanning.
 #
 # Usage: Copy this file to .github/workflows/ in any project that uses lshaz.
 # Requires compile_commands.json in the repo (run lshaz init first).

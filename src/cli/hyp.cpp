@@ -85,7 +85,7 @@ int runHypCommand(int argc, const char **argv) {
         else
             llvm::errs() << "lshaz hyp: no hypothesis template for "
                          << d.ruleID << " at " << d.location.file << ":"
-                         << d.location.line << " — skipped\n";
+                         << d.location.line << ", skipped\n";
     }
 
     // Select output stream.

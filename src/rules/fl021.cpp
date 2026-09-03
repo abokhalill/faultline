@@ -30,7 +30,7 @@ public:
         return "A large frame does not cost to touch: a 512KB frame reads "
                "and writes at the same ~2ns per line as a 1KB one, because "
                "the stack is sequential and prefetches cleanly. The cost is "
-               "displacement — the frame occupies cache and TLB entries that "
+               "displacement. The frame occupies cache and TLB entries that "
                "the rest of the working set then loses, and it is paid by "
                "whatever else was resident rather than by the function "
                "holding the frame. Size alone therefore does not grade it; "
@@ -149,7 +149,7 @@ public:
         else
             hw << "Within a single page, so the cost is L1D capacity "
                << "pressure from the lines touched on entry, not D-TLB "
-               << "reach — the stack's own pages stay resident.";
+               << "reach. The stack's own pages stay resident.";
         diag.hardwareReasoning = hw.str();
 
         diag.structuralEvidence = {

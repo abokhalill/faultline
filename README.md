@@ -17,7 +17,7 @@ $ lshaz scan .
 lshaz: 172/172 TU(s) parsed, 41 diagnostic(s)
 lshaz: coverage 16947 function(s), 20526 record(s), 170 hot
 
-[CRITICAL] FL002 — False Sharing Candidate
+[CRITICAL] FL002, False Sharing Candidate
   src/server.h:2041  (struct redisServer)
   Two independently-written fields share cache line 0. Each write by one
   core invalidates the line in every other core's L1/L2, forcing an RFO
@@ -79,7 +79,7 @@ lshaz scan https://github.com/abseil/abseil-cpp
 ```
 
 Exit codes: `0` clean, `1` findings, `2` some files failed to compile,
-`3` something was wrong with the invocation. **Exit `2` matters** — a file
+`3` something was wrong with the invocation. **Exit `2` matters**, a file
 that didn't compile wasn't analyzed, so its hazards are missing from the
 report, not missing from your code.
 
@@ -136,13 +136,13 @@ before you act on it.
 - **Output is byte-identical regardless of `--jobs`.** 
 - **Third-party trees are skipped** by default. `--include-vendored` if you
   want them.
-- **Codebases that hide atomics behind a typedef** — kernel `atomic_t`, nginx
-  `ngx_atomic_t` — need those names in `atomic_type_names`, or lshaz can't
+- **Codebases that hide atomics behind a typedef**, kernel `atomic_t`, nginx
+  `ngx_atomic_t`. Need those names in `atomic_type_names`, or lshaz can't
   see they're atomic.
 - **x86-64 is the default model** (64-byte lines, TSO). `--target-arch arm64`
   changes the severity model, since a `seq_cst` load is free under TSO and
   costs `LDAR` on ARM64.
-- **Scanning a library on its own** gives thin hot-path coverage — there's no
+- **Scanning a library on its own** gives thin hot-path coverage, there's no
   application to infer hot paths from. lshaz tells you when this happens.
 
 ## CI
@@ -164,4 +164,4 @@ feeds the Security tab.
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0, see [LICENSE](LICENSE).

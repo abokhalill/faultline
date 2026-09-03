@@ -11,7 +11,7 @@
 
 namespace canary {
 
-// FL060 — NUMA-unfriendly shared structure: >=256B, escapes, mutable.
+// FL060. NUMA-unfriendly shared structure: >=256B, escapes, mutable.
 struct alignas(64) SharedRegistry {
     std::atomic<uint64_t> sequence{0};
     std::atomic<uint64_t> epoch{0};
@@ -20,7 +20,7 @@ struct alignas(64) SharedRegistry {
 };
 static SharedRegistry g_registry;
 
-// FL090 — hazard amplification: atomics on distinct lines of one shared
+// FL090. Hazard amplification: atomics on distinct lines of one shared
 // object, written from thread bodies. hft_core cannot canary this rule:
 // it spawns no threads at all, so amplification has no mechanism there and
 // firing on it was evidence-free.
@@ -34,7 +34,7 @@ struct AmplifiedCounters {
 };
 static AmplifiedCounters g_amplified;
 
-// FL002 — the thread-pool shape: one shared object, two adjacent plain
+// FL002. The thread-pool shape: one shared object, two adjacent plain
 // counters, ONE writer function run by every pool thread. Requiring two
 // distinct writer *functions* rejected this, which is backwards: two
 // *cores* is the requirement, and a pool already has them.
@@ -48,7 +48,7 @@ static void record_pool_event(int hit) {
     else     g_pool_counters.misses++;
 }
 
-// FL003 — striped per-thread array: one slot per thread, packed several to
+// FL003. Striped per-thread array: one slot per thread, packed several to
 // a line, written under a thread-index.
 static uint64_t g_thread_bytes[64];
 
@@ -60,7 +60,7 @@ uint64_t total_accounted() {
     return t;
 }
 
-// FL061 — centralized dispatcher: hot function with high fan-out.
+// FL061. Centralized dispatcher: hot function with high fan-out.
 static void op_add(uint64_t v)  { g_registry.sequence.fetch_add(v); }
 static void op_sub(uint64_t v)  { g_registry.sequence.fetch_sub(v); }
 static void op_mark(uint64_t v) { g_registry.epoch.store(v); }
@@ -107,7 +107,7 @@ void run() {
 // A loop-swept subscript reached outside any enclosing function. The striped
 // array visitor keyed writer attribution on the current function without
 // filtering that state, which segfaulted the analyzer on rocksdb rather than
-// producing a finding — a crash is a silent recall loss for the whole TU.
+// producing a finding. A crash is a silent recall loss for the whole TU.
 static constexpr int kSeedLen = 8;
 static int seed_table[kSeedLen] = {0, 1, 2, 3, 4, 5, 6, 7};
 struct SeedSum {

@@ -26,7 +26,7 @@ public:
         return "On multi-socket systems memory is physically partitioned across "
                "NUMA nodes, and a remote access pays the interconnect on the "
                "critical path: roughly +40ns over local, about 1.25x. Latency is "
-               "the mechanism, not bandwidth — a single core cannot saturate "
+               "the mechanism, not bandwidth. A single core cannot saturate "
                "either link, so it reads local and remote memory at the same "
                "rate. Placement and per-node replication help; widening the "
                "structure does not. Large shared mutable structures allocated "
@@ -55,7 +55,7 @@ public:
         // On one socket there is no remote node, so this rule's entire
         // mechanism is null and reporting it would spend a reviewer's
         // attention on a penalty that cannot occur. Socket count is a
-        // deployment property and genuinely unreadable from source, so the
+        // deployment property and unreadable from source, so the
         // tool takes it from config rather than guessing: 0 leaves the
         // assumption labelled in the output, as before.
         if (Cfg.numaSockets == 1)

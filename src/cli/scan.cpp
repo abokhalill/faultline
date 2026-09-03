@@ -125,10 +125,10 @@ void printScanUsage() {
         << "  Analyzes a single file with explicit compiler flags.\n"
         << "\n"
         << "Exit Codes:\n"
-        << "  0  Clean — no diagnostics\n"
-        << "  1  Findings — diagnostics emitted\n"
-        << "  2  Parse errors — one or more TUs failed to compile\n"
-        << "  3  Fatal — infrastructure failure (bad arguments, missing files)\n";
+        << "  0  Clean, no diagnostics\n"
+        << "  1  Findings, diagnostics emitted\n"
+        << "  2  Parse errors. One or more TUs failed to compile\n"
+        << "  3  Fatal. Infrastructure failure (bad arguments, missing files)\n";
 }
 
 bool consumeArg(int &i, int argc, const char **argv, const char *flag,
@@ -464,7 +464,7 @@ int runScanCommand(int argc, const char **argv) {
         contents.split(lines, '\n', /*MaxSplit=*/-1, /*KeepEmpty=*/false);
         for (auto &line : lines)
             request.filter.changedFiles.push_back(line.trim().str());
-        llvm::errs() << "lshaz: incremental mode — "
+        llvm::errs() << "lshaz: incremental mode, "
                      << request.filter.changedFiles.size()
                      << " changed file(s)\n";
     }
@@ -521,7 +521,7 @@ int runScanCommand(int argc, const char **argv) {
             for (unsigned i = 0; i < cap; ++i) {
                 llvm::errs() << "  failed: " << result.failedTUs[i];
                 if (i < result.failedTUErrors.size())
-                    llvm::errs() << " — " << result.failedTUErrors[i];
+                    llvm::errs() << ", " << result.failedTUErrors[i];
                 llvm::errs() << "\n";
             }
             if (result.totalTUsFailed > cap)
