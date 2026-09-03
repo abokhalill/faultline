@@ -260,10 +260,17 @@ public:
     bool withdrawnWhenNotHot() const override { return true; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Cache line ownership thrashing via MESI RFO (Read-For-Ownership). "
-               "Each atomic write from a different core forces exclusive ownership "
-               "transfer (~40-100ns cross-core, ~100-300ns cross-socket). "
-               "Store buffer pressure from sustained atomic writes.";
+        return "Every atomic RMW takes the line in Modified state, so two "
+               "cores writing it trade ownership. The LOCK-prefixed operation "
+               "itself costs ~4-6ns uncontended and is paid at every "
+               "ordering. The transfer on top of that is spacing-dependent "
+               "within a socket: +22ns when the writes land 8ns apart, "
+               "+0.3ns at 125ns, and nothing measurable past ~1us, since the "
+               "line has to still be resident in a peer core's L1 to be "
+               "stolen. Across sockets it does not decay at all, measuring "
+               "32-52ns flat from ~670ns of spacing out to 85us, because "
+               "ownership is a round trip to the remote home agent on the "
+               "critical path of the LOCK.";
     }
 
     void analyze(const clang::Decl *D,
