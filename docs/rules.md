@@ -440,7 +440,8 @@ acceptable; unbounded ones need runtime data).
 the sibling-starvation clause drops from the reasoning and severity
 drops to Medium. One mechanism instead of two, not silence. The
 mitigation states the PAUSE trade honestly (~140 cycles of wake-up
-latency on Skylake+-derived cores); a deliberate bare spin on a
+latency on Skylake+-derived cores, a widely cited figure this project
+has not measured); a deliberate bare spin on a
 sub-microsecond signaling path is what `// lshaz-suppress FL013` is
 for, and the diagnostic says so.
 
