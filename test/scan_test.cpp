@@ -178,6 +178,56 @@ void testEveryRuleHasCanary(const std::string &bin,
           "every registered rule fires on hft_core or canary");
 }
 
+// The registry gate above asks only whether a rule fired somewhere, and both
+// fixtures were C++. A rule matching C++ spellings alone therefore kept the
+// gate green while reporting nothing on any C codebase: FL013 missed every
+// spin loop in redis that way, 41 POSIX lock sites went with it, and the
+// output was indistinguishable from a clean scan.
+void testCLanguageCanary(const std::string &bin,
+                         const std::string &canaryFixture) {
+    std::cerr << "test: language-specific rules fire on a C translation unit\n";
+    if (canaryFixture.empty()) {
+        check(false, "canary fixture present for the C-language gate");
+        return;
+    }
+    auto tmp = isolateFixture(canaryFixture, "canaryc");
+    auto r = run(bin + " scan " + (tmp / "project").string() +
+                 " --no-ir --format json");
+    fs::remove_all(tmp);
+
+    // Each diagnostic emits ruleID before location.file, so the file
+    // belonging to a ruleID is the first one before the next ruleID.
+    std::set<std::string> firedInC;
+    const std::string key = "\"ruleID\":";
+    for (size_t i = r.out.find(key); i != std::string::npos;
+         i = r.out.find(key, i + key.size())) {
+        size_t q = r.out.find('"', i + key.size());
+        if (q == std::string::npos) break;
+        size_t e = r.out.find('"', q + 1);
+        if (e == std::string::npos) break;
+        std::string id = r.out.substr(q + 1, e - q - 1);
+
+        size_t next = r.out.find(key, i + key.size());
+        size_t f = r.out.find("\"file\":", e);
+        if (f == std::string::npos || (next != std::string::npos && f > next))
+            continue;
+        size_t fq = r.out.find('"', f + 7);
+        if (fq == std::string::npos) continue;
+        size_t fe = r.out.find('"', fq + 1);
+        if (fe == std::string::npos) continue;
+        std::string file = r.out.substr(fq + 1, fe - fq - 1);
+        if (file.size() > 2 && file.compare(file.size() - 2, 2, ".c") == 0)
+            firedInC.insert(id);
+    }
+
+    check(!firedInC.empty(), "the C translation unit was analyzed at all");
+    for (const char *id : {"FL013"}) {
+        std::string label = std::string(id) +
+                            " fires on a C translation unit";
+        check(firedInC.count(id) != 0, label.c_str());
+    }
+}
+
 void testMechanismClaimsBoundSeverity(const std::string &bin,
                                       const std::string &fixture,
                                       const std::string &canaryFixture) {
@@ -830,6 +880,7 @@ int main() {
 
     // Recall canary: registry completeness.
     testEveryRuleHasCanary(bin, fixture, canaryPath());
+    testCLanguageCanary(bin, canaryPath());
     testMechanismClaimsBoundSeverity(bin, fixture, canaryPath());
 
     // Hazard detection.

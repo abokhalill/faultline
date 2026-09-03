@@ -126,6 +126,23 @@ public:
         return true;
     }
 
+    // AtomicExpr is not a CallExpr, so the arm above never sees a C11 or
+    // GNU builtin. Matched on op spelling because the AO__ enumerators are
+    // generated from Builtins.def and move between LLVM 16 and 18.
+    bool VisitAtomicExpr(clang::AtomicExpr *E) {
+        llvm::StringRef n = E->getOpAsString();
+        if (E->isCmpXChg()) {
+            casForm = true;
+        } else if (n.ends_with("_test_and_set")) {
+            tasForm = true;
+        } else if (!n.ends_with("_load") && !n.ends_with("_load_n")) {
+            return true;
+        }
+        found = true;
+        noteVar(E->getPtr()->IgnoreParenImpCasts());
+        return true;
+    }
+
     bool VisitImplicitCastExpr(clang::ImplicitCastExpr *E) {
         if (E->getCastKind() != clang::CK_LValueToRValue &&
             E->getCastKind() != clang::CK_AtomicToNonAtomic)
