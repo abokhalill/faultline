@@ -28,7 +28,11 @@ public:
                "is nil while the working set still fits, measured +2% at "
                "256KB, and grows sharply as it stops: +36% at 4MB, +123% "
                "once the spread form exceeds last-level cache and the packed "
-               "form does not. Extra lines per access are not themselves a "
+               "form does not, on a 12MB Coffee Lake. Both the threshold and "
+               "the size of the step belong to the deployment's cache, not to "
+               "the layout: the same sweep against a 32MB Zen 3 L3 reaches "
+               "+38% only at 128MB versus 256MB. Extra lines per access are "
+               "not themselves a "
                "cost: touching two resident lines measures the same as one. "
                "The variable is total footprint against cache size, so "
                "instance count matters as much as layout.";

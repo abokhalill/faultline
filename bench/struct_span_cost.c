@@ -76,7 +76,11 @@ int main(int argc, char **argv) {
     // The other half of FL001's claim is eviction, which is a working-set
     // argument a single hot instance cannot test. Same field count, double the
     // footprint, swept so the array outruns cache.
-    for (long count = 4096; count <= 262144; count *= 8) {
+    //
+    // Runs to 2M because the bound has to clear the LLC of the part in hand,
+    // not the part the sweep was written on. 262144 tops out at 32MB spread,
+    // which a 5950X holds entirely in its 32MB per-CCD L3.
+    for (long count = 4096; count <= 2097152; count *= 8) {
         struct packed_s *pa = aligned_alloc(LINE, count * sizeof *pa);
         struct spread_s *sa = aligned_alloc(LINE, count * sizeof *sa);
         if (!pa || !sa) { fprintf(stderr, "alloc\n"); return 2; }
