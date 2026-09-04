@@ -580,6 +580,7 @@ int runInitCommand(int argc, const char **argv) {
     }
 
     // Validate the database by probing sample TUs.
+    bool haveDB = false;
     {
         llvm::SmallString<256> dbPath(dir);
         llvm::sys::path::append(dbPath, "compile_commands.json");
@@ -588,13 +589,27 @@ int runInitCommand(int argc, const char **argv) {
             llvm::sys::path::append(dbPath, "build");
             llvm::sys::path::append(dbPath, "compile_commands.json");
         }
-        if (llvm::sys::fs::exists(dbPath))
+        haveDB = llvm::sys::fs::exists(dbPath);
+        if (haveDB)
             validateCompileDB(std::string(dbPath));
     }
 
     // Starter config
     if (!noConfig)
         writeStarterConfig(dir);
+
+    // An unrecognized build system used to fall through to "ready" and exit 0,
+    // one line after saying it found no build system, and the scan it told the
+    // user to run then failed on the missing database.
+    if (!haveDB) {
+        llvm::errs() << "\nlshaz init: no compile_commands.json was produced, "
+                        "so scan has nothing to read.\n"
+                        "  Generate one with your build system (cmake "
+                        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON,\n"
+                        "  meson setup, or bear -- make) and point lshaz at "
+                        "the directory holding it.\n";
+        return 1;
+    }
 
     llvm::errs() << "\nlshaz init: ready. Run:\n"
                     "  lshaz scan " << dir << "\n";

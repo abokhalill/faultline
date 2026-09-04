@@ -410,6 +410,25 @@ void testUnknownOption(const std::string &bin) {
 
 // ===== Compile DB resolution tests =====
 
+// init used to print "no recognized build system found" and then "ready. Run:
+// lshaz scan <dir>" and exit 0, sending the user at a scan that cannot read
+// anything.
+void testInitWithoutBuildSystem(const std::string &bin) {
+    std::cerr << "test: init fails when it produced no compile database\n";
+    auto tmp = fs::temp_directory_path() /
+               ("lshaz_initnb_" + std::to_string(getpid()));
+    fs::create_directories(tmp);
+    { std::ofstream f(tmp / "m.c"); f << "int main(void){return 0;}\n"; }
+
+    auto r = run(bin + " init " + tmp.string());
+    check(r.exitCode != 0, "init reports failure with no build system");
+    check(!contains(r.err, "ready"), "init does not claim ready");
+    check(contains(r.err, "no compile_commands.json"),
+          "init names what is missing");
+
+    fs::remove_all(tmp);
+}
+
 void testCMakeGeneration(const std::string &bin, const std::string &fixture) {
     std::cerr << "test: cmake auto-generation of compile_commands.json\n";
     auto tmp = isolateFixture(fixture, "cmake");
@@ -949,6 +968,7 @@ int main() {
     }
 
     // Compile DB resolution.
+    testInitWithoutBuildSystem(bin);
     testCMakeGeneration(bin, fixture);
     testExplicitCompileDB(bin, fixture);
     testDirectCompileDBPath(bin, fixture);
