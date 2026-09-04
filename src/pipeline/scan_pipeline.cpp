@@ -1107,6 +1107,10 @@ static void runIRPass(
                       llvm::sys::fs::exists(remPath);
 
         argv.push_back("-fsave-optimization-record");
+        argv.push_back("-Xclang");
+        argv.push_back("-opt-record-passes");
+        argv.push_back("-Xclang");
+        argv.push_back(remarkPassFilter().str());
         argv.push_back("-foptimization-record-file=" + std::string(remPath));
         argv.push_back("-o");
         argv.push_back(std::string(irPath));
@@ -1696,8 +1700,15 @@ static unsigned emitOptRemarkFindings(
         const std::vector<OptRemark> &remarks,
         const std::map<std::string, HotnessSource> &globalHot,
         const std::vector<std::string> &hotPatterns) {
-    // One finding per (function, kind): repeated records are one decision.
-    std::set<std::pair<std::string, std::string>> seen;
+    // Keyed on the site as well as the function, because overloads share a
+    // qualified name on both sides of the join and merging them drops one.
+    // Capped per function: raxIteratorNextStep alone reports 25 loops, and a
+    // reader needs the count more than the twenty-fifth location.
+    constexpr unsigned kMaxSitesPerFunction = 3;
+    std::set<std::tuple<std::string, std::string, std::string, unsigned>> seen;
+    std::map<std::pair<std::string, std::string>, unsigned> total, shown;
+    for (const auto &r : remarks)
+        ++total[{r.function, r.name}];
     unsigned emitted = 0;
 
     for (const auto &r : remarks) {
@@ -1716,8 +1727,12 @@ static unsigned emitOptRemarkFindings(
             if (src == HotnessSource::None)
                 continue;
         }
-        if (!seen.emplace(r.function, r.name).second)
+        if (!seen.emplace(r.function, r.name, r.file, r.line).second)
             continue;
+        unsigned &n = shown[{r.function, r.name}];
+        if (n >= kMaxSitesPerFunction)
+            continue;
+        ++n;
 
         Diagnostic d;
         d.ruleID = "C002";
@@ -1748,6 +1763,14 @@ static unsigned emitOptRemarkFindings(
             d.structuralEvidence["copies"] = std::to_string(r.count);
         if (!r.detail.empty())
             d.structuralEvidence["compiler_note"] = r.detail;
+        const unsigned sites = total[{r.function, r.name}];
+        d.structuralEvidence["sites_in_function"] = std::to_string(sites);
+        if (sites > kMaxSitesPerFunction)
+            d.escalations.push_back(
+                std::to_string(sites) + " loops in this function carry the "
+                "same remark; " + std::to_string(kMaxSitesPerFunction) +
+                " are reported. Re-run after a fix rather than working the "
+                "list, since one aliasing change can clear several");
 
         d.mitigation =
             "Hoist the load into a local before the loop where the invariance "

@@ -840,10 +840,16 @@ machine the tool does not have.
 
 **Collection.** The remark file rides the clang invocation the IR pass
 already forks, via `-fsave-optimization-record`, and is read with
-`llvm::remarks`. `--no-ir` disables this class with it. Findings are limited
-to functions the cross-TU hot verdict reaches or that match
-`hot_function_patterns`, one per (function, remark kind): a redis-sized
-corpus emits 155 MB of records, so the hot filter is load-bearing.
+`llvm::remarks`. `--no-ir` disables this class with it. `-opt-record-passes`
+narrows what the compiler serializes to the whitelisted passes: on one redis
+TU that is 3.94 MB and 9524 records down to 0.57 MB and 1870, with all 1595
+reportable records intact.
+
+Findings are limited to functions the cross-TU hot verdict reaches or that
+match `hot_function_patterns`. Deduplicated per (function, kind, file, line),
+because overloads share a qualified name on both sides of the join and
+merging them drops one, then capped at three sites per function with the
+total in `sites_in_function`.
 
 **Not collected.** `gvn/LoadClobbered` is 4822 of one file's 8264 missed
 remarks and reports imprecise alias analysis rather than lost work.

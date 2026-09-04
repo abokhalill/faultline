@@ -13,8 +13,16 @@ namespace lshaz {
 
 namespace {
 
-// The oracle keys on getQualifiedNameAsString(), so the signature has to go.
-// Bracket depth rather than find('<'), which misreads operator<<.
+// A '<' that closes out "operator" is part of the operator's name.
+bool opensTemplateArgs(const std::string &d, size_t i) {
+    size_t k = i;
+    while (k > 0 && d[k - 1] == '<') --k;
+    return !(k >= 8 && d.compare(k - 8, 8, "operator") == 0);
+}
+
+// The oracle keys on getQualifiedNameAsString(), which carries neither the
+// signature nor the template arguments, so both have to come off here or an
+// instantiation never joins. Bracket depth rather than find('<').
 std::string qualifiedFrom(llvm::StringRef mangled) {
     std::string d = llvm::demangle(mangled.str());
     if (auto paren = d.find('('); paren != std::string::npos)
@@ -29,7 +37,16 @@ std::string qualifiedFrom(llvm::StringRef mangled) {
     }
     if (lastSpace != std::string::npos)
         d = d.substr(lastSpace + 1);
-    return d;
+
+    std::string out;
+    out.reserve(d.size());
+    depth = 0;
+    for (size_t i = 0; i < d.size(); ++i) {
+        if (d[i] == '<' && opensTemplateArgs(d, i)) { ++depth; continue; }
+        if (d[i] == '>' && depth) { --depth; continue; }
+        if (!depth) out += d[i];
+    }
+    return out;
 }
 
 } // anonymous namespace
@@ -40,6 +57,14 @@ bool remarkIsReportable(llvm::StringRef pass, llvm::StringRef name) {
     // fire. gvn/LoadClobbered is 4822 of one file's 8264 missed remarks and
     // reports imprecise alias analysis, not lost work.
     return pass == "licm" && name == "LoadWithLoopInvariantAddressInvalidated";
+}
+
+llvm::StringRef remarkPassFilter() {
+    // Handed to -opt-record-passes so the compiler never serializes what the
+    // whitelist would discard: 3.94 MB and 9524 records become 0.57 MB and
+    // 1870 on one redis TU, with all 1595 reportable records intact. Grow
+    // this with remarkIsReportable or the new kind is emitted and dropped.
+    return "licm";
 }
 
 bool parseOptRemarks(const std::string &path, std::vector<OptRemark> &out) {

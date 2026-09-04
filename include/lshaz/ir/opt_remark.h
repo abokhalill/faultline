@@ -27,4 +27,7 @@ bool remarkIsReportable(llvm::StringRef pass, llvm::StringRef name);
 // produces none. Returns false only for a container that exists and breaks.
 bool parseOptRemarks(const std::string &path, std::vector<OptRemark> &out);
 
+// Regex for -opt-record-passes, so filtering happens before serialization.
+llvm::StringRef remarkPassFilter();
+
 } // namespace lshaz
