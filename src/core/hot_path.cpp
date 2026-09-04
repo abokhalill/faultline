@@ -258,6 +258,10 @@ inferGlobalHotness(const ThreadRoleSummary &facts,
         work.push_back(fn);
     };
     for (const auto &e : facts.threadEntries) seed(e);
+    // inferFromCodeShape seeds fn->isMain() per TU; without the same seed
+    // here a program that spawns no threads has no globally hot function at
+    // all, and every hot-path rule is silently inert on it.
+    seed("main");
     for (const auto &p : mainPatterns) seed(p);
 
     if (work.empty())
