@@ -45,6 +45,7 @@ struct ScanArgs {
     std::string compileDBPath;
     std::string configPath;
     std::string format = "cli";
+    bool formatGiven = false;   // "cli" is the default, not necessarily a choice
     std::string outputFile;
     std::string minSeverity = "Informational";
     std::string minEvidence = "speculative";
@@ -167,7 +168,10 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         }
         if (consumeArg(i, argc, argv, "--compile-db", args.compileDBPath, "-C")) continue;
         if (consumeArg(i, argc, argv, "--config", args.configPath, "-c")) continue;
-        if (consumeArg(i, argc, argv, "--format", args.format, "-f")) continue;
+        if (consumeArg(i, argc, argv, "--format", args.format, "-f")) {
+            args.formatGiven = true;
+            continue;
+        }
         if (consumeArg(i, argc, argv, "--output", args.outputFile, "-o")) continue;
         if (consumeArg(i, argc, argv, "--min-severity", args.minSeverity, "-s")) continue;
         if (consumeArg(i, argc, argv, "--min-evidence", args.minEvidence, "-e")) continue;
@@ -341,12 +345,9 @@ int runScanCommand(int argc, const char **argv) {
         request.hotnessThreshold = args.hotnessThreshold;
         request.filter.minSeverity = request.config.minSeverity;
         request.filter.minEvidenceTier = parseEvidenceTier(args.minEvidence);
-        if (args.format == "sarif")
-            request.outputFormat = OutputFormat::SARIF;
-        else if (args.format == "json")
-            request.outputFormat = OutputFormat::JSON;
-        else if (args.format == "tidy")
-            request.outputFormat = OutputFormat::CLI;
+        const std::string singleFormat =
+            args.formatGiven ? args.format
+                             : (request.config.jsonOutput ? "json" : "cli");
 
         bool isTTY = llvm::errs().is_displayed();
         ScanPipeline pipeline([isTTY](const std::string &stage,
@@ -368,7 +369,7 @@ int runScanCommand(int argc, const char **argv) {
             llvm::errs() << "lshaz: suppressed "
                          << result.suppressedByCalibration
                          << " diagnostic(s) via calibration feedback\n";
-        return emitOutput(result, request, args.format, args.outputFile);
+        return emitOutput(result, request, singleFormat, args.outputFile);
     }
 
     // Resolve target: URL -> clone, .json -> compile DB, directory -> project root.
@@ -475,12 +476,20 @@ int runScanCommand(int argc, const char **argv) {
     request.perfProfilePath = args.perfProfile;
     request.hotnessThreshold = args.hotnessThreshold;
 
-    if (args.format == "sarif")
+    // json_output was parsed and documented but read by nothing, so a config
+    // asking for JSON silently got text. --format still wins, which is why the
+    // flag has to record that it was given: "cli" is also the default.
+    // json_output was parsed and documented but read by nothing, so a config
+    // asking for JSON silently got text. --format still wins, which is why the
+    // flag records that it was given: "cli" is also the default value.
+    // emitOutput takes the string, so resolving it here is what has effect;
+    // request.outputFormat is kept in step for consumers of the request.
+    const std::string effectiveFormat =
+        args.formatGiven ? args.format : (cfg.jsonOutput ? "json" : "cli");
+    if (effectiveFormat == "sarif")
         request.outputFormat = OutputFormat::SARIF;
-    else if (args.format == "json")
+    else if (effectiveFormat == "json")
         request.outputFormat = OutputFormat::JSON;
-    else if (args.format == "tidy")
-        request.outputFormat = OutputFormat::CLI;
     else
         request.outputFormat = OutputFormat::CLI;
 
@@ -601,7 +610,7 @@ int runScanCommand(int argc, const char **argv) {
         llvm::errs() << "lshaz: suppressed " << result.suppressedByCalibration
                      << " diagnostic(s) via calibration feedback\n";
 
-    int exitCode = emitOutput(result, request, args.format, args.outputFile);
+    int exitCode = emitOutput(result, request, effectiveFormat, args.outputFile);
 
     if (args.watch && !isCompileDB) {
         namespace fs = std::filesystem;
@@ -661,7 +670,8 @@ int runScanCommand(int argc, const char **argv) {
                              << result.suppressedByCalibration
                              << " diagnostic(s) via calibration feedback\n";
 
-            exitCode = emitOutput(result, request, args.format, args.outputFile);
+            exitCode = emitOutput(result, request, effectiveFormat,
+                                  args.outputFile);
         }
     }
 

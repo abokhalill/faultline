@@ -16,6 +16,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <iostream>
 #include <cctype>
 #include <set>
@@ -406,6 +407,27 @@ void testUnknownOption(const std::string &bin) {
     auto r = run(bin + " scan . --bogus");
     check(r.exitCode == 3, "exit 3");
     check(contains(r.err, "unknown option"), "error message");
+}
+
+// json_output: true selects JSON, and --format still outranks it. "cli" is the
+// default value of the flag, so the override has to key on whether --format
+// was actually given rather than on its value.
+void testJsonOutputConfigKey(const std::string &bin,
+                             const std::string &fixture) {
+    std::cerr << "test: json_output config key selects JSON, --format wins\n";
+    auto tmp = isolateFixture(fixture, "jsoncfg");
+    auto project = (tmp / "project").string();
+    { std::ofstream f(project + "/lshaz.config.yaml"); f << "json_output: true\n"; }
+
+    auto cfgOnly = run(bin + " scan " + project + " --no-ir");
+    check(contains(cfgOnly.out, "\"schemaVersion\""),
+          "json_output: true produces JSON without --format");
+
+    auto overridden = run(bin + " scan " + project + " --no-ir --format cli");
+    check(!contains(overridden.out, "\"schemaVersion\""),
+          "--format cli outranks json_output: true");
+
+    fs::remove_all(tmp);
 }
 
 // ===== Compile DB resolution tests =====
@@ -968,6 +990,7 @@ int main() {
     }
 
     // Compile DB resolution.
+    testJsonOutputConfigKey(bin, fixture);
     testInitWithoutBuildSystem(bin);
     testCMakeGeneration(bin, fixture);
     testExplicitCompileDB(bin, fixture);
