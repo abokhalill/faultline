@@ -103,6 +103,10 @@ bool isGCCOnlyFlag(llvm::StringRef arg) {
         "-fzero-call-used-regs=used-gpr",
         "-fstrict-flex-arrays=3",
         "-fno-strict-flex-arrays",
+        // clang-18 crashes on this with -c. Harmless while emission is
+        // -S -emit-llvm, fatal the moment anything runs codegen.
+        "-ffat-lto-objects",
+        "-fno-fat-lto-objects",
     };
     if (exactFlags.contains(arg))
         return true;
