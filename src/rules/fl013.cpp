@@ -466,11 +466,11 @@ public:
                       "test_and_set (TTAS), with pause/umwait in the "
                       "read loop. If the bare TAS is the design: "
                       "// lshaz-suppress FL013."
-                    : "_mm_pause() is widely cited at ~140 cycles of "
-                      "wake-up latency on Skylake+-derived cores, which "
-                      "this project has not measured; for sub-microsecond "
-                      "signaling prefer a bounded bare spin then "
-                      "umwait/tpause where available, or yield/futex for "
+                    : "_mm_pause() measured 64 cycles on Zen 3 against the "
+                      "~140 widely cited for Skylake-derived cores, a vendor "
+                      "split this project has measured on one side only; for "
+                      "sub-microsecond signaling prefer a bounded bare spin "
+                      "then umwait/tpause where available, or yield/futex for "
                       "longer waits. If the bare spin is the design, say "
                       "so: // lshaz-suppress FL013.";
 
