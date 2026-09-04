@@ -11,12 +11,6 @@
 
 namespace lshaz {
 
-enum class OutputFormat : uint8_t {
-    CLI,
-    JSON,
-    SARIF,
-};
-
 struct IROptions {
     bool enabled           = true;
     std::string optLevel   = "O0";   // O0|O1|O2
@@ -67,7 +61,6 @@ struct ScanRequest {
     IROptions ir;
     FeedbackOptions feedback;
     FilterOptions filter;
-    OutputFormat outputFormat = OutputFormat::CLI;
 
     // When false, refuse to run build system commands (cmake, meson, bear)
     // to generate compile_commands.json. Only discover existing ones.

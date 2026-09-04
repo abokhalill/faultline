@@ -482,16 +482,8 @@ int runScanCommand(int argc, const char **argv) {
     // json_output was parsed and documented but read by nothing, so a config
     // asking for JSON silently got text. --format still wins, which is why the
     // flag records that it was given: "cli" is also the default value.
-    // emitOutput takes the string, so resolving it here is what has effect;
-    // request.outputFormat is kept in step for consumers of the request.
     const std::string effectiveFormat =
         args.formatGiven ? args.format : (cfg.jsonOutput ? "json" : "cli");
-    if (effectiveFormat == "sarif")
-        request.outputFormat = OutputFormat::SARIF;
-    else if (effectiveFormat == "json")
-        request.outputFormat = OutputFormat::JSON;
-    else
-        request.outputFormat = OutputFormat::CLI;
 
     // Execute pipeline.
     bool isTTY = llvm::errs().is_displayed();
