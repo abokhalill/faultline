@@ -1,5 +1,5 @@
-# FL020 reaches libc through a project wrapper in every serious C codebase,
-# and sees none of it without the names.
+# FL020 sees no allocation in a codebase that wraps libc unless it is told
+# the wrapper names.
 allocator_function_patterns:
   - "canary_alloc*"
   - "canary_release_buf"

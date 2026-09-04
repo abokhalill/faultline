@@ -268,24 +268,28 @@ public:
                 " in-loop write site(s) to the flagged pair, spacing can "
                 "reach the sub-microsecond range where coherence cost is real");
         }
-        // The decay is a single-socket property. Cross-socket ownership is a
-        // QPI round trip on the critical path of the LOCK, unhideable by any
-        // gap: measured flat at 32-52ns from 134ns out to 85us spacing, where
-        // intra-socket had collapsed to zero by 670ns. Sparseness earns no
-        // demotion on a machine that may schedule the writers on two sockets.
-        const bool decayApplies = Cfg.numaSockets < 2;
+        // Decay needs both writers under one last-level cache: across
+        // domains the ownership transfer sits on the LOCK's critical path
+        // and no gap hides it. Socket count is the wrong proxy on chiplets,
+        // so an unknown topology declines to demote.
+        unsigned domains = Cfg.coherenceDomains;
+        if (domains == 0 && Cfg.numaSockets > 0) domains = Cfg.numaSockets;
+        const bool decayApplies = domains == 1;
         if (sparsePair && !densePair && !decayApplies)
             escalations.push_back(
-                "writers are sparse, but the target is multi-socket: "
-                "cross-socket sharing costs ~45ns per write and does not "
-                "decay with spacing, so sparseness earns no demotion here");
+                "writers are sparse, but the target has more than one "
+                "last-level-cache domain (or the count is unset): cross-domain "
+                "sharing costs ~51ns per write and does not decay with "
+                "spacing, so sparseness earns no demotion here. Set "
+                "coherence_domains: 1 if both writers provably share an LLC");
         else if (sparsePair)
             escalations.push_back(
                 "every writer of this pair calls out to a body this TU cannot "
                 "see, and none writes in a loop: the writes are separated by a "
                 "syscall or external call and are microseconds apart. "
                 "Contended-RMW cost collapses ~75x once spacing exceeds "
-                "~125ns within a socket, so the co-location is real but the "
+                "~119ns under one last-level cache, so the co-location is "
+                "real but the "
                 "ping-pong is not");
 
         const auto &SM = Ctx.getSourceManager();
@@ -355,7 +359,8 @@ public:
             {"writes land close enough in time to catch the line resident "
              "in a peer core's L1",
              "no writer is separated from the next by an opaque call, on a "
-             "single-socket target where coherence cost decays with spacing",
+             "target whose writers share one last-level cache, where "
+             "coherence cost decays with spacing",
              !(sparsePair && !densePair && decayApplies),
              (sparsePair && !densePair && decayApplies) ? Severity::Medium : sev,
              /*gating=*/true},

@@ -73,6 +73,11 @@ struct Config {
     // the assumption labelled.
     unsigned numaSockets = 0;
 
+    // Last-level-cache domains on the target, which is not socket count: a
+    // 5950X is one socket, one NUMA node, two CCDs. FL002's density decay
+    // holds only within a domain. 0 is unknown and declines to demote.
+    unsigned coherenceDomains = 0;
+
     // Rule enable/disable
     std::vector<std::string> disabledRules;
 
@@ -111,10 +116,9 @@ struct Config {
     // built in.
     std::vector<std::string> relaxFunctionPatterns;
 
-    // Allocator wrapper names (fnmatch) added to FL020's built-in set.
-    // Serious C codebases reach libc through one (redis zmalloc, nginx
-    // ngx_palloc, postgres palloc, git xmalloc, Linux kmalloc), and without
-    // these the rule sees none of it.
+    // Allocator wrappers (fnmatch) added to FL020's built-in set. Without
+    // them a codebase reaching libc through zmalloc, ngx_palloc or kmalloc
+    // shows no allocation at all.
     std::vector<std::string> allocatorFunctionPatterns;
 
     // Project names for a thread-slot index (fnmatch), added to FL003's

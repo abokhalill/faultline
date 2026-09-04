@@ -1709,10 +1709,9 @@ static unsigned emitOptRemarkFindings(
         const std::vector<OptRemark> &remarks,
         const std::map<std::string, HotnessSource> &globalHot,
         const std::vector<std::string> &hotPatterns) {
-    // Keyed on the site as well as the function, because overloads share a
-    // qualified name on both sides of the join and merging them drops one.
-    // Capped per function: raxIteratorNextStep alone reports 25 loops, and a
-    // reader needs the count more than the twenty-fifth location.
+    // Keyed on the site too: overloads share a qualified name on both sides
+    // of the join, so merging them drops one. Capped per function because a
+    // single function can carry 25 of these.
     constexpr unsigned kMaxSitesPerFunction = 3;
     std::set<std::tuple<std::string, std::string, std::string, unsigned>> seen;
     std::map<std::pair<std::string, std::string>, unsigned> total, shown;

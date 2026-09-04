@@ -61,6 +61,15 @@ allocator_function_patterns: []  # FL020: project allocator wrappers, e.g.
                                  # rule sees no allocation in a codebase that
                                  # wraps libc, which is most of them.
 
+# Deployment topology. coherence_domains is the number of last-level-cache
+# domains, which is NOT socket count: a Ryzen 9 5950X is one socket and one
+# NUMA node with two CCDs, and cross-CCD sharing does not decay with write
+# spacing. 0 (unknown) makes FL002 decline to demote sparse sharing rather
+# than assume the favourable topology. Set 1 only when both writers provably
+# share an LLC.
+coherence_domains: 0
+numa_sockets: 0
+
 # Target model
 target_arch: "x86-64"         # x86-64 | arm64 | arm64-apple
 linked_allocator: ""          # tcmalloc | jemalloc | mimalloc

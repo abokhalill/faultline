@@ -132,9 +132,8 @@ public:
     const std::vector<AllocSite> &sites() const { return sites_; }
 
 private:
-    // The wrapper is the allocation as far as the caller is concerned, and
-    // its name is all the evidence there is; AllocatorTopology grades an
-    // unknown callee as the configured allocator, which is what it is.
+    // AllocatorTopology grades an unknown callee as the configured
+    // allocator, which is what a wrapper resolves to.
     bool matchesWrapper(const std::string &name) const {
         for (const auto &p : wrappers_)
             if (fnmatch(p.c_str(), name.c_str(), 0) == 0)

@@ -20,9 +20,8 @@ bool opensTemplateArgs(const std::string &d, size_t i) {
     return !(k >= 8 && d.compare(k - 8, 8, "operator") == 0);
 }
 
-// The oracle keys on getQualifiedNameAsString(), which carries neither the
-// signature nor the template arguments, so both have to come off here or an
-// instantiation never joins. Bracket depth rather than find('<').
+// getQualifiedNameAsString() carries neither signature nor template args, so
+// both come off here or an instantiation never joins.
 std::string qualifiedFrom(llvm::StringRef mangled) {
     std::string d = llvm::demangle(mangled.str());
     if (auto paren = d.find('('); paren != std::string::npos)
@@ -61,9 +60,8 @@ bool remarkIsReportable(llvm::StringRef pass, llvm::StringRef name) {
 
 llvm::StringRef remarkPassFilter() {
     // Handed to -opt-record-passes so the compiler never serializes what the
-    // whitelist would discard: 3.94 MB and 9524 records become 0.57 MB and
-    // 1870 on one redis TU, with all 1595 reportable records intact. Grow
-    // this with remarkIsReportable or the new kind is emitted and dropped.
+    // whitelist discards, cutting one redis TU 3.94 MB to 0.57 MB. Grow it
+    // with remarkIsReportable or the new kind is emitted and then dropped.
     return "licm";
 }
 

@@ -233,7 +233,13 @@ contention):
   TU carry their own instance of the finding, which outranks this one at
   cross-TU deduplication.
 
-**Demotions:** deliberate-layout contract.
+**Demotions:** deliberate-layout contract, and a density conjunct. Contended-RMW
+cost decays with inter-write spacing only while both writers sit under one
+last-level cache: measured collapsing to zero by ~119ns within a CCD, and flat
+at ~51ns from 2.2ns out to 122us across two CCDs of a Ryzen 9 5950X, which is
+one socket and one NUMA node. Socket count is therefore the wrong predicate on
+any chiplet part, and `coherence_domains` is the right one. Unknown declines to
+demote.
 
 **Mitigation:** Pad independently written fields to separate lines
 (`alignas(64)`); per-thread or per-core replicas for counters.
