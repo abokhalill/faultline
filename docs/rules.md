@@ -539,10 +539,24 @@ different subsystem. IR-confirmed when the IR pass is enabled: an allocation the
 optimizer eliminated is demoted rather than reported on faith.
 
 **Escalations:** allocation inside a loop; size above `alloc_size_escalation`
-(default 256B); data-flow evidence the pointer escapes (passed out, stored to
-a field, returned) or flows into a loop body.
+(default 1032B, glibc's `tcache_max`); data-flow evidence the pointer escapes
+(passed out, stored to a field, returned) or flows into a loop body.
 
-**Mitigation:** Preallocate; arena/slab allocators; object pools.
+**Cross-thread free, resolved in the reduce phase.** Same-thread alloc/free is
+flat in thread count on every part measured, so allocation volume is not the
+hazard; returning a block to an arena another thread owns is, at 25x the
+same-thread round trip at 512B. Establishing it needs the allocation and the
+free attributed to disjoint thread roles, and those routinely sit in different
+TUs, so the map phase emits per-TU sets of which functions allocate and which
+free each **pointee type** and the reduce phase joins them against the merged
+thread-role verdicts. The type name is the join key because no pointer value
+survives the TU split. A site whose type cannot be named is not recorded, which
+leaves the conjunct unestablished rather than guessed. When it does establish,
+the arena-contention claim carries the finding to High and the verdict names
+the type.
+
+**Mitigation:** Preallocate; arena/slab allocators; object pools. Where the
+handoff is the design, free on the allocating thread and hand back an index.
 
 ### FL021, Large Stack Frame
 

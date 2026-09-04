@@ -439,6 +439,10 @@ std::string serializeShardResult(int exitCode,
     emitNameSets(threadRoles.callEdges);
     buf += "},\"fieldWriters\":{";
     emitNameSets(threadRoles.fieldWriters);
+    buf += "},\"allocOf\":{";
+    emitNameSets(threadRoles.allocatorsOfType);
+    buf += "},\"freeOf\":{";
+    emitNameSets(threadRoles.freersOfType);
     buf += "},\"edgeDepth\":{";
     {
         bool firstCaller = true;
@@ -867,6 +871,10 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.callEdges);
                 else if (tk == "fieldWriters")
                     parseNameSets(out.threadRoles.fieldWriters);
+                else if (tk == "allocOf")
+                    parseNameSets(out.threadRoles.allocatorsOfType);
+                else if (tk == "freeOf")
+                    parseNameSets(out.threadRoles.freersOfType);
                 else if (tk == "overridden")
                     parseStrArray(out.threadRoles.overriddenVirtuals);
                 else if (tk == "edgeDepth") {
@@ -2676,6 +2684,47 @@ ScanResult ScanPipeline::run(
         if (roleEscalated > 0)
             report("thread_roles", std::to_string(roleEscalated) +
                    " finding(s) escalated (disjoint writer roles)");
+
+        // FL020's cross-thread-free conjunct. The rule ships it gating and
+        // unestablished, which caps every allocation finding at Medium, and
+        // only the merged summary can settle it: the allocation and the free
+        // are routinely in different TUs, joined here by the allocated type.
+        unsigned xfree = 0;
+        for (auto &d : result.diagnostics) {
+            if (d.ruleID != "FL020")
+                continue;
+            std::string ty;
+            for (const auto &[k, v] : d.structuralEvidence)
+                if (k == "allocated_type") { ty = v; break; }
+            if (ty.empty() ||
+                !result.threadRoles.typeIsFreedCrossThread(
+                    result.threadRoleFacts, ty))
+                continue;
+            // Two claims describe this, and only one moves the grade.
+            // severitySupportedByClaims reads a gating claim's supports as a
+            // cap and never looks at its established flag, so the arena
+            // contention claim is what has to become established; the gating
+            // one is updated because the verdict text lists it.
+            for (auto &c : d.mechanismClaims) {
+                if (c.precondition.rfind("a free on a thread other than", 0) ==
+                    0)
+                    c.established = true;
+                if (c.gating && c.precondition.rfind("alloc and free", 0) == 0) {
+                    c.established = true;
+                    c.precondition = "alloc and free of '" + ty +
+                                     "' attributed to disjoint thread roles";
+                }
+            }
+            d.escalations.push_back(
+                "cross-TU: every allocation of '" + ty +
+                "' happens on one thread role and every free on another, so "
+                "the block returns to an arena owned by a different thread: "
+                "25x the same-thread round trip at 512B on glibc");
+            ++xfree;
+        }
+        if (xfree > 0)
+            report("thread_roles", std::to_string(xfree) +
+                   " FL020 finding(s) with cross-thread free established");
     }
 
     // Resolve cross-TU hotness candidates. The map phase could not decide

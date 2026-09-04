@@ -33,6 +33,15 @@ struct ThreadRoleSummary {
     std::map<std::string, std::map<std::string, unsigned>> edgeLoopDepth;
     std::map<std::string, unsigned> ownLoopDepth;
 
+    // Functions that allocate, and functions that free, a block of a given
+    // pointee type. The join key is the type name because it is the only
+    // thing that crosses a TU boundary: the allocation and the free that
+    // releases it routinely sit in different files, and no pointer value
+    // survives the split. A site whose type cannot be named is left out,
+    // which leaves FL020's conjunct unestablished rather than guessed.
+    std::map<std::string, std::set<std::string>> allocatorsOfType;
+    std::map<std::string, std::set<std::string>> freersOfType;
+
     // Virtual methods some class actually overrides, qualified names. A call
     // to a method absent here is monomorphic program-wide, which is the
     // difference between paying ~1ns and ~9ns. Only the merged set can say,
@@ -60,6 +69,10 @@ struct ThreadRoleSummary {
             auto &cur = ownLoopDepth[fn];
             if (d > cur) cur = d;
         }
+        for (const auto &[ty, fns] : other.allocatorsOfType)
+            allocatorsOfType[ty].insert(fns.begin(), fns.end());
+        for (const auto &[ty, fns] : other.freersOfType)
+            freersOfType[ty].insert(fns.begin(), fns.end());
         overriddenVirtuals.insert(other.overriddenVirtuals.begin(),
                                   other.overriddenVirtuals.end());
     }
@@ -104,6 +117,35 @@ struct ThreadRoleVerdicts {
             mask |= r;
         }
         return mask;
+    }
+
+    // Union of roles over a named function set. ROLE_NONE if any member is
+    // unattributed, since a partial answer cannot prove disjointness.
+    uint8_t rolesOf(const std::set<std::string> &fns) const {
+        if (fns.empty())
+            return ROLE_NONE;
+        uint8_t mask = 0;
+        for (const auto &f : fns) {
+            uint8_t r = roleOf(f);
+            if (r == ROLE_NONE)
+                return ROLE_NONE;
+            mask |= r;
+        }
+        return mask;
+    }
+
+    // Every allocation of this type on one thread role, every free on the
+    // other. The measured 25x is a property of that split, not of allocation
+    // volume, so this is what FL020's conjunct gates on.
+    bool typeIsFreedCrossThread(const ThreadRoleSummary &facts,
+                                const std::string &typeName) const {
+        auto a = facts.allocatorsOfType.find(typeName);
+        auto f = facts.freersOfType.find(typeName);
+        if (a == facts.allocatorsOfType.end() ||
+            f == facts.freersOfType.end())
+            return false;
+        uint8_t am = rolesOf(a->second), fm = rolesOf(f->second);
+        return am != ROLE_NONE && fm != ROLE_NONE && (am & fm) == 0;
     }
 
     // True when both fields have fully-attributed writers and the role

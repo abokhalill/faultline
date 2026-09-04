@@ -16,6 +16,7 @@
 #include <clang/Basic/SourceManager.h>
 
 #include <fnmatch.h>
+#include <map>
 
 #include <sstream>
 #include <string>
@@ -30,12 +31,33 @@ struct AllocSite {
     unsigned inLoop = 0;
     AllocatorClass allocClass = AllocatorClass::Unknown;
     long long constBytes = -1; // -1 when the request does not fold to a constant
+    std::string typeName;      // pointee type, empty when it cannot be named
 };
 
 class AllocVisitor : public clang::RecursiveASTVisitor<AllocVisitor> {
 public:
     AllocVisitor(clang::ASTContext &Ctx, const std::vector<std::string> &wrappers)
         : ctx_(Ctx), wrappers_(wrappers) {}
+
+    // T *p = malloc(n): the call's own type is void*, so the declaration is
+    // where the allocated type is recoverable. Keyed by the call's location,
+    // which is what the site records.
+    bool VisitVarDecl(clang::VarDecl *VD) {
+        if (!VD || !VD->hasInit())
+            return true;
+        const auto *CE = llvm::dyn_cast<clang::CallExpr>(
+            VD->getInit()->IgnoreParenImpCasts());
+        if (!CE)
+            return true;
+        clang::QualType QT = VD->getType();
+        const auto *PT = QT.isNull() ? nullptr : QT->getAs<clang::PointerType>();
+        if (!PT)
+            return true;
+        std::string n = typeKey(PT->getPointeeType());
+        if (!n.empty())
+            declTypes_[CE->getBeginLoc().getRawEncoding()] = n;
+        return true;
+    }
 
     bool VisitCXXNewExpr(clang::CXXNewExpr *E) {
         long long bytes = -1;
@@ -49,7 +71,8 @@ public:
             }
         }
         sites_.push_back({E->getBeginLoc(), "operator new", inLoop_,
-                          AllocatorClass::Unknown, bytes});
+                          AllocatorClass::Unknown, bytes,
+                          typeKey(E->getAllocatedType())});
         return true;
     }
 
@@ -142,7 +165,17 @@ public:
         return r;
     }
 
-    const std::vector<AllocSite> &sites() const { return sites_; }
+    // Types are attached after the walk: VisitVarDecl may run either side of
+    // the call site it names, so the join cannot happen at push time.
+    const std::vector<AllocSite> &sites() {
+        for (auto &s : sites_)
+            if (s.typeName.empty()) {
+                auto it = declTypes_.find(s.loc.getRawEncoding());
+                if (it != declTypes_.end())
+                    s.typeName = it->second;
+            }
+        return sites_;
+    }
 
 private:
     // AllocatorTopology grades an unknown callee as the configured
@@ -152,6 +185,18 @@ private:
             if (fnmatch(p.c_str(), name.c_str(), 0) == 0)
                 return true;
         return false;
+    }
+
+    std::string typeKey(clang::QualType QT) const {
+        if (QT.isNull())
+            return {};
+        QT = QT.getCanonicalType().getUnqualifiedType();
+        if (QT->isVoidType() || QT->isDependentType() ||
+            QT->isIncompleteType())
+            return {};
+        const auto *RD = QT->getAsRecordDecl();
+        return RD ? RD->getCanonicalDecl()->getQualifiedNameAsString()
+                  : QT.getAsString();
     }
 
     long long constArg(const clang::Expr *E) const {
@@ -180,6 +225,7 @@ private:
     clang::ASTContext &ctx_;
     const std::vector<std::string> &wrappers_;
     std::vector<AllocSite> sites_;
+    std::map<unsigned, std::string> declTypes_;
     unsigned inLoop_ = 0;
 };
 
@@ -359,6 +405,7 @@ public:
                 {"allocator_class", std::string(allocatorClassName(ac))},
                 {"function", FD->getQualifiedNameAsString()},
                 {"in_loop", site.inLoop ? "yes" : "no"},
+                {"allocated_type", site.typeName},
                 {"hot_path", "true"},
                 {"alloc_escapes", escapes ? "yes" : "no"},
                 {"flows_to_loop", flowsToLoop ? "yes" : "no"},

@@ -512,6 +512,78 @@ void testJsonOutputConfigKey(const std::string &bin,
     fs::remove_all(tmp);
 }
 
+// FL020's cross-thread-free conjunct. The allocation and the free sit in
+// different TUs on purpose: that split is the whole reason the verdict has to
+// come from the reduce phase, and a single-file repro would pass without
+// exercising the join at all.
+void testCrossThreadFreeConjunct(const std::string &bin) {
+    std::cerr << "test: FL020 establishes cross-thread free across TUs\n";
+    auto root = fs::temp_directory_path() /
+                ("lshaz_xfree_" + std::to_string(getpid()));
+
+    auto build = [&](const fs::path &dir, bool crossThread) {
+        fs::create_directories(dir);
+        { std::ofstream f(dir / "job.h");
+          f << "#pragma once\n#include <stdlib.h>\n"
+               "typedef struct { int id; char payload[512]; } Job;\n"
+               "void enqueue(Job *j);\nJob *dequeue(void);\n"
+               "void consume(Job *j);\n"; }
+        { std::ofstream f(dir / "queue.c");
+          f << "#include \"job.h\"\nstatic Job *s[1024];\n"
+               "static unsigned h, t;\n"
+               "void enqueue(Job *j) { s[h++ & 1023] = j; }\n"
+               "Job *dequeue(void) { return s[t++ & 1023]; }\n"; }
+        { std::ofstream f(dir / "consumer.c");
+          f << "#include \"job.h\"\nvoid consume(Job *j) { free(j); }\n"
+               "void *worker(void *a) { (void)a;\n";
+          // Cross-thread: the worker drains and frees. Same-thread: it does
+          // nothing and main frees, so the roles coincide.
+          f << (crossThread
+                    ? "  for (int i = 0; i < 1000000; i++) { Job *j = "
+                      "dequeue(); if (j) consume(j); }\n"
+                    : "");
+          f << "  return 0;\n}\n"; }
+        { std::ofstream f(dir / "producer.c");
+          f << "#include \"job.h\"\n#include <pthread.h>\n"
+               "void *worker(void *a);\n"
+               "Job *make_job(int id) { Job *j = malloc(sizeof(Job));"
+               " if (j) j->id = id; return j; }\n"
+               "int main(void) { pthread_t t;"
+               " pthread_create(&t, 0, worker, 0);\n"
+               "  for (int i = 0; i < 1000000; i++) { Job *j = make_job(i);"
+               " enqueue(j);";
+          f << (crossThread ? "" : " consume(j);");
+          f << " }\n  return 0; }\n"; }
+        { std::ofstream f(dir / "lshaz.config.yaml");
+          f << "hot_function_patterns:\n  - \"make_job\"\n  - \"consume\"\n"; }
+        { std::ofstream f(dir / "compile_commands.json");
+          f << "[";
+          const char *srcs[] = {"producer.c", "consumer.c", "queue.c"};
+          for (int i = 0; i < 3; ++i)
+              f << (i ? "," : "") << "{\"directory\":\"" << dir.string()
+                << "\",\"command\":\"cc -O2 -c " << srcs[i]
+                << "\",\"file\":\"" << (dir / srcs[i]).string() << "\"}";
+          f << "]\n"; }
+    };
+
+    build(root / "cross", true);
+    build(root / "same", false);
+
+    auto cross = run(bin + " scan " + (root / "cross").string() + " --no-ir");
+    check(contains(cross.err, "cross-thread free established"),
+          "disjoint alloc/free roles establish the conjunct");
+    check(contains(cross.out, "[High] FL020"),
+          "the allocating site outranks Medium once established");
+
+    auto same = run(bin + " scan " + (root / "same").string() + " --no-ir");
+    check(!contains(same.err, "cross-thread free established"),
+          "same-thread free does not establish it");
+    check(!contains(same.out, "[High] FL020"),
+          "same-thread free stays capped");
+
+    fs::remove_all(root);
+}
+
 // ===== Compile DB resolution tests =====
 
 // init used to print "no recognized build system found" and then "ready. Run:
@@ -1073,6 +1145,7 @@ int main() {
 
     // Compile DB resolution.
     testEveryConfigFieldIsRead();
+    testCrossThreadFreeConjunct(bin);
     testJsonOutputConfigKey(bin, fixture);
     testInitWithoutBuildSystem(bin);
     testCMakeGeneration(bin, fixture);
