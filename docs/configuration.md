@@ -61,6 +61,17 @@ allocator_function_patterns: []  # FL020: project allocator wrappers, e.g.
                                  # rule sees no allocation in a codebase that
                                  # wraps libc, which is most of them.
 
+lock_function_patterns: []       # FL012: project lock wrappers, e.g.
+unlock_function_patterns: []     # ["ngx_shmtx_lock"] / ["ngx_shmtx_unlock"],
+                                 # or LWLockAcquire/LWLockRelease. nginx takes
+                                 # 48 of its 50 locks through a wrapper, so
+                                 # without these the rule sees 4% of that tree.
+                                 # Acquire and release are separate lists
+                                 # because nesting depth is a count: inferring
+                                 # the release side from the spelling
+                                 # desynchronizes it on the first wrapper that
+                                 # does not say "unlock".
+
 # Deployment topology. coherence_domains is the number of last-level-cache
 # domains, which is NOT socket count: a Ryzen 9 5950X is one socket and one
 # NUMA node with two CCDs, and cross-CCD sharing does not decay with write

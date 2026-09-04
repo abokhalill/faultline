@@ -85,6 +85,24 @@ int canary_drain_pending(int id) {
     return n;
 }
 
+// FL012 again, through a wrapper. nginx reaches 48 of its 50 locks this way
+// and postgres uses LWLockAcquire, so the pthread names above are the case
+// that does not occur in the codebases the rule is aimed at.
+typedef struct { volatile long lock; } canary_shmtx_t;
+void canary_shmtx_lock(canary_shmtx_t *m);
+void canary_shmtx_unlock(canary_shmtx_t *m);
+
+static canary_shmtx_t canary_zone_mtx, canary_slab_mtx;
+
+__attribute__((hot))
+void canary_zone_commit(void) {
+    canary_shmtx_lock(&canary_zone_mtx);
+    canary_shmtx_lock(&canary_slab_mtx);   // nested, and the grade says so
+    canary_pending[0]++;
+    canary_shmtx_unlock(&canary_slab_mtx);
+    canary_shmtx_unlock(&canary_zone_mtx);
+}
+
 // C002. The bound load is loop-invariant but a store through `out` may alias
 // it, so LICM cannot hoist and it reloads every iteration.
 __attribute__((noinline))

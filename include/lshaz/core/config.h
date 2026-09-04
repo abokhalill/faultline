@@ -124,6 +124,15 @@ struct Config {
     // shows no allocation at all.
     std::vector<std::string> allocatorFunctionPatterns;
 
+    // Lock wrappers (fnmatch) added to FL012's POSIX set. nginx reaches its
+    // mutexes through ngx_shmtx_lock at 48 sites and pthread_mutex_lock at 2,
+    // so without these the rule sees 4% of the locks in that tree. Acquire and
+    // release are separate lists because nesting depth is a count: guessing
+    // the release side from the spelling desynchronizes it on the first
+    // wrapper that does not say "unlock".
+    std::vector<std::string> lockFunctionPatterns;
+    std::vector<std::string> unlockFunctionPatterns;
+
     // Project names for a thread-slot index (fnmatch), added to FL003's
     // built-in set. Kept out of that set because `slot` and `shard` name
     // hash buckets and ring positions at least as often.

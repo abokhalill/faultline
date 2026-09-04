@@ -3,3 +3,10 @@
 allocator_function_patterns:
   - "canary_alloc*"
   - "canary_release_buf"
+
+# Same trap one subsystem over: FL012 matches pthread_ by name, and the
+# codebases it targets reach their mutexes through a wrapper.
+lock_function_patterns:
+  - "canary_shmtx_lock"
+unlock_function_patterns:
+  - "canary_shmtx_unlock"

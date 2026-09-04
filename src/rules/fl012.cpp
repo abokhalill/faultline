@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <fnmatch.h>
 #include "lshaz/core/rule.h"
 #include "lshaz/core/registry.h"
 #include "lshaz/core/hot_path.h"
@@ -28,6 +29,10 @@ struct LockSite {
 
 class LockVisitor : public clang::RecursiveASTVisitor<LockVisitor> {
 public:
+    LockVisitor(const std::vector<std::string> &lockPats,
+                const std::vector<std::string> &unlockPats)
+        : lockPats_(lockPats), unlockPats_(unlockPats) {}
+
     bool VisitCXXMemberCallExpr(clang::CXXMemberCallExpr *E) {
         const auto *MD = E->getMethodDecl();
         if (!MD)
@@ -69,6 +74,22 @@ public:
         if (!FD || !FD->getIdentifier())
             return true;
         llvm::StringRef n = FD->getName();
+
+        // Project wrappers first: a codebase reaching its mutexes through
+        // ngx_shmtx_lock or LWLockAcquire has no pthread_ call to match.
+        if (matches(unlockPats_, n)) {
+            if (lockDepth_ > 0)
+                --lockDepth_;
+            return true;
+        }
+        if (matches(lockPats_, n)) {
+            sites_.push_back({E->getBeginLoc(), n.str(), lockDepth_ > 0,
+                              inLoop_});
+            ++lockDepth_;
+            ++scopeLockIncrements_;
+            return true;
+        }
+
         if (!n.starts_with("pthread_"))
             return true;
 
@@ -167,6 +188,17 @@ public:
     const std::vector<LockSite> &sites() const { return sites_; }
 
 private:
+    static bool matches(const std::vector<std::string> &pats,
+                        llvm::StringRef n) {
+        std::string s = n.str();
+        for (const auto &p : pats)
+            if (fnmatch(p.c_str(), s.c_str(), 0) == 0)
+                return true;
+        return false;
+    }
+
+    const std::vector<std::string> &lockPats_;
+    const std::vector<std::string> &unlockPats_;
     std::vector<LockSite> sites_;
     unsigned inLoop_ = 0;
     unsigned lockDepth_ = 0;
@@ -198,7 +230,7 @@ public:
     void analyze(const clang::Decl *D,
                  clang::ASTContext &Ctx,
                  const HotPathOracle &Oracle,
-                 const Config & /*Cfg*/,
+                 const Config &Cfg,
                  EscapeAnalysis & /*Escape*/,
                  std::vector<Diagnostic> &out) override {
 
@@ -209,7 +241,8 @@ public:
         if (!Oracle.isFunctionHot(FD))
             return;
 
-        LockVisitor visitor;
+        LockVisitor visitor(Cfg.lockFunctionPatterns,
+                            Cfg.unlockFunctionPatterns);
         visitor.TraverseStmt(FD->getBody());
 
         const auto &SM = Ctx.getSourceManager();
