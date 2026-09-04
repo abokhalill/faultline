@@ -381,11 +381,11 @@ public:
                "the other core's eventual write invalidates the line and the "
                "pipeline takes a memory-order machine clear (full flush, "
                "machine_clears.memory_ordering). PAUSE de-speculates the loop. "
-               "The sibling-starvation half of this is weaker than commonly "
-               "claimed: a spinning logical core cost its SMT sibling nothing "
-               "measurable against a latency-bound workload, so PAUSE is worth "
-               "adding for the machine clear rather than for sibling "
-               "bandwidth.";
+               "The sibling-starvation half of this does not reproduce: a "
+               "spinning logical core costs its SMT sibling nothing measurable "
+               "on Coffee Lake or Zen 3, 1.474 ns/op with and without PAUSE "
+               "and 0.0% recovered, so PAUSE is worth adding for the machine "
+               "clear rather than for sibling bandwidth.";
     }
 
     void analyze(const clang::Decl *D,
@@ -409,9 +409,11 @@ public:
         if (visitor.sites.empty())
             return;
 
-        // SMT off in BIOS voids the sibling-starvation half of the
-        // mechanism; the machine clear survives. One mechanism, not
-        // two = one severity notch, not silence.
+        // Reported as deployment context, no longer as a severity term.
+        // sync_cost places a spinner on the SMT sibling of the victim and
+        // measures 1.474 ns/op with and without PAUSE, 0.0% recovered, on
+        // Coffee Lake and again on Zen 3. The machine clear is the whole
+        // mechanism, and it does not care whether SMT is on.
         bool smt = Cfg.smtEnabled;
 
         const auto &SM = Ctx.getSourceManager();
@@ -420,7 +422,7 @@ public:
             Diagnostic diag;
             diag.ruleID = "FL013";
             diag.title = "Spin-Wait Without Pause";
-            diag.severity = smt ? Severity::High : Severity::Medium;
+            diag.severity = Severity::Medium;
             // TAS spin outranks load spin: each iteration is an RFO
             // write, so contenders ping-pong the line in Modified state
             // where a TTAS spins read-only on a Shared copy.
@@ -442,12 +444,6 @@ public:
                 hw << "; each iteration is additionally an RFO write, "
                       "contenders trade the line in Modified state where "
                       "test-and-test-and-set would spin on a Shared copy";
-            if (smt)
-                hw << "; the spin also starves the SMT sibling's issue "
-                      "ports";
-            else
-                hw << " (smt_enabled: false, sibling-starvation cost "
-                      "excluded from this verdict)";
             hw << ".";
             diag.hardwareReasoning = hw.str();
 
@@ -478,9 +474,13 @@ public:
                 {"memory-order machine clear when the peer's write lands",
                  "a tight poll loop with no pause or wait hint", true,
                  Severity::Medium},
+                // Kept so the verdict names what was tested and dropped.
+                // Measured 0.0% recovered on two vendors, so SMT being on is
+                // not evidence for it.
                 {"sibling starvation: the spin holds issue slots the peer "
                  "needs to make the progress being waited on",
-                 "SMT enabled on the deployment", smt, Severity::High},
+                 "a spinning sibling measurably slowing its peer, which "
+                 "sync_cost does not reproduce", false, Severity::High},
                 {"RFO ping-pong with the line held Modified",
                  "the spin writes each iteration (TAS) rather than reading",
                  s.tasForm, Severity::High},

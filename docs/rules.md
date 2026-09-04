@@ -448,21 +448,25 @@ Bespoke backoff vocabularies (folly `Sleeper`, in-house
 `Backoff::pause`) are declared once via `relax_function_patterns`
 (fnmatch on plain or qualified names) rather than chased here.
 
-Mechanism: the pauseless spin speculates polled loads far ahead; the
+Mechanism: the pauseless spin speculates polled loads far ahead and the
 writer's eventual invalidation triggers a memory-order machine clear
-(full pipeline flush. `machine_clears.memory_ordering`), and the
-spinning logical core monopolizes issue ports its SMT sibling needs.
+(full pipeline flush. `machine_clears.memory_ordering`). That is the
+whole mechanism. The rule also claimed the spinning logical core
+monopolizes issue ports its SMT sibling needs; `sync_cost` places a
+spinner on the sibling and measures 1.474 ns/op with and without PAUSE,
+**0.0% recovered**, on Coffee Lake and again on Zen 3.
 Grading: TAS spin 0.78 (each iteration is an RFO **write**, contenders
 trade the line in Modified state where a TTAS spins on a Shared copy),
 load-spin 0.75, CAS-retry 0.62 (short retry bursts are often
 acceptable; unbounded ones need runtime data).
 
-`smt_enabled: false` (config) models BIOS-disabled Hyper-Threading:
-the sibling-starvation clause drops from the reasoning and severity
-drops to Medium. One mechanism instead of two, not silence. The
-mitigation states the PAUSE trade honestly (~140 cycles of wake-up
-latency on Skylake+-derived cores, a widely cited figure this project
-has not measured); a deliberate bare spin on a
+`smt_enabled` (config) is reported in the evidence and nothing else. It
+used to move severity a notch on the sibling-starvation clause; since
+that clause is refuted on both vendors, every finding grades Medium
+whether SMT is on or off. The mitigation states the PAUSE trade with
+the measurement behind it (64 cycles on Zen 3 against the ~140 widely
+cited for Skylake-derived cores, which this project has not measured);
+a deliberate bare spin on a
 sub-microsecond signaling path is what `// lshaz-suppress FL013` is
 for, and the diagnostic says so.
 

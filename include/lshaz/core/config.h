@@ -19,9 +19,9 @@ struct Config {
     // Target architecture (affects cache model, ordering cost model, rule text)
     TargetArch targetArch       = TargetArch::X86_64;
 
-    // Deployment runs with SMT/Hyper-Threading enabled. Desks disable it
-    // in BIOS; FL013's sibling-starvation cost is then excluded and its
-    // severity drops a notch.
+    // Deployment runs with SMT/Hyper-Threading enabled. Reported in FL013's
+    // evidence only. It used to move that rule's severity a notch, until
+    // sync_cost measured 0.0% sibling recovery on two vendors.
     bool smtEnabled             = true;
 
     // Cache model
