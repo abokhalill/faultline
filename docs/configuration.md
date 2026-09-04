@@ -61,6 +61,14 @@ allocator_function_patterns: []  # FL020: project allocator wrappers, e.g.
                                  # rule sees no allocation in a codebase that
                                  # wraps libc, which is most of them.
 
+mapping_function_patterns: []    # FL070: large-mapping wrappers, "name" or
+                                 # "name:N" with N the zero-based size
+                                 # parameter (default 0). A 4MB mapping one
+                                 # call deep is invisible otherwise. The index
+                                 # is explicit because ngx_memalign takes
+                                 # (alignment, size, log) and guessing the
+                                 # first integer would grade the alignment.
+
 lock_function_patterns: []       # FL012: project lock wrappers, e.g.
 unlock_function_patterns: []     # ["ngx_shmtx_lock"] / ["ngx_shmtx_unlock"],
                                  # or LWLockAcquire/LWLockRelease. nginx takes
@@ -107,8 +115,9 @@ disabled_rules: []
 #   - "*::backoff"
 
 # SMT/Hyper-Threading enabled on the deployment target (default true).
-# Desks disabling it in BIOS set false: FL013 drops the
-# sibling-starvation clause and one severity notch.
+# Reported in FL013's evidence and nothing else. It used to move that rule a
+# severity notch on the sibling-starvation clause, until sync_cost measured
+# 0.0% sibling recovery on Coffee Lake and again on Zen 3.
 # smt_enabled: true
 
 # FL003 cost model: L1 data cache size the padding footprint is weighed
@@ -123,7 +132,10 @@ disabled_rules: []
 # Opaque atomic wrapper type names.
 # Struct/typedef names treated as atomic even without _Atomic or std::atomic.
 # Required for codebases that wrap atomics in plain structs; without this,
-# those fields are invisible to atomic detection (FL002/FL010/FL011/FL090).
+# those fields are invisible to the layout and escape analyses and so to
+# FL001, FL002, FL013, FL041 and FL090. FL010 and FL011 do not consult it:
+# they key on the operation (AtomicExpr, __sync_*, std::atomic members), which
+# a wrapper's own body still performs.
 atomic_type_names:
   - atomic_t          # Linux kernel
   - atomic64_t
