@@ -19,7 +19,7 @@ cache_line_span_crit: 128     # FL001 critical threshold (bytes)
 stack_frame_warn_bytes: 2048  # FL021 threshold
 
 # Allocation
-alloc_size_escalation: 256    # FL020 escalation threshold (bytes)
+alloc_size_escalation: 1032   # FL020 escalation, glibc tcache_max (bytes)
 
 # Branch depth
 branch_depth_warn: 4          # FL050 nesting threshold

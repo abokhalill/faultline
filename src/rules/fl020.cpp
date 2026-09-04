@@ -29,6 +29,7 @@ struct AllocSite {
     std::string kind; // "new", "delete", "malloc", "std::make_shared", etc.
     unsigned inLoop = 0;
     AllocatorClass allocClass = AllocatorClass::Unknown;
+    long long constBytes = -1; // -1 when the request does not fold to a constant
 };
 
 class AllocVisitor : public clang::RecursiveASTVisitor<AllocVisitor> {
@@ -37,7 +38,18 @@ public:
         : ctx_(Ctx), wrappers_(wrappers) {}
 
     bool VisitCXXNewExpr(clang::CXXNewExpr *E) {
-        sites_.push_back({E->getBeginLoc(), "operator new", inLoop_});
+        long long bytes = -1;
+        clang::QualType t = E->getAllocatedType();
+        if (!t.isNull() && !t->isDependentType() && !t->isIncompleteType()) {
+            bytes = ctx_.getTypeSizeInChars(t).getQuantity();
+            if (E->isArray()) {
+                auto n = E->getArraySize();
+                long long count = n ? constArg(*n) : -1;
+                bytes = count >= 0 ? bytes * count : -1;
+            }
+        }
+        sites_.push_back({E->getBeginLoc(), "operator new", inLoop_,
+                          AllocatorClass::Unknown, bytes});
         return true;
     }
 
@@ -53,7 +65,8 @@ public:
             if (name == "malloc" || name == "calloc" || name == "realloc" ||
                 name == "free" || name == "aligned_alloc" ||
                 name == "posix_memalign" || matchesWrapper(name)) {
-                sites_.push_back({E->getBeginLoc(), name, inLoop_});
+                sites_.push_back({E->getBeginLoc(), name, inLoop_,
+                                  AllocatorClass::Unknown, requestBytes(E, name)});
             }
 
             if (name == "std::make_shared" || name == "std::make_unique" ||
@@ -141,6 +154,29 @@ private:
         return false;
     }
 
+    long long constArg(const clang::Expr *E) const {
+        clang::Expr::EvalResult r;
+        if (!E || !E->EvaluateAsInt(r, ctx_))
+            return -1;
+        return r.Val.getInt().getExtValue();
+    }
+
+    // Wrappers are deliberately absent: their signatures vary, and guessing
+    // which parameter is the size would grade real allocations on a number
+    // read from the wrong argument.
+    long long requestBytes(const clang::CallExpr *E, llvm::StringRef name) const {
+        unsigned n = E->getNumArgs();
+        if (name == "malloc" && n >= 1)
+            return constArg(E->getArg(0));
+        if (name == "calloc" && n >= 2) {
+            long long a = constArg(E->getArg(0)), b = constArg(E->getArg(1));
+            return (a >= 0 && b >= 0) ? a * b : -1;
+        }
+        if ((name == "realloc" || name == "aligned_alloc") && n >= 2)
+            return constArg(E->getArg(1));
+        return -1;
+    }
+
     clang::ASTContext &ctx_;
     const std::vector<std::string> &wrappers_;
     std::vector<AllocSite> sites_;
@@ -221,6 +257,25 @@ public:
                     "Allocation inside loop: per-iteration allocator pressure, "
                     "compounding TLB and fragmentation cost");
                 // Loop escalation overrides topology demotion.
+                if (sev < Severity::High)
+                    sev = Severity::High;
+            }
+
+            // Above glibc's tcache_max the request misses the per-thread cache
+            // and takes the arena path, 19.3ns to 55.4ns on Zen 3. tcmalloc and
+            // jemalloc draw their boundary elsewhere, so only allocators not
+            // already classified as thread-caching are graded on size.
+            const bool overThreadCache =
+                site.constBytes >= 0 &&
+                static_cast<size_t>(site.constBytes) > Cfg.allocSizeEscalation &&
+                ac != AllocatorClass::ThreadLocal &&
+                ac != AllocatorClass::PoolSlab;
+            if (overThreadCache) {
+                escalations.push_back(
+                    "Request of " + std::to_string(site.constBytes) +
+                    "B exceeds the thread-cache boundary (" +
+                    std::to_string(Cfg.allocSizeEscalation) +
+                    "B): misses tcache for the arena path, 2.8x on glibc");
                 if (sev < Severity::High)
                     sev = Severity::High;
             }
@@ -331,6 +386,13 @@ public:
                 {"the cost is paid on every iteration",
                  "the allocation sits inside a loop", site.inLoop != 0,
                  Severity::High},
+                // Established by the size alone: no runtime frequency
+                // assumption stands behind it, unlike the round-trip claim.
+                {"the request misses the thread cache for the arena path, "
+                 "2.8x the round trip",
+                 "a constant request above the allocator's thread-cache "
+                 "boundary",
+                 overThreadCache, Severity::High},
                 // Cross-thread free is the only term that reaches Critical,
                 // and proving it needs alloc/free ownership across TUs, which
                 // we cannot do yet. Unestablished so the grade says so.

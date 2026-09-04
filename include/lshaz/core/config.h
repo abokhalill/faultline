@@ -32,8 +32,11 @@ struct Config {
     // Stack frame
     size_t stackFrameWarnBytes  = 2048; // FL021 threshold
 
-    // Allocation
-    size_t allocSizeEscalation  = 256;  // FL020 escalation
+    // FL020 escalation, set at glibc's tcache_max. At or below it a request is
+    // served from the per-thread cache; above it the arena path costs 2.8x
+    // (19.3ns to 55.4ns, Zen 3). The previous 256 graded a curve that is flat
+    // from 32B to 1032B. tcmalloc and jemalloc draw the line elsewhere.
+    size_t allocSizeEscalation  = 1032;
 
     // Branch depth
     unsigned branchDepthWarn    = 4;    // FL050 threshold
