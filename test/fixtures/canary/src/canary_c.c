@@ -57,7 +57,7 @@ void canary_unbind_client(canary_client *c) {
 
 // FL014. Atomic through a cast the compiler cannot prove aligned. At offset
 // 60 of a 16-aligned buffer the 8-byte access crosses the line under one of
-// the four realizable placements, so x86 escalates to a bus lock and ARM64
+// the four realizable placements, so x86 serializes the core and ARM64
 // faults. A packed _Atomic field does not reach here: Clang lowers that to
 // libatomic instead.
 static char canary_wire[256];

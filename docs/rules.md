@@ -471,11 +471,15 @@ for, and the diagnostic says so.
 **Base severity:** Critical &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** none
 
 **Hardware mechanism, and it differs by target.** On x86-64 a LOCK-prefixed
-operation spanning two cache lines cannot lock a single line, so the core
-escalates to a bus lock and stalls every core on the socket: 3007ns against
-6.0ns for the same operation naturally aligned, **500x**, the largest single
-figure in `measured-constants.md`. Measured on Intel Coffee Lake only; AMD is
-unmeasured and the text says so. On ARM64 the exclusive and LSE atomics
+operation spanning two cache lines cannot lock a single line, so the core falls
+back to a serializing path costing roughly 2400 cycles: 3007ns against 6.0ns
+aligned on Coffee Lake (**500x**) and 710ns against 2.21ns on Zen 3 (**321x**),
+the largest single figure in `measured-constants.md`. The cost lands on the
+issuing core. This rule used to claim the bus lock stalled every core on the
+socket; `buslock_blast` put a victim on a neighbouring core sharing nothing
+with the aggressor and measured 1.03x, under an aligned-atomic control that
+moved further than the treatment did, so that claim is withdrawn on AMD and
+remains untested on Intel. On ARM64 the exclusive and LSE atomics
 require natural alignment, so the identical source raises an alignment fault
 and the process takes SIGBUS. Detection is the same on both; only the
 consequence and the mitigation branch.

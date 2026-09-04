@@ -169,10 +169,13 @@ public:
         return "An atomic whose address is cast from a byte-granular base "
                "asserts an alignment the source never established. On x86-64 "
                "a LOCK-prefixed operation spanning two cache lines cannot "
-               "lock one line, so the core escalates to a bus lock and stalls "
-               "every core on the socket: measured 3007ns against 6.0ns for "
-               "the same operation naturally aligned, 500x, on Coffee Lake "
-               "(Intel only; AMD unmeasured). On ARM64 the exclusive and LSE "
+               "lock one line, so the core falls back to a serializing path "
+               "costing ~2400 cycles: 3007ns against 6.0ns aligned on Coffee "
+               "Lake (500x), 710ns against 2.21ns on Zen 3 (321x). The cost is "
+               "borne by the issuing core. A neighbour running its own atomics "
+               "measured 1.03x on Zen 3, under a control that moved further, "
+               "so the socket-wide stall this rule used to claim is withdrawn "
+               "on AMD and untested on Intel. On ARM64 the exclusive and LSE "
                "atomics require natural alignment, so the same source raises "
                "an alignment fault and the process takes SIGBUS. A packed "
                "_Atomic field is a different shape: Clang diagnoses it under "
@@ -252,9 +255,8 @@ public:
                       "slowdown.";
             else
                 hw << "On x86-64 a LOCK-prefixed operation spanning two lines "
-                      "escalates to a bus lock that stalls every core on the "
-                      "socket, measured at 500x the aligned operation on "
-                      "Intel Coffee Lake.";
+                      "serializes the issuing core, measured at 500x the "
+                      "aligned operation on Coffee Lake and 321x on Zen 3.";
             d.hardwareReasoning = hw.str();
 
             d.structuralEvidence = {
@@ -284,7 +286,7 @@ public:
                  "an atomic cast from a base narrower than the access", true,
                  Severity::Medium},
                 {isARM ? "alignment fault on a misaligned exclusive access"
-                       : "bus lock stalling every core on the socket",
+                       : "the issuing core serializes for ~2400 cycles",
                  "the access crosses a cache line under a realizable base "
                  "alignment",
                  s.splitsSometimes, Severity::Critical},
