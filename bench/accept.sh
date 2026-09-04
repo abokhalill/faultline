@@ -2,11 +2,12 @@
 # Acceptance gate for a rented measurement box. Run before tuning, before any
 # experiment, before trusting a single null result.
 #
-# The instrument is the thing under test here, not the machine. Two false nulls
-# this campaign came from broken instruments that looked like clean results:
-# `perf script -F cpu` returning zero rows from 55,972 samples, and a runtime
-# IDIV burying the entire quantity under measurement. A box that cannot
-# reproduce a known positive cannot be trusted to report a negative.
+# The instrument is the thing under test here, not the machine. Three false
+# nulls this campaign came from instruments that looked like clean results:
+# `perf script -F cpu` returning zero rows from 55,972 samples, a runtime IDIV
+# burying the quantity under measurement, and c2c reporting zero HITM on pure
+# false sharing because AMD files that signal elsewhere. Hence every check
+# contrasts two arms rather than reading one counter.
 set -u
 
 pass=0; fail=0
@@ -37,37 +38,79 @@ else
     ok "perf counts hardware events"
 fi
 
-echo "=== 3. coherence events exist ==="
+echo "=== 3. coherence attribution path exists ==="
+# Intel carries this on xsnp and fills the HITM columns; AMD routes c2c through
+# ibs_op and leaves them at zero. Requiring xsnp by name rejects working AMD.
+have_path=0
 if perf list 2>/dev/null | grep -qi xsnp; then
-    ok "xsnp/HITM events present"
-    perf list 2>/dev/null | grep -i xsnp | head -3 | sed 's/^/        /'
-else
-    bad "no xsnp events, perf c2c cannot attribute coherence"
+    ok "xsnp events present (HITM columns expected to populate)"
+    have_path=1
 fi
+if [ -d /sys/bus/event_source/devices/ibs_op ]; then
+    ok "ibs_op present (c2c attributes through IBS; HITM stays zero)"
+    have_path=1
+fi
+[ "$have_path" -eq 1 ] || bad "neither xsnp nor ibs_op, c2c cannot attribute coherence"
 
-echo "=== 4. known positive: c2c must SEE false sharing ==="
-# rmw_cost in shared mode is false sharing by construction. On a working
-# instrument this concentrates HITM on one line across two byte offsets.
-if [ ! -x ./rmw_cost ]; then
-    bad "./rmw_cost not built, cannot validate the instrument"
-else
-    ./rmw_cost 2 0 60000000 shared 0,1 >/dev/null 2>&1 &
-    kp=$!
+echo "=== 4. known positive AND negative: c2c must SEPARATE them ==="
+# stripe_cost, not rmw_cost: c2c attributes load and store ops, and a
+# LOCK-prefixed RMW reads 1% against a 0% control on IBS.
+#
+# Relaunch until the window closes. The packed arm runs ~80x longer for the
+# same count, so no single count keeps both arms alive through it.
+c2c_run() {
+    local stop=/tmp/accept_stop.$$
+    touch "$stop"
+    ( while [ -e "$stop" ]; do ./stripe_cost 4 "$1" 20000000 0,1,2,3 >/dev/null 2>&1; done ) &
+    local kp=$!
     sleep 1
-    perf c2c record -a -o /tmp/accept_c2c.data -- sleep 6 >/dev/null 2>&1
+    perf c2c record -a -o "$2" -- sleep 6 >/dev/null 2>&1
+    rm -f "$stop"
     wait $kp 2>/dev/null
-    rpt=$(perf c2c report -i /tmp/accept_c2c.data --stdio 2>/dev/null)
-    # Count HITM, do not read the "LLC Misses to Remote" percentages: on a
-    # single-socket box those are zero by construction and a working
-    # instrument reads as blind.
-    loc=$(echo "$rpt" | sed -n 's/.*Load Local HITM *: *\([0-9]*\).*/\1/p'  | head -1)
-    rem=$(echo "$rpt" | sed -n 's/.*Load Remote HITM *: *\([0-9]*\).*/\1/p' | head -1)
-    tot=$(( ${loc:-0} + ${rem:-0} ))
-    if [ "$tot" -gt 0 ]; then
-        ok "c2c sees the known positive: ${loc:-0} local + ${rem:-0} remote HITM"
-        note "verify by eye: HITM should concentrate on ONE line, two offsets"
+    perf c2c report -i "$2" --stdio 2>/dev/null
+}
+field() {
+    local v
+    v=$(echo "$1" | sed -n "s/.*$2 *: *\([0-9][0-9]*\).*/\1/p" | head -1)
+    echo "${v:-0}"
+}
+
+[ -x ./stripe_cost ] || cc -O2 -pthread -o ./stripe_cost stripe_cost.c 2>/dev/null
+if [ ! -x ./stripe_cost ]; then
+    bad "./stripe_cost not built, cannot validate the instrument"
+else
+    # Packed: four threads per 64B line. Padded: one line each, same work.
+    pos=$(c2c_run 8  /tmp/accept_c2c_pos.data)
+    neg=$(c2c_run 64 /tmp/accept_c2c_neg.data)
+
+    separated=0
+    for arm in pos neg; do
+        eval "rpt=\$$arm"
+        eval "${arm}_hitm=\$(( $(field "$rpt" 'Load Local HITM')  \
+                            + $(field "$rpt" 'Load Remote HITM') ))"
+        ld=$(field "$rpt" 'Load Operations')
+        llc=$(field "$rpt" 'Load LLC hit')
+        eval "${arm}_frac=$(( ld > 0 ? 100 * llc / ld : 0 ))"
+    done
+
+    # Tenfold clears the jitter between repeats of one arm.
+    if [ "$pos_hitm" -gt 0 ] && [ "$pos_hitm" -ge $(( 10 * neg_hitm + 1 )) ]; then
+        ok "HITM separates the arms: $pos_hitm packed vs $neg_hitm padded"
+        separated=1
+    fi
+    # The packed arm's working set is four lines and should stay L1-resident,
+    # so loads reaching LLC are the coherence traffic.
+    if [ "$pos_frac" -ge 50 ] && [ "$pos_frac" -ge $(( 5 * neg_frac + 1 )) ]; then
+        ok "LLC-hit fraction separates the arms: ${pos_frac}% packed vs ${neg_frac}% padded"
+        separated=1
+    fi
+
+    if [ "$separated" -eq 1 ]; then
+        note "verify by eye: the packed arm should concentrate on ONE line"
     else
-        bad "zero HITM on a known positive. INSTRUMENT IS BLIND, do not trust nulls"
+        bad "no discriminator separates a known positive from its control."
+        note "      HITM ${pos_hitm}/${neg_hitm}, LLC-hit ${pos_frac}%/${neg_frac}%"
+        note "      INSTRUMENT IS BLIND, do not trust nulls from this box"
     fi
 fi
 
