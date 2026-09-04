@@ -33,10 +33,16 @@ public:
     Severity getBaseSeverity() const override { return Severity::High; }
 
     std::string_view getHardwareMechanism() const override {
-        return "Head/tail index cache line bouncing in MPMC queues. "
-               "Atomic head and tail on same cache line causes MESI "
-               "invalidation on every enqueue/dequeue from different cores. "
-               "Without padding, producer and consumer thrash the same line.";
+        return "Head/tail index cache line bouncing in MPMC queues. Atomic "
+               "head and tail on one line invalidates on every "
+               "enqueue/dequeue from a different core, so producer and "
+               "consumer trade the line instead of working. What padding buys "
+               "is measured and does not transfer between parts: +3.7ns per "
+               "element on Coffee Lake, +3.5 on Haswell-EP, +2.7 on W-2295, "
+               "but only +0.28 on Zen 3 across CCDs and -0.10 within one, "
+               "where co-locating the indices is free. Treat the Intel figure "
+               "as the ceiling and expect an order of magnitude less on a "
+               "chiplet part.";
     }
 
     void analyze(const clang::Decl *D,
