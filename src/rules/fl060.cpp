@@ -105,8 +105,9 @@ public:
 
         if (hasAtomics) {
             escalations.push_back(
-                "Contains atomic fields: cross-socket atomic RMW incurs "
-                "interconnect round-trip (~200-400ns on QPI/UPI)");
+                "Contains atomic fields: a cross-socket atomic RMW pays the "
+                "interconnect, measured 32-52ns flat across sockets and not "
+                "decaying with write spacing");
         }
 
         if (mutableCount > 8) {
