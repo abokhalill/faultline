@@ -14,6 +14,7 @@ extern "C" {
 // fixtures. The remark channel keys on that verdict, not a local attribute.
 long canary_scale_into(long *out, const long *bound, long n);
 int canary_drain_pending(int id);
+void canary_churn(int n);
 }
 
 namespace canary {
@@ -98,6 +99,7 @@ static void worker(int id) {
     for (int i = 0; i < 1000; ++i) {
         canary_scale_into(buf, &bound, 64);
         canary_drain_pending(id);
+        canary_churn(2);
         record_pool_event(i & 1);
         g_amplified.head.fetch_add(1);
         g_amplified.tail.fetch_add(1);

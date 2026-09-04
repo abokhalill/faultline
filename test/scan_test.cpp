@@ -285,6 +285,24 @@ void testOptRemarkChannel(const std::string &bin,
           "no remark container failed to parse");
 }
 
+// Every serious C codebase reaches libc through a wrapper, so a rule that
+// matches only the libc names sees none of its allocations: redis has 1310
+// z* calls against 503 raw ones and FL020 reported 3.
+void testAllocatorWrapperNames(const std::string &bin,
+                               const std::string &canaryFixture) {
+    std::cerr << "test: FL020 sees allocations through a project wrapper\n";
+    if (canaryFixture.empty()) {
+        check(false, "canary fixture present for the allocator gate");
+        return;
+    }
+    auto tmp = isolateFixture(canaryFixture, "allocwrap");
+    auto r = run(bin + " scan " + (tmp / "project").string() +
+                 " --no-ir --format json --rule FL020");
+    fs::remove_all(tmp);
+    check(contains(r.out, "canary_alloc_buf"),
+          "an allocator named only in config is detected");
+}
+
 void testMechanismClaimsBoundSeverity(const std::string &bin,
                                       const std::string &fixture,
                                       const std::string &canaryFixture) {
@@ -940,6 +958,7 @@ int main() {
     testCLanguageCanary(bin, canaryPath());
     testStripeIndexIdentity(bin, canaryPath());
     testOptRemarkChannel(bin, canaryPath());
+    testAllocatorWrapperNames(bin, canaryPath());
     testMechanismClaimsBoundSeverity(bin, fixture, canaryPath());
 
     // Hazard detection.

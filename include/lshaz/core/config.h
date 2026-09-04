@@ -111,6 +111,12 @@ struct Config {
     // built in.
     std::vector<std::string> relaxFunctionPatterns;
 
+    // Allocator wrapper names (fnmatch) added to FL020's built-in set.
+    // Serious C codebases reach libc through one (redis zmalloc, nginx
+    // ngx_palloc, postgres palloc, git xmalloc, Linux kmalloc), and without
+    // these the rule sees none of it.
+    std::vector<std::string> allocatorFunctionPatterns;
+
     // Project names for a thread-slot index (fnmatch), added to FL003's
     // built-in set. Kept out of that set because `slot` and `shard` name
     // hash buckets and ring positions at least as often.

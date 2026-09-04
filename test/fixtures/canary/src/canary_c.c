@@ -96,3 +96,17 @@ long canary_scale_into(long *out, const long *bound, long n) {
     }
     return hits;
 }
+
+// FL020. Allocation through a project wrapper, which is how redis, nginx,
+// postgres and the kernel all reach libc. Declared in lshaz.config.yaml;
+// without that the rule sees nothing here.
+extern void *canary_alloc_buf(unsigned long n);
+extern void canary_release_buf(void *p);
+
+__attribute__((hot))
+void canary_churn(int n) {
+    for (int i = 0; i < n; i++) {
+        void *p = canary_alloc_buf(4096);
+        canary_release_buf(p);
+    }
+}

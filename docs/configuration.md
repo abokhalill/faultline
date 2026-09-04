@@ -56,6 +56,10 @@ main_function_patterns: []    # additional main-thread roots
 relax_function_patterns: []   # FL013: project-specific cpu_relax()/pause()
 thread_index_patterns: []     # FL003: project spellings of a thread-slot
                               # subscript, e.g. ["slot"]
+allocator_function_patterns: []  # FL020: project allocator wrappers, e.g.
+                                 # ["z*alloc", "zfree"]. Without these the
+                                 # rule sees no allocation in a codebase that
+                                 # wraps libc, which is most of them.
 
 # Target model
 target_arch: "x86-64"         # x86-64 | arm64 | arm64-apple

@@ -514,7 +514,14 @@ lock component but keep the TLB/fault component.
 
 **Detection:** `new`/`delete`, `malloc`/`free`, growth-capable containers, and
 allocation-prone type-erasure (`std::function`, `std::shared_ptr`) in hot
-functions. IR-confirmed when the IR pass is enabled: an allocation the
+functions, plus any name in `allocator_function_patterns`.
+
+**A wrapped allocator is invisible without that config.** Serious C codebases
+reach libc through their own name: redis `zmalloc`, nginx `ngx_palloc`,
+postgres `palloc`, git `xmalloc`, Linux `kmalloc`. redis makes 1310 `z*`
+allocation calls against 503 raw libc ones, and FL020 reported 3 findings
+until the wrappers were declared, then 489. Same trap as `atomic_type_names`,
+different subsystem. IR-confirmed when the IR pass is enabled: an allocation the
 optimizer eliminated is demoted rather than reported on faith.
 
 **Escalations:** allocation inside a loop; size above `alloc_size_escalation`

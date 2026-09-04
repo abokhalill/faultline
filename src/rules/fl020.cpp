@@ -15,6 +15,8 @@
 #include <clang/AST/Stmt.h>
 #include <clang/Basic/SourceManager.h>
 
+#include <fnmatch.h>
+
 #include <sstream>
 #include <string>
 
@@ -31,7 +33,8 @@ struct AllocSite {
 
 class AllocVisitor : public clang::RecursiveASTVisitor<AllocVisitor> {
 public:
-    explicit AllocVisitor(clang::ASTContext &Ctx) : ctx_(Ctx) {}
+    AllocVisitor(clang::ASTContext &Ctx, const std::vector<std::string> &wrappers)
+        : ctx_(Ctx), wrappers_(wrappers) {}
 
     bool VisitCXXNewExpr(clang::CXXNewExpr *E) {
         sites_.push_back({E->getBeginLoc(), "operator new", inLoop_});
@@ -49,7 +52,7 @@ public:
 
             if (name == "malloc" || name == "calloc" || name == "realloc" ||
                 name == "free" || name == "aligned_alloc" ||
-                name == "posix_memalign") {
+                name == "posix_memalign" || matchesWrapper(name)) {
                 sites_.push_back({E->getBeginLoc(), name, inLoop_});
             }
 
@@ -129,7 +132,18 @@ public:
     const std::vector<AllocSite> &sites() const { return sites_; }
 
 private:
+    // The wrapper is the allocation as far as the caller is concerned, and
+    // its name is all the evidence there is; AllocatorTopology grades an
+    // unknown callee as the configured allocator, which is what it is.
+    bool matchesWrapper(const std::string &name) const {
+        for (const auto &p : wrappers_)
+            if (fnmatch(p.c_str(), name.c_str(), 0) == 0)
+                return true;
+        return false;
+    }
+
     clang::ASTContext &ctx_;
+    const std::vector<std::string> &wrappers_;
     std::vector<AllocSite> sites_;
     unsigned inLoop_ = 0;
 };
@@ -170,7 +184,7 @@ public:
         if (!Oracle.isFunctionHot(FD))
             return;
 
-        AllocVisitor visitor(Ctx);
+        AllocVisitor visitor(Ctx, Cfg.allocatorFunctionPatterns);
         visitor.TraverseStmt(FD->getBody());
 
         // Intra-procedural data-flow analysis for precision.
