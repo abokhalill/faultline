@@ -133,6 +133,11 @@ struct Config {
     std::vector<std::string> lockFunctionPatterns;
     std::vector<std::string> unlockFunctionPatterns;
 
+    // Large-mapping wrappers for FL070, "name" or "name:N" where N is the
+    // zero-based size parameter (default 0). A 4MB mapping through a one-line
+    // wrapper is invisible otherwise, while the identical direct mmap fires.
+    std::vector<std::string> mappingFunctionPatterns;
+
     // Project names for a thread-slot index (fnmatch), added to FL003's
     // built-in set. Kept out of that set because `slot` and `shard` name
     // hash buckets and ring positions at least as often.

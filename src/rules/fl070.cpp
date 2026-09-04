@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <fnmatch.h>
 #include "lshaz/core/rule.h"
 #include "lshaz/analysis/layout_safety.h"
 #include "lshaz/core/registry.h"
@@ -61,7 +62,7 @@ public:
 struct AllocSite {
     clang::SourceLocation loc;
     uint64_t length;
-    const char *api;
+    std::string api;
     // The argument that would exonerate the site (mmap flags, memalign
     // alignment) is not compile-time evaluable. Unprovable is a tier,
     // never a Medium assertion.
@@ -73,7 +74,8 @@ public:
     clang::ASTContext &ctx;
     std::vector<AllocSite> sites;
 
-    explicit AllocVisitor(clang::ASTContext &C) : ctx(C) {}
+    AllocVisitor(clang::ASTContext &C, const std::vector<std::string> &wrappers)
+        : ctx(C), wrappers_(wrappers) {}
 
     bool VisitCallExpr(clang::CallExpr *E) {
         const auto *FD = E->getDirectCallee();
@@ -102,6 +104,8 @@ public:
             if (flags & kMapHugetlb)
                 return true; // hugepages requested
             sites.push_back({E->getBeginLoc(), len, "mmap", nullptr});
+        } else if (matchWrapper(n, E)) {
+            return true;
         } else if (n == "posix_memalign" && E->getNumArgs() >= 3) {
             uint64_t align = 0, len = 0;
             if (!cstInt(2, len) || len < kTLBSpanBytes)
@@ -131,6 +135,43 @@ public:
         }
         return true;
     }
+
+private:
+    // "name" or "name:N", N being the zero-based size parameter. The index is
+    // required rather than inferred: ngx_memalign takes (alignment, size, log)
+    // and a first-integer-wins rule would grade the alignment as the mapping.
+    bool matchWrapper(llvm::StringRef n, clang::CallExpr *E) {
+        std::string name = n.str();
+        for (const auto &pat : wrappers_) {
+            auto colon = pat.rfind(':');
+            std::string glob = pat;
+            unsigned idx = 0;
+            if (colon != std::string::npos &&
+                colon + 1 < pat.size() &&
+                pat.find_first_not_of("0123456789", colon + 1) ==
+                    std::string::npos) {
+                glob = pat.substr(0, colon);
+                idx = static_cast<unsigned>(std::stoul(pat.substr(colon + 1)));
+            }
+            if (fnmatch(glob.c_str(), name.c_str(), 0) != 0)
+                continue;
+            if (idx >= E->getNumArgs())
+                return false;
+            clang::Expr::EvalResult r;
+            if (!E->getArg(idx)->EvaluateAsInt(r, ctx))
+                return false;
+            uint64_t len = r.Val.getInt().getZExtValue();
+            if (len < kTLBSpanBytes)
+                return false;
+            // MAP_HUGETLB and the alignment sit inside the wrapper, so the
+            // exoneration this rule normally looks for is unreachable here.
+            sites.push_back({E->getBeginLoc(), len, name, "wrapper-internal"});
+            return true;
+        }
+        return false;
+    }
+
+    const std::vector<std::string> &wrappers_;
 };
 
 bool allocatorIsTHPAware(const Config &cfg) {
@@ -238,7 +279,7 @@ public:
         // Path 2: allocation sites with provable sizes. Not hot-gated,
         // the mapping outlives the allocating function; grading carries
         // the uncertainty instead.
-        AllocVisitor allocs(Ctx);
+        AllocVisitor allocs(Ctx, Cfg.mappingFunctionPatterns);
         allocs.TraverseStmt(FD->getBody());
         bool thpAllocator = allocatorIsTHPAware(Cfg);
         for (const auto &s : allocs.sites) {

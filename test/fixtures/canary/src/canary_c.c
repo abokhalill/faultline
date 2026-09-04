@@ -127,3 +127,12 @@ void canary_churn(int n) {
         canary_release_buf(p);
     }
 }
+
+// FL070 through a wrapper. A 4MB mapping one call deep is invisible to a rule
+// that matches mmap by name, while the identical direct call fires.
+void *canary_map_arena(unsigned long n);
+
+__attribute__((hot))
+void *canary_reserve_replay(void) {
+    return canary_map_arena(4ul << 20);
+}

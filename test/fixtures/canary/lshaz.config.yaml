@@ -10,3 +10,8 @@ lock_function_patterns:
   - "canary_shmtx_lock"
 unlock_function_patterns:
   - "canary_shmtx_unlock"
+
+# FL070 grades mapping size, so the size parameter index is explicit: a
+# wrapper like ngx_memalign(alignment, size, log) puts it second.
+mapping_function_patterns:
+  - "canary_map_arena:0"

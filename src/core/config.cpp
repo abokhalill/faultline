@@ -60,6 +60,8 @@ struct MappingTraits<lshaz::Config> {
         io.mapOptional("relax_function_patterns", cfg.relaxFunctionPatterns);
         io.mapOptional("thread_index_patterns",  cfg.threadIndexPatterns);
         io.mapOptional("lock_function_patterns",   cfg.lockFunctionPatterns);
+        io.mapOptional("mapping_function_patterns",
+                       cfg.mappingFunctionPatterns);
         io.mapOptional("unlock_function_patterns", cfg.unlockFunctionPatterns);
         io.mapOptional("allocator_function_patterns",
                        cfg.allocatorFunctionPatterns);
