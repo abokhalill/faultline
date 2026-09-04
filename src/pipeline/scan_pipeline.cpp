@@ -1024,7 +1024,8 @@ static void runIRPass(
         const std::unordered_set<std::string> &failedFiles,
         std::vector<Diagnostic> &diagnostics,
         ExecutionMetadata &meta,
-        std::vector<OptRemark> &remarks) {
+        std::vector<OptRemark> &remarks,
+        unsigned &remarkFilesFailed) {
 
     IRAnalyzer irAnalyzer;
     std::string optLevel = "-" + req.ir.optLevel;
@@ -1196,8 +1197,12 @@ static void runIRPass(
                 llvm::sys::fs::remove(jobs[idx].remarkFile);
             }
             llvm::sys::fs::remove(jobs[idx].errFile);
-            if (result.exitCode == 0)
-                parseOptRemarks(jobs[idx].remarkFile, remarks);
+            // A container that breaks mid-stream keeps what it already
+            // yielded, so the count is the only thing that says coverage
+            // was partial.
+            if (result.exitCode == 0 &&
+                !parseOptRemarks(jobs[idx].remarkFile, remarks))
+                ++remarkFilesFailed;
         }
         irAnalyzer.mergeFrom(std::move(sr.analyzer));
     }
@@ -2143,6 +2148,7 @@ ScanResult ScanPipeline::run(
         const std::vector<std::string> &sources) {
     ScanResult result;
     std::vector<OptRemark> optRemarks;
+    unsigned remarkFilesFailed = 0;
     std::vector<FailedTU> failedTUsDetailed; // For header fingerprint detection
 
     result.metadata.toolVersion = kToolVersion;
@@ -2627,7 +2633,8 @@ ScanResult ScanPipeline::run(
         for (const auto &ftu : failedTUsDetailed)
             failedFiles.insert(ftu.file);
         runIRPass(request, compDB, sources, failedFiles,
-                  result.diagnostics, result.metadata, optRemarks);
+                  result.diagnostics, result.metadata, optRemarks,
+                  remarkFilesFailed);
     }
 
     // Cross-TU escape suppression using aggregated per-type escape summaries.
@@ -2715,10 +2722,15 @@ ScanResult ScanPipeline::run(
         unsigned fromRemarks = emitOptRemarkFindings(
             result.diagnostics, optRemarks, globalHot,
             request.config.hotFunctionPatterns);
-        if (!optRemarks.empty())
+        if (!optRemarks.empty() || remarkFilesFailed)
             report("opt_remarks", std::to_string(fromRemarks) +
                    " finding(s) from " + std::to_string(optRemarks.size()) +
-                   " reportable compiler remark(s)");
+                   " reportable compiler remark(s)" +
+                   (remarkFilesFailed
+                        ? "; " + std::to_string(remarkFilesFailed) +
+                              " remark file(s) ended truncated, coverage "
+                              "for those TUs is partial"
+                        : std::string()));
     }
 
     // Monomorphic virtual calls. Nothing overrides the callee anywhere in the
