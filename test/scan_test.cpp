@@ -409,6 +409,88 @@ void testUnknownOption(const std::string &bin) {
     check(contains(r.err, "unknown option"), "error message");
 }
 
+// A Config field that nothing reads is a knob the user sets and the docs
+// advertise while nothing happens, and it looks exactly like a working one.
+// allocSizeEscalation sat dead behind an FL020 comment, and jsonOutput was
+// parsed, documented, and never consulted. Same species as the registry
+// canary gate below: absence of effect is invisible without a check for it.
+void testEveryConfigFieldIsRead() {
+    std::cerr << "test: every Config field is read somewhere\n";
+    const std::string hdr = "include/lshaz/core/config.h";
+    if (!fs::exists(hdr)) {
+        std::cerr << "    (not at repo root, skipping)\n";
+        return;
+    }
+    std::string decl{std::istreambuf_iterator<char>(
+                         *std::make_unique<std::ifstream>(hdr)),
+                     std::istreambuf_iterator<char>()};
+    auto structPos = decl.find("struct Config");
+    check(structPos != std::string::npos, "Config struct located");
+    decl = decl.substr(structPos);
+
+    // Field names: the last identifier before '=' or ';' on a declaration
+    // line. Comment lines and the method declarations are skipped.
+    std::vector<std::string> fields;
+    std::istringstream ls(decl);
+    for (std::string line; std::getline(ls, line);) {
+        auto hash = line.find("//");
+        if (hash != std::string::npos) line = line.substr(0, hash);
+        if (line.find('(') != std::string::npos) continue;   // methods
+        auto term = line.find_first_of("=;");
+        if (term == std::string::npos) continue;
+        std::string lhs = line.substr(0, term);
+        size_t e = lhs.find_last_not_of(" \t");
+        if (e == std::string::npos) continue;
+        size_t b = lhs.find_last_of(" \t*&", e);
+        if (b == std::string::npos) continue;
+        std::string name = lhs.substr(b + 1, e - b);
+        if (name.empty() || !(isalpha(name[0]) || name[0] == '_')) continue;
+        if (name == "Config" || name == "struct") continue;
+        fields.push_back(name);
+    }
+    check(fields.size() > 20, "Config fields parsed");
+
+    std::string corpus;
+    for (const char *root : {"src", "include"}) {
+        if (!fs::exists(root)) continue;
+        for (auto &p : fs::recursive_directory_iterator(root)) {
+            if (!p.is_regular_file()) continue;
+            auto s = p.path().string();
+            if (s.find("core/config.cpp") != std::string::npos ||
+                s.find("core/config.h") != std::string::npos)
+                continue;
+            auto ext = p.path().extension().string();
+            if (ext != ".cpp" && ext != ".h") continue;
+            std::ifstream f(s);
+            corpus.append(std::istreambuf_iterator<char>(f),
+                          std::istreambuf_iterator<char>());
+        }
+    }
+
+    std::vector<std::string> dead;
+    for (const auto &f : fields) {
+        bool seen = false;
+        for (const char *pfx : {".", ">"}) {
+            std::string needle = std::string(pfx) + f;
+            size_t at = corpus.find(needle);
+            while (at != std::string::npos && !seen) {
+                char after = at + needle.size() < corpus.size()
+                                 ? corpus[at + needle.size()] : ' ';
+                if (!isalnum(after) && after != '_') seen = true;
+                at = corpus.find(needle, at + 1);
+            }
+            if (seen) break;
+        }
+        if (!seen) dead.push_back(f);
+    }
+    if (!dead.empty()) {
+        std::cerr << "    Config fields nothing reads: ";
+        for (const auto &d : dead) std::cerr << d << " ";
+        std::cerr << "\n";
+    }
+    check(dead.empty(), "no Config field is parsed and then ignored");
+}
+
 // json_output: true selects JSON, and --format still outranks it. "cli" is the
 // default value of the flag, so the override has to key on whether --format
 // was actually given rather than on its value.
@@ -990,6 +1072,7 @@ int main() {
     }
 
     // Compile DB resolution.
+    testEveryConfigFieldIsRead();
     testJsonOutputConfigKey(bin, fixture);
     testInitWithoutBuildSystem(bin);
     testCMakeGeneration(bin, fixture);
