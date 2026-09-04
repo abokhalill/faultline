@@ -535,7 +535,16 @@ int runScanCommand(int argc, const char **argv) {
         const auto &cov = result.coverage;
         llvm::errs() << "lshaz: coverage " << cov.functionsSeen
                      << " function(s), " << cov.recordsSeen << " record(s), "
-                     << cov.functionsHot << " hot\n";
+                     << cov.functionsHot << " hot";
+        if (cov.functionsWithdrawnCold)
+            llvm::errs() << ", " << cov.functionsWithdrawnCold
+                         << " withdrawn cold after cross-TU resolution";
+        llvm::errs() << "\n";
+        // functionsHot is the map-phase verdict and counts Candidates the
+        // reducer later refused, so it is printed next to the withdrawal count
+        // rather than alone. No threshold warning here: the two are not
+        // comparable quantities, since functionsHot counts functions and the
+        // withdrawals only cover those that carried a finding.
         if (cov.functionsSeen > 0 && cov.functionsHot == 0)
             llvm::errs()
                 << "lshaz: WARNING no function was marked hot, so every "

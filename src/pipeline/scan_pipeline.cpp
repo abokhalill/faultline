@@ -2685,6 +2685,7 @@ ScanResult ScanPipeline::run(
     {
         const auto globalHot = inferGlobalHotness(
             result.threadRoleFacts, request.config.mainFunctionPatterns);
+        std::set<std::string> withdrawnFns;
         std::set<std::string> withdrawable;
         for (const auto &r : RuleRegistry::instance().rules())
             if (r->withdrawnWhenNotHot())
@@ -2704,6 +2705,7 @@ ScanResult ScanPipeline::run(
                 // the whole program.
                 d.suppressed = true;
                 ++dropped;
+                withdrawnFns.insert(d.functionName);
                 continue;
             }
             d.hotness = static_cast<uint8_t>(it->second);
@@ -2717,6 +2719,7 @@ ScanResult ScanPipeline::run(
                 c.supports = hotnessSupportedSeverity(it->second, d.severity);
             }
         }
+        result.coverage.functionsWithdrawnCold = withdrawnFns.size();
         if (resolved || dropped)
             report("hotness", std::to_string(resolved) +
                    " cross-TU candidate(s) confirmed hot, " +
