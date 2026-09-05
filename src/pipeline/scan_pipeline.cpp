@@ -427,15 +427,16 @@ std::string serializeShardResult(int exitCode,
                 firstKey = false;
             }
         };
-    buf += ",\"threadRoles\":{\"entries\":[";
-    {
+    auto emitNames = [&](const std::set<std::string> &s) {
         bool first = true;
-        for (const auto &e : threadRoles.threadEntries) {
+        for (const auto &e : s) {
             if (!first) buf += ',';
             buf += '"'; buf += esc(e); buf += '"';
             first = false;
         }
-    }
+    };
+    buf += ",\"threadRoles\":{\"entries\":[";
+    emitNames(threadRoles.threadEntries);
     buf += "],\"edges\":{";
     emitNameSets(threadRoles.callEdges);
     buf += "},\"fieldWriters\":{";
@@ -452,7 +453,15 @@ std::string serializeShardResult(int exitCode,
     emitNameSets(threadRoles.allocSitesByCallee);
     buf += "},\"freeSites\":{";
     emitNameSets(threadRoles.freeSitesByCallee);
-    buf += "},\"edgeDepth\":{";
+    buf += "},\"declAlloc\":[";
+    emitNames(threadRoles.declaredAllocators);
+    buf += "],\"declFree\":[";
+    emitNames(threadRoles.declaredFreers);
+    buf += "],\"defined\":[";
+    emitNames(threadRoles.definedFunctions);
+    buf += "],\"builtins\":[";
+    emitNames(threadRoles.builtinCallees);
+    buf += "],\"edgeDepth\":{";
     {
         bool firstCaller = true;
         for (const auto &[caller, edges] : threadRoles.edgeLoopDepth) {
@@ -894,6 +903,14 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.freeSitesByCallee);
                 else if (tk == "overridden")
                     parseStrArray(out.threadRoles.overriddenVirtuals);
+                else if (tk == "declAlloc")
+                    parseStrArray(out.threadRoles.declaredAllocators);
+                else if (tk == "declFree")
+                    parseStrArray(out.threadRoles.declaredFreers);
+                else if (tk == "defined")
+                    parseStrArray(out.threadRoles.definedFunctions);
+                else if (tk == "builtins")
+                    parseStrArray(out.threadRoles.builtinCallees);
                 else if (tk == "edgeDepth") {
                     ipc::expect(json, i, '{');
                     while (true) {
@@ -2219,21 +2236,91 @@ ScanResult ScanPipeline::run(
     {
         ThreadRoleSummary vocabFacts;
         unsigned parsed = 0;
-        for (const auto &src : sources) {
+        // A TU that crashes the prepass is skipped, not fatal: the vocabulary
+        // is then smaller and the conjuncts fail closed.
+        auto prescanOne = [&](const std::string &src,
+                              ThreadRoleSummary &into) -> bool {
             VocabularyActionFactory vf;
             llvm::CrashRecoveryContext CRC;
-            // A TU that crashes the prepass is skipped, not fatal: the
-            // vocabulary is then smaller and the conjuncts fail closed.
             int rc = 1;
-            if (CRC.RunSafely([&]() {
-                    std::vector<std::string> one = {src};
-                    clang::tooling::ClangTool tool(compDB, one);
-                    tool.setPrintErrorMessage(false);
-                    addResourceDirAdjuster(tool, compDB, src);
-                    rc = tool.run(&vf);
-                }) && rc == 0)
-                ++parsed;
-            vocabFacts.merge(vf.facts());
+            bool ok = CRC.RunSafely([&]() {
+                std::vector<std::string> one = {src};
+                clang::tooling::ClangTool tool(compDB, one);
+                tool.setPrintErrorMessage(false);
+                addResourceDirAdjuster(tool, compDB, src);
+                rc = tool.run(&vf);
+            });
+            into.merge(vf.facts());
+            return ok && rc == 0;
+        };
+
+        if (jobs <= 1 || sources.size() <= 1) {
+            for (const auto &src : sources)
+                if (prescanOne(src, vocabFacts))
+                    ++parsed;
+        } else {
+            // Same sharding and fork isolation the analysis pass uses, for the
+            // same reason: ClangTool's global state is not thread-safe. On
+            // rocksdb the sequential prepass dominated the scan.
+            std::vector<std::vector<std::string>> vshards(jobs);
+            for (size_t i = 0; i < sources.size(); ++i)
+                vshards[i % jobs].push_back(sources[i]);
+
+            std::vector<std::pair<pid_t, std::string>> kids;
+            for (unsigned j = 0; j < jobs; ++j) {
+                if (vshards[j].empty()) continue;
+                llvm::SmallString<128> tmpDir;
+                llvm::sys::path::system_temp_directory(true, tmpDir);
+                llvm::SmallString<128> p(tmpDir);
+                llvm::sys::path::append(p,
+                    "lshaz-vocab-" + std::to_string(j) + "-" +
+                    std::to_string(getpid()) + ".json");
+
+                pid_t pid = fork();
+                if (pid < 0) {
+                    // Fall back rather than lose the shard: a smaller
+                    // vocabulary silently weakens every rule downstream.
+                    for (const auto &src : vshards[j])
+                        if (prescanOne(src, vocabFacts))
+                            ++parsed;
+                    continue;
+                }
+                if (pid == 0) {
+                    llvm::CrashRecoveryContext::Enable();
+                    std::error_code ec;
+                    llvm::raw_fd_ostream o(std::string(p), ec);
+                    if (ec) _exit(kShardIPCWriteFailed);
+                    for (const auto &src : vshards[j]) {
+                        ThreadRoleSummary one;
+                        int rc = prescanOne(src, one) ? 0 : 1;
+                        o << serializeShardResult(rc, {}, {}, {}, one, {}, {},
+                                                  src) << "\n";
+                        o.flush();
+                    }
+                    o.close();
+                    _exit(0);
+                }
+                kids.push_back({pid, std::string(p)});
+            }
+
+            for (auto &[pid, path] : kids) {
+                int status = 0;
+                waitpid(pid, &status, 0);
+                auto buf = llvm::MemoryBuffer::getFile(path);
+                if (buf) {
+                    llvm::StringRef all = (*buf)->getBuffer();
+                    while (!all.empty()) {
+                        auto [line, rest] = all.split('\n');
+                        all = rest;
+                        if (line.trim().empty()) continue;
+                        ShardIPC rec;
+                        if (!deserializeShardResult(line.str(), rec)) continue;
+                        vocabFacts.merge(rec.threadRoles);
+                        if (rec.exitCode == 0) ++parsed;
+                    }
+                }
+                llvm::sys::fs::remove(path);
+            }
         }
         std::set<std::string> av, fv;
         inferAllocatorVocabulary(vocabFacts, request.config
