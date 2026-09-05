@@ -132,6 +132,23 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
         if (i + 1 < meta.sourceFiles.size()) os << ", ";
     }
     os << "],\n";
+    // The vocabulary the scan applied, so two runs can be diffed on what the
+    // tool concluded and not only on what it reported.
+    auto emitNames = [&](const char *key,
+                         const std::vector<std::string> &v) {
+        os << "    \"" << key << "\": [";
+        for (size_t i = 0; i < v.size(); ++i) {
+            os << "\"" << escape(v[i]) << "\"";
+            if (i + 1 < v.size()) os << ", ";
+        }
+        os << "],\n";
+    };
+    emitNames("derivedAllocators", meta.derivedAllocators);
+    emitNames("derivedFreers", meta.derivedFreers);
+    emitNames("derivedLocks", meta.derivedLocks);
+    emitNames("derivedUnlocks", meta.derivedUnlocks);
+    emitNames("derivedMappings", meta.derivedMappings);
+    emitNames("undecidedWrappers", meta.undecidedWrappers);
     os << "    \"compilers\": [";
     for (size_t i = 0; i < meta.compilers.size(); ++i) {
         os << "{\"path\": \"" << escape(meta.compilers[i].path) << "\"}";

@@ -2399,6 +2399,15 @@ ScanResult ScanPipeline::run(
                             &seededLock, &seededUnlock);
         analysisConfig.derivedLockNames = lv;
         analysisConfig.derivedUnlockNames = uv;
+        // Names, not counts: a count cannot be diffed and cannot be checked.
+        // The full set including seeds, since what matters to a reader is the
+        // vocabulary the scan actually applied.
+        result.metadata.derivedAllocators.assign(av.begin(), av.end());
+        result.metadata.derivedFreers.assign(fv.begin(), fv.end());
+        result.metadata.derivedLocks.assign(lv.begin(), lv.end());
+        result.metadata.derivedUnlocks.assign(uv.begin(), uv.end());
+        result.metadata.derivedMappings.assign(mv.begin(), mv.end());
+
         analysisConfig.derivedAllocatorNames = av;
         analysisConfig.derivedFreeNames = fv;
         // Every derived vocabulary is reported, not just the allocator one.
@@ -2426,6 +2435,7 @@ ScanResult ScanPipeline::run(
         // An undecidable wrapper and one that decided "no" are otherwise the
         // same silence.
         const auto opaque = unresolvedVocabularyBoundaries(vocabFacts, av, fv);
+        result.metadata.undecidedWrappers = opaque;
         if (!opaque.empty()) {
             std::string names;
             for (size_t i = 0; i < opaque.size() && i < 5; ++i)

@@ -119,7 +119,7 @@ public:
     // the whole program.
     bool VisitAtomicExpr(clang::AtomicExpr *E) {
         if (fn_ && isRMW(E->getOp()))
-            noteSpin(E->getPtr());
+            noteSpin(E->getPtr(), nullptr);
         return true;
     }
 
@@ -227,12 +227,12 @@ public:
                 (bn.contains("compare") || bn.contains("exchange") ||
                  bn.contains("test_and_set") || bn.contains("lock_release") ||
                  bn.contains("fetch_")))
-                noteSpin(E->getArg(0));
+                noteSpin(E->getArg(0), E);
         }
         if (rmw_.count(g))
             for (unsigned i = 0; i < E->getNumArgs(); ++i)
                 if (!paramRootType(E->getArg(i)).empty()) {
-                    noteSpin(E->getArg(i));
+                    noteSpin(E->getArg(i), E);
                     break;
                 }
         const clang::Expr *a0 = E->getArg(0)->IgnoreImpCasts();
@@ -358,11 +358,23 @@ private:
         return typeKey(t);
     }
 
-    void noteSpin(const clang::Expr *operand) {
+    // Which side a compare-exchange is depends on what it publishes, not on
+    // whether a loop surrounds it: a release stores zero, an acquire stores the
+    // owner. ngx_shmtx_trylock has no loop and is still an acquire, and grading
+    // it as a release decrements FL012's nesting depth on a try.
+    void noteSpin(const clang::Expr *operand, const clang::CallExpr *E) {
         std::string t = paramRootType(operand);
         if (t.empty())
             return;
-        (loopDepth_ > 0 ? out_.spinAcquireOfType : out_.spinReleaseOfType)[t]
+        bool release = loopDepth_ == 0;
+        if (E && E->getNumArgs() >= 3) {
+            clang::Expr::EvalResult r;
+            if (E->getArg(2)->EvaluateAsInt(r, ctx_))
+                release = r.Val.getInt() == 0;
+            else
+                release = false;
+        }
+        (release ? out_.spinReleaseOfType : out_.spinAcquireOfType)[t]
             .insert(threadRoleNodeName(fn_, ctx_));
     }
 

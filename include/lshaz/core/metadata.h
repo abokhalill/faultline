@@ -23,6 +23,17 @@ struct ExecutionMetadata {
 
     // Parse summary.
     unsigned totalTUs      = 0;
+    // What the vocabulary prepass concluded, by name. A count on stderr said
+    // how many were derived but never which, leaving the inference less
+    // inspectable than the config list it replaced. Emitted here so two scans
+    // can be diffed on what the tool decided, not just on what it found.
+    std::vector<std::string> derivedAllocators;
+    std::vector<std::string> derivedFreers;
+    std::vector<std::string> derivedLocks;
+    std::vector<std::string> derivedUnlocks;
+    std::vector<std::string> derivedMappings;
+    std::vector<std::string> undecidedWrappers;
+
     unsigned failedTUCount = 0;
     std::vector<std::string> failedTUs;
     std::vector<std::string> failedTUErrors;
