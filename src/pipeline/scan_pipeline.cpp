@@ -2326,6 +2326,7 @@ ScanResult ScanPipeline::run(
         inferAllocatorVocabulary(vocabFacts, request.config
                                      .allocatorFunctionPatterns, av, fv);
         result.threadRoleFacts.merge(vocabFacts);
+        result.coverage.distinctFunctions = vocabFacts.definedFunctions.size();
         analysisConfig.derivedAllocatorNames = av;
         analysisConfig.derivedFreeNames = fv;
         report("vocabulary",

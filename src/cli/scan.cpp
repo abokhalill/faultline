@@ -534,9 +534,17 @@ int runScanCommand(int argc, const char **argv) {
         // that silence is indistinguishable from a clean result unless it is
         // stated.
         const auto &cov = result.coverage;
-        llvm::errs() << "lshaz: coverage " << cov.functionsSeen
+        // Hot as a share, not a count: it is summed per TU while the function
+        // count is deduplicated, and printing both as counts read as 1324378
+        // hot out of 22586 on rocksdb.
+        llvm::errs() << "lshaz: coverage "
+                     << (cov.distinctFunctions ? cov.distinctFunctions
+                                               : cov.functionsSeen)
                      << " function(s), " << cov.recordsSeen << " record(s), "
-                     << cov.functionsHot << " hot";
+                     << (cov.functionsSeen
+                             ? cov.functionsHot * 100 / cov.functionsSeen
+                             : 0)
+                     << "% hot";
         if (cov.functionsWithdrawnCold)
             llvm::errs() << ", " << cov.functionsWithdrawnCold
                          << " withdrawn cold after cross-TU resolution";
