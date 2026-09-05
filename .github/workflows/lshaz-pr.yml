@@ -13,6 +13,10 @@ on:
 jobs:
   lshaz-diff:
     runs-on: ubuntu-24.04
+    # A fork PR gets a read-only token whatever this asks for, so the comment
+    # step below is conditioned on the PR being same-repo rather than declared
+    # here and left to fail. The findings go to the job summary either way, and
+    # that needs no permission at all.
     permissions:
       contents: read
       pull-requests: write
@@ -28,8 +32,15 @@ jobs:
           sudo apt-get install -y -qq llvm-18-dev libclang-18-dev clang-18 cmake
 
       - name: Install lshaz
+        env:
+          # Pin this to the release you validated against. Tracking main means
+          # a rule change upstream can move your gate without a commit here.
+          LSHAZ_REF: main
         run: |
-          curl -sL https://raw.githubusercontent.com/abokhalill/lshaz/main/install.sh | bash
+          set -euo pipefail
+          # -f so a 404 fails the step instead of piping an error page to bash,
+          # which curl otherwise reports as success.
+          curl -fsSL "https://raw.githubusercontent.com/abokhalill/lshaz/${LSHAZ_REF}/install.sh" | bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Scan baseline (main)
@@ -65,8 +76,20 @@ jobs:
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           cat /tmp/diff-output.txt
 
-      - name: Post PR comment
+      - name: Publish findings to the job summary
         if: always()
+        run: |
+          {
+            echo "### lshaz"
+            echo '```'
+            cat /tmp/diff-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Skipped for fork PRs, where the token is read-only regardless of the
+      # permissions block. The summary step above already carries the findings.
+      - name: Post PR comment
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v7
         with:
           script: |
