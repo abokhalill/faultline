@@ -220,10 +220,17 @@ void HotPathOracle::inferFromCodeShape(const CallGraph &cg) {
     }
 
     for (const auto &[fn, d] : depth) {
-        if (d == 0) continue;   // reachable but never repeated: not hot
-        // Own loop nesting is cost per call. It only sharpens the grade
-        // once repetition is already established by the path in.
-        const unsigned graded = d + (cg.ownLoopDepth(fn) >= 2 ? 1u : 0u);
+        const unsigned own = cg.ownLoopDepth(fn);
+        // Repetition on the way in, or repetition once here. Requiring the
+        // former alone made the same hazard visible or invisible depending on
+        // where it was written: an allocation in a helper called from a loop
+        // graded hot, while the identical allocation inlined into that loop
+        // body graded cold, because the enclosing function was entered once.
+        if (d == 0 && own == 0) continue;
+        // Own loop nesting is still only cost per call, so it sharpens the
+        // grade rather than establishing it. A function reached once whose own
+        // loop is the only repetition stays at the weakest grade.
+        const unsigned graded = d + (own >= 2 ? 1u : 0u);
         record(fn, graded >= 2 ? HotnessSource::InferredDeep
                                : HotnessSource::InferredShallow);
     }
@@ -319,10 +326,13 @@ inferGlobalHotness(const ThreadRoleSummary &facts,
     }
 
     for (const auto &[fn, d] : depth) {
-        if (d == 0) continue;
         unsigned own = 0;
         auto o = facts.ownLoopDepth.find(fn);
         if (o != facts.ownLoopDepth.end()) own = o->second;
+        // Must match inferFromCodeShape's admission test exactly. The reduce
+        // phase confirms or drops what the map phase proposed, so a stricter
+        // rule here deletes findings the map was right to raise.
+        if (d == 0 && own == 0) continue;
         unsigned graded = d + (own >= 2 ? 1u : 0u);
 
         // Demote, never drop: still worth seeing, not worth asserting.
