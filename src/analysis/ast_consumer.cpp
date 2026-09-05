@@ -296,6 +296,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     // two-pass split exists to avoid.
 
     StripedArrayAnalysis striped(Ctx, config_, oracle_);
+    striped.setThreadEntries(cg.threadEntryNames());
     striped.catalogue(decls);
     striped.collectAliases(decls);
     striped.collectUses(TU);

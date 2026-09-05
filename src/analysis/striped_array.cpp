@@ -74,6 +74,16 @@ const clang::ArraySubscriptExpr *asSubscript(const clang::Expr *E) {
     if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E))
         if (UO->getOpcode() == clang::UO_AddrOf)
             E = UO->getSubExpr()->IgnoreParenImpCasts();
+    // "stats[id].hits++" writes a field of the element, so the write target is
+    // the member and the subscript is its base. Only matching the bare
+    // subscript saw arrays of scalars and missed every array of per-thread
+    // structs, which is the more common of the two shapes.
+    while (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
+        E = ME->getBase()->IgnoreParenImpCasts();
+        if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E))
+            if (UO->getOpcode() == clang::UO_Deref)
+                E = UO->getSubExpr()->IgnoreParenImpCasts();
+    }
     return llvm::dyn_cast<clang::ArraySubscriptExpr>(E);
 }
 
@@ -97,21 +107,39 @@ public:
 
     UseVisitor(clang::ASTContext &C, StripedArraySummary &o,
                const std::map<std::string, std::string> &al,
-               const HotPathOracle &orc, const Config &c)
-        : ctx(C), out(o), aliases(al), oracle(orc), cfg(c) {}
+               const HotPathOracle &orc, const Config &c,
+               const std::set<std::string> &entries)
+        : ctx(C), out(o), aliases(al), oracle(orc), cfg(c),
+          threadEntries(entries) {}
+
+    const std::set<std::string> &threadEntries;
+    // Locals carrying a thread identity forward. "long id = (long)arg" is the
+    // canonical spelling and the cast erases nothing that matters.
+    llvm::SmallPtrSet<const clang::VarDecl *, 8> identDerived;
 
     bool TraverseFunctionDecl(clang::FunctionDecl *FD) {
         if (!FD->doesThisDeclarationHaveABody())
             return RecursiveASTVisitor::TraverseFunctionDecl(FD);
         const auto *prev = currentFn;
+        auto savedIdent = identDerived;
+        identDerived.clear();
         currentFn = FD;
         bool r = RecursiveASTVisitor::TraverseFunctionDecl(FD);
         currentFn = prev;
+        identDerived = savedIdent;
         return r;
     }
     bool TraverseCXXMethodDecl(clang::CXXMethodDecl *MD) {
         return TraverseFunctionDecl(MD);
     }
+
+    bool VisitVarDecl(clang::VarDecl *VD) {
+        if (VD && VD->hasInit() && inThreadEntry() &&
+            rootsAtEntryParam(VD->getInit()))
+            identDerived.insert(VD->getCanonicalDecl());
+        return true;
+    }
+
 
     bool TraverseForStmt(clang::ForStmt *S) {
         auto added = pushInduction(S->getInit());
@@ -252,6 +280,29 @@ private:
         return false;
     }
 
+    // The enclosing function was handed to a thread primitive, so its
+    // parameters are what the spawn passed it. That is the thread identity by
+    // construction, whatever the parameter is named.
+    bool inThreadEntry() const {
+        return currentFn &&
+               threadEntries.count(threadRoleNodeName(currentFn, ctx)) > 0;
+    }
+
+    // Through casts, arithmetic and member access, since a thread payload is
+    // routinely a struct pointer whose field holds the index.
+    bool rootsAtEntryParam(const clang::Stmt *S) const {
+        if (!S) return false;
+        if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(S)) {
+            const auto *D = DRE->getDecl();
+            if (llvm::isa<clang::ParmVarDecl>(D)) return true;
+            if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(D))
+                return identDerived.count(VD->getCanonicalDecl()) > 0;
+        }
+        for (const auto *C : S->children())
+            if (rootsAtEntryParam(C)) return true;
+        return false;
+    }
+
     IndexProvenance classify(const clang::Expr *idx) {
         idx = idx->IgnoreParenImpCasts();
         clang::Expr::EvalResult r;
@@ -265,7 +316,17 @@ private:
                     return IndexProvenance::ThreadIdent;
             if (nameIsThreadIdent(D->getName(), cfg.threadIndexPatterns))
                 return IndexProvenance::ThreadIdent;
+            // Structural, and it outranks the name list rather than extending
+            // it: the canonical worker writes "long id = (long)arg" and no
+            // spelling of "id" was ever going to be enumerable.
+            if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(D))
+                if (inThreadEntry() &&
+                    (llvm::isa<clang::ParmVarDecl>(D) ||
+                     identDerived.count(VD->getCanonicalDecl())))
+                    return IndexProvenance::ThreadIdent;
         }
+        if (inThreadEntry() && rootsAtEntryParam(idx))
+            return IndexProvenance::ThreadIdent;
         if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(idx))
             if (nameIsThreadIdent(ME->getMemberDecl()->getName(), cfg.threadIndexPatterns))
                 return IndexProvenance::ThreadIdent;
@@ -408,7 +469,7 @@ void StripedArrayAnalysis::collectAliases(
 
 void StripedArrayAnalysis::collectUses(const clang::TranslationUnitDecl *TU) {
     if (summary_.empty() || !TU) return;
-    UseVisitor v(ctx_, summary_, aliases_, oracle_, cfg_);
+    UseVisitor v(ctx_, summary_, aliases_, oracle_, cfg_, threadEntries_);
     v.TraverseDecl(const_cast<clang::TranslationUnitDecl *>(TU));
 }
 
