@@ -17,6 +17,7 @@
 
 #include <fnmatch.h>
 #include <map>
+#include <set>
 
 #include <sstream>
 #include <string>
@@ -36,8 +37,11 @@ struct AllocSite {
 
 class AllocVisitor : public clang::RecursiveASTVisitor<AllocVisitor> {
 public:
-    AllocVisitor(clang::ASTContext &Ctx, const std::vector<std::string> &wrappers)
-        : ctx_(Ctx), wrappers_(wrappers) {}
+    AllocVisitor(clang::ASTContext &Ctx, const std::vector<std::string> &wrappers,
+                 const std::set<std::string> &derived,
+                 const std::set<std::string> &derivedFree)
+        : ctx_(Ctx), wrappers_(wrappers), derived_(derived),
+          derivedFree_(derivedFree) {}
 
     // T *p = malloc(n): the call's own type is void*, so the declaration is
     // where the allocated type is recoverable. Keyed by the call's location,
@@ -180,7 +184,14 @@ public:
 private:
     // AllocatorTopology grades an unknown callee as the configured
     // allocator, which is what a wrapper resolves to.
+    // Derived names come from the prepass and carry the codebase's own
+    // spelling; the patterns remain for what structure cannot reach.
     bool matchesWrapper(const std::string &name) const {
+        // Both sides: a release wrapper takes the same arena lock an
+        // allocation does, which is why this rule's libc list already
+        // carries free alongside malloc.
+        if (derived_.count(name) || derivedFree_.count(name))
+            return true;
         for (const auto &p : wrappers_)
             if (fnmatch(p.c_str(), name.c_str(), 0) == 0)
                 return true;
@@ -224,6 +235,8 @@ private:
 
     clang::ASTContext &ctx_;
     const std::vector<std::string> &wrappers_;
+    const std::set<std::string> &derived_;
+    const std::set<std::string> &derivedFree_;
     std::vector<AllocSite> sites_;
     std::map<unsigned, std::string> declTypes_;
     unsigned inLoop_ = 0;
@@ -265,7 +278,9 @@ public:
         if (!Oracle.isFunctionHot(FD))
             return;
 
-        AllocVisitor visitor(Ctx, Cfg.allocatorFunctionPatterns);
+        AllocVisitor visitor(Ctx, Cfg.allocatorFunctionPatterns,
+                             Cfg.derivedAllocatorNames,
+                             Cfg.derivedFreeNames);
         visitor.TraverseStmt(FD->getBody());
 
         // Intra-procedural data-flow analysis for precision.

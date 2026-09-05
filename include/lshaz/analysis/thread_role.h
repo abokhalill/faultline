@@ -42,6 +42,37 @@ struct ThreadRoleSummary {
     std::map<std::string, std::set<std::string>> allocatorsOfType;
     std::map<std::string, std::set<std::string>> freersOfType;
 
+    // Raw structure for inferring the project's own allocator vocabulary,
+    // rather than being told it. Requiring a human to declare zmalloc,
+    // ngx_palloc, palloc, xmalloc or kmalloc before the rule can see anything
+    // is hardcoding with a config file in front of it, and it has to be
+    // rediscovered per codebase.
+    //
+    // returnForwards: F returns the result of calling G, so F allocates if G
+    // does. paramForwards: F hands one of its own parameters to G, so F frees
+    // if G does. Seeded from the libc primitives, which are ABI rather than
+    // vocabulary, and closed over the merged graph in the reduce phase.
+    std::map<std::string, std::set<std::string>> returnForwards;
+    std::map<std::string, std::set<std::string>> paramForwards;
+
+    // Call sites keyed by callee: "F|T" meaning that inside F, the callee
+    // produced (or was handed) a T*. Attribution waits for the reduce phase,
+    // which is the first point that knows whether the callee allocates.
+    std::map<std::string, std::set<std::string>> allocSitesByCallee;
+    std::map<std::string, std::set<std::string>> freeSitesByCallee;
+
+    // Seeds taken from the declaration rather than its spelling. A libc name
+    // list is defeated by one #define: redis builds jemalloc with
+    // "#define malloc(size) je_malloc(size)", so no seed name survives
+    // preprocessing anywhere in the tree. The attributes do survive, and an
+    // allocator carries them because the optimizer needs them, which is what
+    // makes this a seed rule no name list has to keep up with.
+    //
+    // Produced only by the vocabulary prepass, which runs in the parent, so
+    // these never cross the IPC boundary.
+    std::set<std::string> declaredAllocators;
+    std::set<std::string> declaredFreers;
+
     // Virtual methods some class actually overrides, qualified names. A call
     // to a method absent here is monomorphic program-wide, which is the
     // difference between paying ~1ns and ~9ns. Only the merged set can say,
@@ -73,6 +104,18 @@ struct ThreadRoleSummary {
             allocatorsOfType[ty].insert(fns.begin(), fns.end());
         for (const auto &[ty, fns] : other.freersOfType)
             freersOfType[ty].insert(fns.begin(), fns.end());
+        for (const auto &[f, gs] : other.returnForwards)
+            returnForwards[f].insert(gs.begin(), gs.end());
+        for (const auto &[f, gs] : other.paramForwards)
+            paramForwards[f].insert(gs.begin(), gs.end());
+        for (const auto &[g, sites] : other.allocSitesByCallee)
+            allocSitesByCallee[g].insert(sites.begin(), sites.end());
+        for (const auto &[g, sites] : other.freeSitesByCallee)
+            freeSitesByCallee[g].insert(sites.begin(), sites.end());
+        declaredAllocators.insert(other.declaredAllocators.begin(),
+                                  other.declaredAllocators.end());
+        declaredFreers.insert(other.declaredFreers.begin(),
+                              other.declaredFreers.end());
         overriddenVirtuals.insert(other.overriddenVirtuals.begin(),
                                   other.overriddenVirtuals.end());
     }
@@ -159,6 +202,19 @@ struct ThreadRoleVerdicts {
         return a != ROLE_NONE && b != ROLE_NONE && (a & b) == 0;
     }
 };
+
+// Closes the allocator and freer sets over the merged graph and turns the
+// recorded call sites into allocatorsOfType / freersOfType. Seeds are the libc
+// primitives only, so a project's own names are derived rather than declared.
+// extraAlloc / extraFree add configured patterns for the cases structure
+// cannot reach: an allocator whose result leaves through an out-parameter, or
+// one whose body this scan never saw.
+//
+// Mutates the two type maps in place; pure in its other inputs.
+void inferAllocatorVocabulary(ThreadRoleSummary &facts,
+                              const std::vector<std::string> &extraAlloc,
+                              std::set<std::string> &allocatorsOut,
+                              std::set<std::string> &freersOut);
 
 // BFS role propagation over the merged call graph. Roots: "main" (plus
 // mainPatterns matches) seed ROLE_MAIN; threadEntries (plus entryPatterns

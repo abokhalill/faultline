@@ -5,6 +5,7 @@
 #include "lshaz/pipeline/filter.h"
 
 #include "lshaz/analysis/action.h"
+#include "lshaz/analysis/vocabulary.h"
 #include "lshaz/core/dedup.h"
 #include "lshaz/core/hot_path.h"
 #include "lshaz/core/interaction.h"
@@ -443,6 +444,14 @@ std::string serializeShardResult(int exitCode,
     emitNameSets(threadRoles.allocatorsOfType);
     buf += "},\"freeOf\":{";
     emitNameSets(threadRoles.freersOfType);
+    buf += "},\"retFwd\":{";
+    emitNameSets(threadRoles.returnForwards);
+    buf += "},\"parFwd\":{";
+    emitNameSets(threadRoles.paramForwards);
+    buf += "},\"allocSites\":{";
+    emitNameSets(threadRoles.allocSitesByCallee);
+    buf += "},\"freeSites\":{";
+    emitNameSets(threadRoles.freeSitesByCallee);
     buf += "},\"edgeDepth\":{";
     {
         bool firstCaller = true;
@@ -875,6 +884,14 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.allocatorsOfType);
                 else if (tk == "freeOf")
                     parseNameSets(out.threadRoles.freersOfType);
+                else if (tk == "retFwd")
+                    parseNameSets(out.threadRoles.returnForwards);
+                else if (tk == "parFwd")
+                    parseNameSets(out.threadRoles.paramForwards);
+                else if (tk == "allocSites")
+                    parseNameSets(out.threadRoles.allocSitesByCallee);
+                else if (tk == "freeSites")
+                    parseNameSets(out.threadRoles.freeSitesByCallee);
                 else if (tk == "overridden")
                     parseStrArray(out.threadRoles.overriddenVirtuals);
                 else if (tk == "edgeDepth") {
@@ -2192,9 +2209,46 @@ ScanResult ScanPipeline::run(
                          " MiB cap per shard");
     }
 
-    int toolRet = 0;
-
     llvm::CrashRecoveryContext::Enable();
+
+    // Pass one. Parses each TU and records structure only, so the parent can
+    // close the project's allocator vocabulary before any rule runs. zmalloc's
+    // body is in zmalloc.c and every caller is elsewhere, so no per-TU pass can
+    // reach it; requiring it in config made a human rediscover it per codebase.
+    Config analysisConfig = request.config;
+    {
+        ThreadRoleSummary vocabFacts;
+        unsigned parsed = 0;
+        for (const auto &src : sources) {
+            VocabularyActionFactory vf;
+            llvm::CrashRecoveryContext CRC;
+            // A TU that crashes the prepass is skipped, not fatal: the
+            // vocabulary is then smaller and the conjuncts fail closed.
+            int rc = 1;
+            if (CRC.RunSafely([&]() {
+                    std::vector<std::string> one = {src};
+                    clang::tooling::ClangTool tool(compDB, one);
+                    tool.setPrintErrorMessage(false);
+                    addResourceDirAdjuster(tool, compDB, src);
+                    rc = tool.run(&vf);
+                }) && rc == 0)
+                ++parsed;
+            vocabFacts.merge(vf.facts());
+        }
+        std::set<std::string> av, fv;
+        inferAllocatorVocabulary(vocabFacts, request.config
+                                     .allocatorFunctionPatterns, av, fv);
+        result.threadRoleFacts.merge(vocabFacts);
+        analysisConfig.derivedAllocatorNames = av;
+        analysisConfig.derivedFreeNames = fv;
+        report("vocabulary",
+               std::to_string(parsed) + "/" + std::to_string(sources.size()) +
+               " TU(s) prescanned clean, " + std::to_string(av.size()) +
+               " allocator and " + std::to_string(fv.size()) +
+               " release name(s) derived");
+    }
+
+    int toolRet = 0;
 
     unsigned completedTUs = 0;
     const unsigned totalTUs = static_cast<unsigned>(sources.size());
@@ -2205,7 +2259,7 @@ ScanResult ScanPipeline::run(
             std::vector<std::string> singleTU = {src};
             std::vector<Diagnostic> tuDiags;
             LshazActionFactory factory(
-                request.config, tuDiags, profileHotFuncs);
+                analysisConfig, tuDiags, profileHotFuncs);
 
             llvm::CrashRecoveryContext CRC;
             bool crashed = !CRC.RunSafely([&]() {
@@ -2356,7 +2410,7 @@ ScanResult ScanPipeline::run(
                     std::vector<Diagnostic> tuDiags;
                     std::vector<FailedTU> tuFailed;
                     LshazActionFactory factory(
-                        request.config, tuDiags, profileHotFuncs);
+                        analysisConfig, tuDiags, profileHotFuncs);
 
                     int tuRet = 0;
                     llvm::CrashRecoveryContext CRC;
@@ -2670,6 +2724,13 @@ ScanResult ScanPipeline::run(
     // Thread-role reduce: verdicts from the merged facts. Runs on the
     // parent's aggregate regardless of jobs count; children never see
     // enough of the graph to classify anything.
+    // Derive the project's allocator vocabulary before anything consults it.
+    // Config patterns extend the libc seeds; they no longer carry the analysis.
+    std::set<std::string> allocVocab, freeVocab;
+    inferAllocatorVocabulary(result.threadRoleFacts,
+                             request.config.allocatorFunctionPatterns,
+                             allocVocab, freeVocab);
+
     result.threadRoles = computeThreadRoles(result.threadRoleFacts,
                                             request.config.threadEntryPatterns,
                                             request.config.mainFunctionPatterns);
@@ -2722,8 +2783,43 @@ ScanResult ScanPipeline::run(
                 "25x the same-thread round trip at 512B on glibc");
             ++xfree;
         }
-        if (xfree > 0)
-            report("thread_roles", std::to_string(xfree) +
+        // Report the join's reach, not just its hits. Zero established reads
+        // identically whether every free is same-thread or no type was ever
+        // recorded on both sides, and those call for opposite responses.
+        unsigned bothSides = 0, bothAttributed = 0;
+        for (const auto &[ty, allocFns] :
+             result.threadRoleFacts.allocatorsOfType) {
+            auto f = result.threadRoleFacts.freersOfType.find(ty);
+            if (f == result.threadRoleFacts.freersOfType.end())
+                continue;
+            ++bothSides;
+            // Disjointness needs every function on both sides attributed: one
+            // unknown allocator could hold the freer's role. Counting these
+            // separates "the frees really are same-thread" from "the call
+            // graph never reached these functions", which want opposite fixes.
+            if (result.threadRoles.rolesOf(allocFns) != ROLE_NONE &&
+                result.threadRoles.rolesOf(f->second) != ROLE_NONE)
+                ++bothAttributed;
+        }
+        report("alloc_vocab",
+               std::to_string(allocVocab.size()) + " allocator name(s) and " +
+               std::to_string(freeVocab.size()) +
+               " release name(s) inferred from " +
+               std::to_string(result.threadRoleFacts.returnForwards.size()) +
+               " return-forward and " +
+               std::to_string(result.threadRoleFacts.paramForwards.size()) +
+               " param-forward edge(s)");
+        if (!result.threadRoleFacts.allocatorsOfType.empty())
+            report("thread_roles",
+                   std::to_string(result.threadRoleFacts.allocatorsOfType
+                                      .size()) +
+                   " type(s) allocated, " +
+                   std::to_string(
+                       result.threadRoleFacts.freersOfType.size()) +
+                   " freed, " + std::to_string(bothSides) +
+                   " with both sides seen, " +
+                   std::to_string(bothAttributed) +
+                   " fully role-attributed, " + std::to_string(xfree) +
                    " FL020 finding(s) with cross-thread free established");
     }
 

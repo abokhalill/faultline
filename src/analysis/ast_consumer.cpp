@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <fnmatch.h>
 #include "lshaz/analysis/symbols.h"
+#include "lshaz/analysis/vocabulary.h"
 #include "lshaz/analysis/ast_consumer.h"
 #include "lshaz/analysis/cache_line.h"
 #include "lshaz/analysis/call_graph.h"
@@ -33,121 +34,6 @@ void collectOverriddenVirtuals(const std::vector<clang::Decl *> &decls,
                     Base->getCanonicalDecl()->getQualifiedNameAsString());
     }
 }
-
-// Who allocates and who frees each pointee type. FL020's conjunct needs the
-// two attributed to disjoint thread roles, and neither side is decidable
-// inside one TU: the producer and the consumer are usually different files.
-//
-// Only sites whose pointee type can be named are recorded. A void* that never
-// meets a typed pointer leaves the type absent, the reduce phase finds no
-// entry, and the conjunct stays unestablished. That is the direction a gating
-// claim has to fail in.
-class AllocOwnershipVisitor
-    : public clang::RecursiveASTVisitor<AllocOwnershipVisitor> {
-public:
-    AllocOwnershipVisitor(clang::ASTContext &C, ThreadRoleSummary &out,
-                          const std::vector<std::string> &wrappers)
-        : ctx_(C), out_(out), wrappers_(wrappers) {}
-
-    bool TraverseFunctionDecl(clang::FunctionDecl *FD) {
-        if (!FD || !FD->doesThisDeclarationHaveABody())
-            return true;
-        const auto *saved = fn_;
-        fn_ = FD;
-        bool r = clang::RecursiveASTVisitor<
-            AllocOwnershipVisitor>::TraverseFunctionDecl(FD);
-        fn_ = saved;
-        return r;
-    }
-    bool TraverseCXXMethodDecl(clang::CXXMethodDecl *MD) {
-        return TraverseFunctionDecl(MD);
-    }
-
-    bool VisitCXXNewExpr(clang::CXXNewExpr *E) {
-        record(out_.allocatorsOfType, E->getAllocatedType());
-        return true;
-    }
-
-    bool VisitCXXDeleteExpr(clang::CXXDeleteExpr *E) {
-        if (const auto *arg = E->getArgument())
-            record(out_.freersOfType, pointee(arg->getType()));
-        return true;
-    }
-
-    // T *p = malloc(n): the call's own type is void*, so the declaration is
-    // where the type is recoverable.
-    bool VisitVarDecl(clang::VarDecl *VD) {
-        if (!VD || !VD->hasInit())
-            return true;
-        if (isAllocCall(VD->getInit()->IgnoreParenImpCasts()))
-            record(out_.allocatorsOfType, pointee(VD->getType()));
-        return true;
-    }
-
-    bool VisitCallExpr(clang::CallExpr *E) {
-        const auto *callee = E->getDirectCallee();
-        if (!callee || !callee->getIdentifier() || E->getNumArgs() < 1)
-            return true;
-        llvm::StringRef n = callee->getName();
-        if (n != "free" && !matchesWrapper(n))
-            return true;
-        // Before the implicit conversion to void*, the argument still carries
-        // the pointee type the caller declared.
-        record(out_.freersOfType,
-               pointee(E->getArg(0)->IgnoreImpCasts()->getType()));
-        return true;
-    }
-
-private:
-    static clang::QualType pointee(clang::QualType QT) {
-        if (QT.isNull())
-            return {};
-        const auto *PT = QT->getAs<clang::PointerType>();
-        return PT ? PT->getPointeeType() : clang::QualType();
-    }
-
-    bool isAllocCall(const clang::Expr *E) const {
-        const auto *CE = llvm::dyn_cast_or_null<clang::CallExpr>(E);
-        if (!CE)
-            return false;
-        const auto *callee = CE->getDirectCallee();
-        if (!callee || !callee->getIdentifier())
-            return false;
-        llvm::StringRef n = callee->getName();
-        return n == "malloc" || n == "calloc" || n == "realloc" ||
-               n == "aligned_alloc" || matchesWrapper(n);
-    }
-
-    bool matchesWrapper(llvm::StringRef n) const {
-        std::string s = n.str();
-        for (const auto &p : wrappers_)
-            if (fnmatch(p.c_str(), s.c_str(), 0) == 0)
-                return true;
-        return false;
-    }
-
-    void record(std::map<std::string, std::set<std::string>> &dst,
-                clang::QualType QT) {
-        if (!fn_ || QT.isNull())
-            return;
-        QT = QT.getCanonicalType().getUnqualifiedType();
-        if (QT->isVoidType() || QT->isDependentType() ||
-            QT->isIncompleteType())
-            return;
-        const auto *RD = QT->getAsRecordDecl();
-        std::string name = RD
-            ? RD->getCanonicalDecl()->getQualifiedNameAsString()
-            : QT.getAsString();
-        if (name.empty())
-            return;
-        dst[name].insert(threadRoleNodeName(fn_, ctx_));
-    }
-
-    clang::ASTContext &ctx_;
-    ThreadRoleSummary &out_;
-    const std::vector<std::string> &wrappers_;
-    const clang::FunctionDecl *fn_ = nullptr;
-};
 
 bool isInSystemHeader(const clang::Decl *D, const clang::SourceManager &SM) {
     auto loc = D->getLocation();
@@ -405,9 +291,9 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
     cg.snapshotForThreadRoles(threadRoles_);
     escape.appendFieldWriterNames(threadRoles_);
     collectOverriddenVirtuals(decls, threadRoles_);
-    AllocOwnershipVisitor owners(Ctx, threadRoles_,
-                                 config_.allocatorFunctionPatterns);
-    owners.TraverseDecl(TU);
+    // Ownership facts come from the vocabulary prepass, which already walked
+    // this TU for them. Collecting again here would be the second walk the
+    // two-pass split exists to avoid.
 
     StripedArrayAnalysis striped(Ctx, config_, oracle_);
     striped.catalogue(decls);

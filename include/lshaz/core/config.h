@@ -4,6 +4,7 @@
 #include "lshaz/core/severity.h"
 
 #include <cstddef>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -123,6 +124,14 @@ struct Config {
     // them a codebase reaching libc through zmalloc, ngx_palloc or kmalloc
     // shows no allocation at all.
     std::vector<std::string> allocatorFunctionPatterns;
+
+    // Derived by the vocabulary prepass from structure, not set by the user
+    // and not YAML-mapped. Exact names rather than globs, because they were
+    // computed rather than guessed. allocator_function_patterns still exists
+    // for allocators the prepass cannot see: one whose body is never compiled,
+    // or whose result leaves through an out-parameter.
+    std::set<std::string> derivedAllocatorNames;
+    std::set<std::string> derivedFreeNames;
 
     // Lock wrappers (fnmatch) added to FL012's POSIX set. nginx reaches its
     // mutexes through ngx_shmtx_lock at 48 sites and pthread_mutex_lock at 2,

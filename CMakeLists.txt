@@ -97,6 +97,7 @@ set(LSHAZ_SOURCES
     src/output/clang_tidy.cpp
     src/analysis/action.cpp
     src/analysis/ast_consumer.cpp
+    src/analysis/vocabulary.cpp
     src/analysis/struct_layout.cpp
     src/analysis/escape.cpp
     src/analysis/cache_line.cpp

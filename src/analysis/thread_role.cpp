@@ -79,4 +79,108 @@ ThreadRoleVerdicts computeThreadRoles(
     return v;
 }
 
+
+namespace {
+
+// libc, plus the C++ operators Clang spells this way. These are ABI, not a
+// codebase's vocabulary, so seeding from them does not fix the analysis to
+// any project.
+const char *kAllocSeeds[] = {
+    "malloc", "calloc", "realloc", "aligned_alloc", "posix_memalign",
+    "valloc", "pvalloc", "memalign", "strdup", "strndup", "mmap", "mmap64",
+    "operator new", "operator new[]",
+};
+// The release side needs names where the allocation side does not. GCC and
+// Clang give an allocator alloc_size, which jemalloc, tcmalloc and mimalloc
+// all carry, so their allocation entry points are derived without being
+// listed. There is no equivalently-used counterpart for deallocation
+// (ownership_takes exists and essentially nobody applies it), so a free chain
+// ending in a replacement allocator's ABI terminates at a bare extern with no
+// evidence at all. These are published third-party ABIs on the same footing
+// as libc, not any scanned project's vocabulary: valkey reaches je_sdallocx
+// through zfree_internal, and every jemalloc-linked program reaches it the
+// same way.
+const char *kFreeSeeds[] = {
+    "free", "cfree", "munmap", "operator delete", "operator delete[]",
+    "dallocx", "sdallocx", "je_dallocx", "je_sdallocx", "je_free",
+    "tc_free", "tc_cfree", "tc_delete",
+    "mi_free", "mi_free_size", "mi_free_aligned",
+};
+
+// Least fixpoint over edges: a function joins the set once any callee it
+// forwards to is in it. Monotone and finite, so iteration terminates; the
+// bound is the edge count, which is why the worklist is a plain loop.
+void closeOver(const std::map<std::string, std::set<std::string>> &edges,
+               std::set<std::string> &set) {
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto &[fn, callees] : edges) {
+            if (set.count(fn))
+                continue;
+            for (const auto &c : callees)
+                if (set.count(c)) {
+                    set.insert(fn);
+                    changed = true;
+                    break;
+                }
+        }
+    }
+}
+
+} // namespace
+
+void inferAllocatorVocabulary(ThreadRoleSummary &facts,
+                              const std::vector<std::string> &extraAlloc,
+                              std::set<std::string> &allocatorsOut,
+                              std::set<std::string> &freersOut) {
+    for (const char *s : kAllocSeeds) allocatorsOut.insert(s);
+    for (const char *s : kFreeSeeds)  freersOut.insert(s);
+    allocatorsOut.insert(facts.declaredAllocators.begin(),
+                         facts.declaredAllocators.end());
+    freersOut.insert(facts.declaredFreers.begin(),
+                     facts.declaredFreers.end());
+
+    // Configured patterns join the seed set rather than replacing inference:
+    // they are for allocators whose structure this cannot see, not for the
+    // ordinary wrapper.
+    if (!extraAlloc.empty()) {
+        std::set<std::string> known;
+        for (const auto &[f, _] : facts.returnForwards) known.insert(f);
+        for (const auto &[f, _] : facts.paramForwards)  known.insert(f);
+        for (const auto &[g, _] : facts.allocSitesByCallee) known.insert(g);
+        for (const auto &[g, _] : facts.freeSitesByCallee)  known.insert(g);
+        for (const auto &pat : extraAlloc)
+            for (const auto &fn : known)
+                if (fnmatch(pat.c_str(), fn.c_str(), 0) == 0) {
+                    allocatorsOut.insert(fn);
+                    freersOut.insert(fn);
+                }
+    }
+
+    closeOver(facts.returnForwards, allocatorsOut);
+    closeOver(facts.paramForwards, freersOut);
+
+    // "F|T" splits back into the function that owns the site and the type it
+    // handled. Only now is it known whether the callee allocates.
+    auto attribute =
+        [](const std::map<std::string, std::set<std::string>> &sites,
+           const std::set<std::string> &vocab,
+           std::map<std::string, std::set<std::string>> &out) {
+            for (const auto &[callee, entries] : sites) {
+                if (!vocab.count(callee))
+                    continue;
+                for (const auto &e : entries) {
+                    auto bar = e.find('|');
+                    if (bar == std::string::npos || bar + 1 >= e.size())
+                        continue;
+                    out[e.substr(bar + 1)].insert(e.substr(0, bar));
+                }
+            }
+        };
+    attribute(facts.allocSitesByCallee, allocatorsOut, facts.allocatorsOfType);
+    attribute(facts.freeSitesByCallee, freersOut, facts.freersOfType);
+}
+
+
 } // namespace lshaz
