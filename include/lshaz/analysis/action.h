@@ -33,7 +33,8 @@ public:
                     StripedArraySummary &stripedArrays,
                     ScanCoverage &coverage,
                     const std::unordered_set<std::string> &profileHotFuncs,
-                    std::vector<FailedTU> &failedTUs);
+                    std::vector<FailedTU> &failedTUs,
+                    std::vector<std::string> *deps);
 
     bool BeginSourceFileAction(clang::CompilerInstance &CI) override;
 
@@ -52,6 +53,7 @@ private:
     ScanCoverage &coverage_;
     const std::unordered_set<std::string> &profileHotFuncs_;
     std::vector<FailedTU> &failedTUs_;
+    std::vector<std::string> *deps_;
     std::string currentFile_;
     std::string firstError_;
 };
@@ -69,6 +71,8 @@ public:
     const ThreadRoleSummary &threadRoles() const { return threadRoles_; }
     const StripedArraySummary &stripedArrays() const { return stripedArrays_; }
     const ScanCoverage &coverage() const { return coverage_; }
+    // Files the TU read, for keying a cached result against later edits.
+    const std::vector<std::string> &deps() const { return deps_; }
 
 private:
     const Config &config_;
@@ -77,6 +81,7 @@ private:
     ThreadRoleSummary threadRoles_;
     StripedArraySummary stripedArrays_;
     ScanCoverage coverage_;
+    std::vector<std::string> deps_;
     std::unordered_set<std::string> profileHotFuncs_;
     std::vector<FailedTU> failedTUs_;
 };

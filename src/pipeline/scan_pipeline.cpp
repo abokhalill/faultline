@@ -2403,9 +2403,54 @@ ScanResult ScanPipeline::run(
     unsigned completedTUs = 0;
     const unsigned totalTUs = static_cast<unsigned>(sources.size());
 
-    if (jobs <= 1 || sources.size() <= 1) {
+    // Analysis results depend on the config the rules read and on the derived
+    // vocabulary, so both are in the key; the prepass cache uses a different
+    // one and survives edits that invalidate these.
+    TUCache tuCache(analysisConfig.cacheDir.empty()
+                        ? std::string()
+                        : analysisConfig.cacheDir + "/tu");
+    const std::string cfgDigest =
+        tuCache.enabled() ? configDigest(analysisConfig) : std::string();
+    auto tuKey = [&](const std::string &src) {
+        auto cmds = compDB.getCompileCommands(src);
+        return TUCache::keyFor(src,
+                               cmds.empty() ? std::vector<std::string>()
+                                            : cmds.front().CommandLine,
+                               cfgDigest);
+    };
+    auto absorb = [&](const ShardIPC &r) {
+        result.diagnostics.insert(result.diagnostics.end(),
+                                  r.diagnostics.begin(), r.diagnostics.end());
+        failedTUsDetailed.insert(failedTUsDetailed.end(),
+                                 r.failedTUs.begin(), r.failedTUs.end());
+        mergeEscapeSummaries(result.escapeSummary, r.escapeSummary);
+        result.threadRoleFacts.merge(r.threadRoles);
+        mergeStripedArrays(result.stripedArrays, r.striped);
+        result.coverage.merge(r.coverage);
+    };
+
+    std::vector<std::string> pending;
+    unsigned tuCacheHits = 0;
+    for (const auto &src : sources) {
+        std::string rec;
+        ShardIPC r;
+        if (tuCache.enabled() && tuCache.lookup(tuKey(src), rec) &&
+            deserializeShardResult(rec, r)) {
+            absorb(r);
+            ++tuCacheHits;
+            ++completedTUs;
+            continue;
+        }
+        pending.push_back(src);
+    }
+    if (tuCache.enabled())
+        report("cache", std::to_string(tuCacheHits) + "/" +
+               std::to_string(sources.size()) + " TU(s) served from cache");
+    const std::vector<std::string> &work = pending;
+
+    if (jobs <= 1 || work.size() <= 1) {
         // Sequential path: per-TU crash isolation.
-        for (const auto &src : sources) {
+        for (const auto &src : work) {
             std::vector<std::string> singleTU = {src};
             std::vector<Diagnostic> tuDiags;
             LshazActionFactory factory(
@@ -2430,6 +2475,15 @@ ScanResult ScanPipeline::run(
                 auto &ff = factory.failedTUs();
                 failedTUsDetailed.insert(failedTUsDetailed.end(),
                     ff.begin(), ff.end());
+                // Only a clean run is stored, for the same reason the prepass
+                // does not cache crashes: a replayed crash is never retried.
+                if (tuCache.enabled() && ff.empty() && !factory.deps().empty())
+                    tuCache.store(tuKey(src), factory.deps(),
+                                  serializeShardResult(
+                                      0, {}, tuDiags, factory.escapeSummary(),
+                                      factory.threadRoles(),
+                                      factory.stripedArrays(),
+                                      factory.coverage(), src));
             }
             result.diagnostics.insert(result.diagnostics.end(),
                 std::make_move_iterator(tuDiags.begin()),
@@ -2451,8 +2505,8 @@ ScanResult ScanPipeline::run(
         // gets its own address space via COW. Children serialize results
         // to temp files; parent reads them back after waitpid().
         std::vector<std::vector<std::string>> shards(jobs);
-        for (size_t i = 0; i < sources.size(); ++i)
-            shards[i % jobs].push_back(sources[i]);
+        for (size_t i = 0; i < work.size(); ++i)
+            shards[i % jobs].push_back(work[i]);
 
         struct ChildSlot {
             pid_t pid = -1;
@@ -2581,11 +2635,17 @@ ScanResult ScanPipeline::run(
                     }
                     if (tuRet != 0) childRet = tuRet;
 
-                    out << serializeShardResult(
-                               tuRet, tuFailed, tuDiags,
-                               factory.escapeSummary(), factory.threadRoles(),
-                               factory.stripedArrays(), factory.coverage(), src)
-                        << "\n";
+                    const std::string rec = serializeShardResult(
+                        tuRet, tuFailed, tuDiags, factory.escapeSummary(),
+                        factory.threadRoles(), factory.stripedArrays(),
+                        factory.coverage(), src);
+                    // Written by the child that produced it: the parent never
+                    // sees the dependency list, and shipping it over IPC would
+                    // pay for it twice.
+                    if (tuCache.enabled() && tuRet == 0 && tuFailed.empty() &&
+                        !factory.deps().empty())
+                        tuCache.store(tuKey(src), factory.deps(), rec);
+                    out << rec << "\n";
                     out.flush();
                     if (out.has_error()) {
                         llvm::errs() << "lshaz: shard " << j

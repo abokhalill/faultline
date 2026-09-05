@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/action.h"
 #include "lshaz/analysis/ast_consumer.h"
+#include "lshaz/analysis/vocabulary.h"
 
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Frontend/CompilerInstance.h>
@@ -52,11 +53,12 @@ LshazAction::LshazAction(
     StripedArraySummary &stripedArrays,
     ScanCoverage &coverage,
     const std::unordered_set<std::string> &profileHotFuncs,
-    std::vector<FailedTU> &failedTUs)
+    std::vector<FailedTU> &failedTUs,
+    std::vector<std::string> *deps)
     : config_(cfg), diagnostics_(diagnostics), escapeSummary_(escapeSummary),
       threadRoles_(threadRoles), stripedArrays_(stripedArrays),
       coverage_(coverage), profileHotFuncs_(profileHotFuncs),
-      failedTUs_(failedTUs) {}
+      failedTUs_(failedTUs), deps_(deps) {}
 
 bool LshazAction::BeginSourceFileAction(clang::CompilerInstance &CI) {
     firstError_.clear();
@@ -80,6 +82,8 @@ LshazAction::CreateASTConsumer(clang::CompilerInstance & /*CI*/,
 }
 
 void LshazAction::EndSourceFileAction() {
+    if (deps_)
+        collectReadFiles(getCompilerInstance(), *deps_);
     auto &diags = getCompilerInstance().getDiagnostics();
     if (diags.hasFatalErrorOccurred() || diags.hasUncompilableErrorOccurred()) {
         FailedTU ftu;
@@ -88,8 +92,6 @@ void LshazAction::EndSourceFileAction() {
         failedTUs_.push_back(std::move(ftu));
     }
 }
-
-// --- Factory ---
 
 LshazActionFactory::LshazActionFactory(
     const Config &cfg, std::vector<Diagnostic> &diagnostics,
@@ -100,7 +102,7 @@ LshazActionFactory::LshazActionFactory(
 std::unique_ptr<clang::FrontendAction> LshazActionFactory::create() {
     return std::make_unique<LshazAction>(
         config_, diagnostics_, escapeSummary_, threadRoles_, stripedArrays_,
-        coverage_, profileHotFuncs_, failedTUs_);
+        coverage_, profileHotFuncs_, failedTUs_, &deps_);
 }
 
 } // namespace lshaz
