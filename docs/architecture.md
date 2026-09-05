@@ -248,6 +248,12 @@ diagnostic's escalation trace, refinement is visible, never silent.
 
 In execution order:
 
+The order below is load-bearing and is not declared anywhere in code: it is
+the call order inside `ScanPipeline::run`. A stage that reads a verdict an
+earlier stage sets must stay after it, and several do. When adding one, say
+here what it consumes and what it produces, because that is the only place the
+dependencies are written down.
+
 1. **Canonical sort** of merged diagnostics (see Determinism).
 2. **FL040 reduce**. Sums per-TU write and loop-write counts per
    `(var, type)` and grades severity on the global aggregate (write
@@ -257,7 +263,24 @@ In execution order:
    suppressed. Runs before dedup so all duplicate instances are reclassified
    consistently. Proven-tier findings and diagnostics without `type_name` are
    never suppressed.
-4. **Deduplication**. Headers included by many TUs produce one finding per
+4. **Sharing-route verdict** (`applySharingRouteVerdict`). Demotes
+   co-located fields that no route actually shares. Reads the merged escape
+   summary, so it must follow the merge and precede dedup for the same reason
+   escape suppression does.
+5. **Thread-role attribution** (`computeThreadRoles`, then
+   `applyThreadRoleEscalation`). BFS over the merged call graph from `main`
+   and the thread entries; escalates findings whose writers hold provably
+   disjoint roles. Needs the whole graph, so it cannot run per TU.
+6. **Global hotness** (`inferGlobalHotness`). Confirms or drops the
+   `Candidate` marks the map phase left. Withdrawable hot-path findings die
+   here, so it must precede anything that grades on severity.
+7. **Allocator vocabulary closure** (`inferAllocatorVocabulary`,
+   `inferLockVocabulary`, `inferMappingVocabulary`). Runs in the prepass
+   reduce, before any rule, since pass two consumes the derived names.
+8. **Affinity and paging respect** (`detectAffinityManagement` /
+   `applyAffinityRespect`, `detectPagingManagement` / `applyPagingRespect`).
+   Each detect/apply pair must stay adjacent and in that order.
+9. **Deduplication**. Headers included by many TUs produce one finding per
    TU. Keys: `(ruleID, file, line)` for struct-level rules;
    `(ruleID, var, type)` for FL040 (the same global appears at different
    header paths); `(ruleID, functionName, line)` for function rules. The
@@ -267,7 +290,7 @@ In execution order:
    annotated with the TU count. Because FL002 encodes write evidence into
    confidence, the TU that observes the writers decides the canonical
    verdict.
-5. **Interaction synthesis (FL091)**, joins diagnostics sharing an entity
+10. **Interaction synthesis (FL091)**, joins diagnostics sharing an entity
    key: `file:line`, `type:` + type name, or `fn:` + function. Eligible
    pairs/triples per the `InteractionEligibilityMatrix` produce compound
    findings; severity derives from the (post-demotion) parents. One compound
@@ -277,18 +300,21 @@ In execution order:
    run earlier, between cross-TU escape suppression and dedup, so every
    duplicate instance is escalated consistently before the canonical
    survivor is chosen.
-6. **Precision budget**. Per-rule governance: max emissions per TU,
+11. **Unapplied-mitigation synthesis** (FL092) and **precision budget**. Per-rule governance: max emissions per TU,
    confidence floors, severity caps.
-7. **Calibration suppression**, with `--calibration-store`, findings whose
+12. **Calibration suppression**, then **PMU trace feedback**, with `--calibration-store`, findings whose
    10-dimension structural feature vector falls within Euclidean radius 0.25
    of a pattern with ≥3 experimentally refuted instances are suppressed.
    Safety rail: Critical/High findings at Proven tier are never suppressed. A
    store path that exists but cannot be parsed is a hard error (exit 3),
    scanning with silently disabled calibration would misreport.
-8. **Header fingerprint (B001)**. Aggregates `FailedTU` error text; a header
+13. **Mechanism-claim invariant gate**. Clamps any finding outranking the
+    claims it established. Runs last among grading stages by construction, so
+    a stage added after it can reintroduce the violation it exists to catch.
+14. **Header fingerprint (B001)**. Aggregates `FailedTU` error text; a header
    missing in ≥3 TUs becomes a single B001 diagnostic naming the header,
    converting systematic build breakage into one actionable finding.
-9. **Filter and final sort**. Suppressed findings drop; output orders by
+15. **Filter and final sort**. Suppressed findings drop; output orders by
    severity (Critical first), then file, then line, with a total-order
    content tiebreaker.
 
