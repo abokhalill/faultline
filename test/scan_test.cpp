@@ -628,6 +628,69 @@ void testTUCacheAgreesWithColdScan(const std::string &bin) {
     fs::remove_all(root);
 }
 
+// The prepass forks, so a fact added to ThreadRoleSummary and to merge() but
+// not to the serializer is discarded at the shard boundary. That failed
+// silently: correct at one job, empty in parallel, and the single-TU fixture
+// that verified the feature took the sequential path and never noticed.
+//
+// Asserting the whole vocabulary line is identical across job counts catches
+// the next one by construction, whatever kind of fact it is. Needs several
+// TUs, or there is nothing to shard.
+void testVocabularyIsJobsInvariant(const std::string &bin) {
+    std::cerr << "test: derived vocabulary is identical across job counts\n";
+    auto root = fs::temp_directory_path() /
+                ("lshaz_vjobs_" + std::to_string(getpid()));
+    fs::create_directories(root);
+
+    { std::ofstream f(root / "lk.h");
+      f << "#pragma once\n#include <stdlib.h>\n"
+           "typedef struct { volatile long *lock; } mtx_t;\n"
+           "void spin_acq(mtx_t *m);\nvoid spin_rel(mtx_t *m);\n"
+           "void *wrap_alloc(size_t n);\nvoid wrap_free(void *p);\n"; }
+    { std::ofstream f(root / "lk.c");
+      f << "#include \"lk.h\"\n"
+           "void spin_acq(mtx_t *m) { for(;;){ if(__sync_bool_compare_and_swap("
+           "m->lock,0,1)) return; } }\n"
+           "void spin_rel(mtx_t *m) { __sync_bool_compare_and_swap("
+           "m->lock,1,0); }\n"; }
+    { std::ofstream f(root / "al.c");
+      f << "#include \"lk.h\"\n"
+           "void *wrap_alloc(size_t n) { return malloc(n); }\n"
+           "void wrap_free(void *p) { free(p); }\n"; }
+    { std::ofstream f(root / "use.c");
+      f << "#include \"lk.h\"\nstatic mtx_t g;\n"
+           "void run(void){ for(int i=0;i<100000;++i){ spin_acq(&g);"
+           " void*p=wrap_alloc(8); wrap_free(p); spin_rel(&g); } }\n"
+           "int main(void){ run(); return 0; }\n"; }
+    { std::ofstream f(root / "compile_commands.json");
+      f << "[";
+      const char *srcs[] = {"lk.c", "al.c", "use.c"};
+      for (int i = 0; i < 3; ++i)
+          f << (i ? "," : "") << "{\"directory\":\"" << root.string()
+            << "\",\"command\":\"cc -c " << srcs[i] << "\",\"file\":\""
+            << (root / srcs[i]).string() << "\"}";
+      f << "]\n"; }
+
+    auto vocabLine = [&](const std::string &jobs) {
+        auto r = run(bin + " scan " + root.string() + " --no-ir --jobs " + jobs);
+        size_t i = r.err.find("name(s) derived");
+        if (i == std::string::npos) return std::string("<absent>");
+        size_t b = r.err.rfind("prescanned clean, ", i);
+        return b == std::string::npos ? std::string("<absent>")
+                                      : r.err.substr(b, i - b);
+    };
+    const std::string one = vocabLine("1");
+    check(one != "<absent>", "the vocabulary line is reported");
+    check(one == vocabLine("4"),
+          "derived vocabulary survives the shard boundary");
+    // Deliberately not named mtx_lock: that is C11's own spelling and would
+    // match the seed set, proving nothing about the derivation.
+    check(one.find("1 lock") != std::string::npos,
+          "the spin lock pair is derived from its atomic, not from a name");
+
+    fs::remove_all(root);
+}
+
 // ===== Compile DB resolution tests =====
 
 // init used to print "no recognized build system found" and then "ready. Run:
@@ -1191,6 +1254,7 @@ int main() {
     testEveryConfigFieldIsRead();
     testCrossThreadFreeConjunct(bin);
     testTUCacheAgreesWithColdScan(bin);
+    testVocabularyIsJobsInvariant(bin);
     testJsonOutputConfigKey(bin, fixture);
     testInitWithoutBuildSystem(bin);
     testCMakeGeneration(bin, fixture);
