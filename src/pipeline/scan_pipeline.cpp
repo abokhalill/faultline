@@ -49,6 +49,8 @@
 
 #include <csignal>
 #include <fnmatch.h>
+#include <charconv>
+#include <cstdio>
 #include <cstring>
 #include <new>
 #include <sys/resource.h>
@@ -338,7 +340,18 @@ std::string serializeShardResult(int exitCode,
         buf += "{\"ruleID\":\"" + esc(d.ruleID) + "\"";
         buf += ",\"title\":\"" + esc(d.title) + "\"";
         buf += ",\"severity\":\"" + std::string(severityToString(d.severity)) + "\"";
-        buf += ",\"confidence\":" + std::to_string(d.confidence);
+        // to_chars, not to_string and not snprintf: both format through the
+        // C locale and would emit "0,72" under LC_NUMERIC=de_DE, silently
+        // corrupting every confidence across the fork. to_chars is
+        // locale-independent by specification and round-trips exactly, where
+        // %f also truncated to six decimals.
+        {
+            char cbuf[40];
+            auto [end, ec] = std::to_chars(cbuf, cbuf + sizeof(cbuf),
+                                           d.confidence);
+            buf += ",\"confidence\":";
+            buf.append(cbuf, ec == std::errc() ? end : cbuf + 1);
+        }
         buf += ",\"evidenceTier\":\"" + std::string(evidenceTierName(d.evidenceTier)) + "\"";
         buf += ",\"suppressed\":" + std::string(d.suppressed ? "true" : "false");
         buf += ",\"location\":{\"file\":\"" + esc(d.location.file) + "\"";
@@ -616,6 +629,18 @@ static void skipValue(const std::string &s, size_t &i) {
         ++i;
         int depth = 1;
         while (i < s.size() && depth > 0) {
+            // String contents are not structure. A ']' inside a string ended
+            // the skip early and left the cursor mid-value, which desynchronizes
+            // every key after it in an unknown array.
+            if (s[i] == '"') {
+                ++i;
+                while (i < s.size() && s[i] != '"') {
+                    if (s[i] == '\\') ++i;
+                    ++i;
+                }
+                if (i < s.size()) ++i;
+                continue;
+            }
             if (s[i] == open) ++depth;
             else if (s[i] == close) --depth;
             ++i;
@@ -632,9 +657,16 @@ static bool expect(const std::string &s, size_t &i, char c) {
     return false;
 }
 
+// Always advances when input remains. Returning without consuming let a
+// non-string where a string was expected spin a caller's loop forever, and the
+// parent has no timeout to escape it with. Truncation was already safe; this
+// covers malformed-but-complete records, which is what a version skew across
+// the TU cache produces.
+static void skipValue(const std::string &s, size_t &i);
 static std::string parseStr(const std::string &s, size_t &i) {
     skipWS(s, i);
-    if (i >= s.size() || s[i] != '"') return {};
+    if (i >= s.size()) return {};
+    if (s[i] != '"') { skipValue(s, i); return {}; }
     ++i;
     std::string out;
     while (i < s.size() && s[i] != '"') {
@@ -671,8 +703,19 @@ static double parseNum(const std::string &s, size_t &i) {
         if (i < s.size() && (s[i] == '+' || s[i] == '-')) ++i;
         while (i < s.size() && s[i] >= '0' && s[i] <= '9') ++i;
     }
-    if (start == i) return 0.0;
-    return std::stod(s.substr(start, i - start));
+    // No digits consumed leaves the cursor where it was, which spins any loop
+    // that called us. Advance past whatever it is instead.
+    if (start == i) {
+        skipValue(s, i);
+        return 0.0;
+    }
+    // from_chars for the same reason as to_chars on the way out: stod parses
+    // through LC_NUMERIC and stops at the '.' under a comma locale, returning
+    // 0 for every confidence in the record.
+    double v = 0.0;
+    auto [ptr, ec] = std::from_chars(s.data() + start, s.data() + i, v);
+    (void)ptr;
+    return ec == std::errc() ? v : 0.0;
 }
 
 static bool parseBool(const std::string &s, size_t &i) {
@@ -2687,14 +2730,12 @@ ScanResult ScanPipeline::run(
                 std::error_code ec;
                 llvm::raw_fd_ostream out(std::string(ipcPath), ec);
                 if (ec) {
-                    // Exiting 0 here would hand the parent an absent IPC file
-                    // indistinguishable from a shard that legitimately found
-                    // nothing. Distinct code so the parent can say why.
                     llvm::errs() << "lshaz: shard " << j
                                  << " could not write IPC to " << ipcPath
                                  << ": " << ec.message() << "\n";
                     _exit(kShardIPCWriteFailed);
                 }
+
 
                 int childRet = 0;
                 unsigned tusDone = 0;
