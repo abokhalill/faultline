@@ -2402,12 +2402,20 @@ ScanResult ScanPipeline::run(
             std::vector<std::pair<pid_t, std::string>> kids;
             for (unsigned j = 0; j < jobs; ++j) {
                 if (vshards[j].empty()) continue;
-                llvm::SmallString<128> tmpDir;
-                llvm::sys::path::system_temp_directory(true, tmpDir);
-                llvm::SmallString<128> p(tmpDir);
-                llvm::sys::path::append(p,
-                    "lshaz-vocab-" + std::to_string(j) + "-" +
-                    std::to_string(getpid()) + ".json");
+                // Created here with O_EXCL and a random component, and the
+                // descriptor is inherited rather than reopened by name. The
+                // old path was predictable and opened with a plain truncating
+                // stream, so anyone on a shared build host could pre-place a
+                // symlink and have the scan clobber its target.
+                int ipcFD = -1;
+                llvm::SmallString<128> p;
+                if (llvm::sys::fs::createTemporaryFile("lshaz-vocab", "json",
+                                                       ipcFD, p)) {
+                    for (const auto &src : vshards[j])
+                        if (prescanOne(src, vocabFacts))
+                            ++parsed;
+                    continue;
+                }
 
                 pid_t pid = fork();
                 if (pid < 0) {
@@ -2420,9 +2428,7 @@ ScanResult ScanPipeline::run(
                 }
                 if (pid == 0) {
                     llvm::CrashRecoveryContext::Enable();
-                    std::error_code ec;
-                    llvm::raw_fd_ostream o(std::string(p), ec);
-                    if (ec) _exit(kShardIPCWriteFailed);
+                    llvm::raw_fd_ostream o(ipcFD, /*shouldClose=*/true);
                     for (const auto &src : vshards[j]) {
                         ThreadRoleSummary one;
                         int rc = prescanOne(src, one) ? 0 : 1;
@@ -2433,6 +2439,7 @@ ScanResult ScanPipeline::run(
                     o.close();
                     _exit(0);
                 }
+                ::close(ipcFD);   // the child owns it now
                 kids.push_back({pid, std::string(p)});
             }
 
@@ -2651,13 +2658,24 @@ ScanResult ScanPipeline::run(
         for (unsigned j = 0; j < jobs; ++j) {
             if (shards[j].empty()) continue;
 
-            // Unique temp file for this shard.
-            llvm::SmallString<128> tmpDir;
-            llvm::sys::path::system_temp_directory(true, tmpDir);
-            llvm::SmallString<128> ipcPath(tmpDir);
-            llvm::sys::path::append(ipcPath,
-                "lshaz-shard-" + std::to_string(j) + "-" +
-                std::to_string(getpid()) + ".json");
+            // O_EXCL with a random component, and the child inherits the
+            // descriptor rather than reopening by name. The predictable path
+            // plus a truncating open was a symlink clobber on a shared host.
+            int ipcFD = -1;
+            llvm::SmallString<128> ipcPath;
+            if (auto ec = llvm::sys::fs::createTemporaryFile(
+                    "lshaz-shard", "json", ipcFD, ipcPath)) {
+                llvm::errs() << "lshaz: could not create IPC file for shard "
+                             << j << ": " << ec.message() << "\n";
+                for (const auto &src : shards[j]) {
+                    FailedTU ftu;
+                    ftu.file = src;
+                    ftu.error = "IPC file creation failed: " + ec.message();
+                    failedTUsDetailed.push_back(ftu);
+                }
+                toolRet = 1;
+                continue;
+            }
 
             pid_t pid = fork();
             if (pid < 0) {
@@ -2727,15 +2745,7 @@ ScanResult ScanPipeline::run(
                 // had already finished, so one crash could lose an entire shard.
                 // Records are newline-delimited so a torn tail is discardable
                 // and the parent can name exactly which TUs went unreached.
-                std::error_code ec;
-                llvm::raw_fd_ostream out(std::string(ipcPath), ec);
-                if (ec) {
-                    llvm::errs() << "lshaz: shard " << j
-                                 << " could not write IPC to " << ipcPath
-                                 << ": " << ec.message() << "\n";
-                    _exit(kShardIPCWriteFailed);
-                }
-
+                llvm::raw_fd_ostream out(ipcFD, /*shouldClose=*/true);
 
                 int childRet = 0;
                 unsigned tusDone = 0;
@@ -2791,6 +2801,7 @@ ScanResult ScanPipeline::run(
             }
 
             // --- Parent ---
+            ::close(ipcFD);   // the child owns it now
             children.push_back({pid, std::string(ipcPath), j});
         }
 
