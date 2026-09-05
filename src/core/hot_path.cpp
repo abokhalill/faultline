@@ -309,6 +309,10 @@ inferGlobalHotness(const ThreadRoleSummary &facts,
     {
         std::vector<std::string> q;
         for (const auto &e : facts.threadEntries) { dist[e] = 0; q.push_back(e); }
+        // Same seed set as the depth pass above. Omitting main left every
+        // function in a thread-free program at the unmeasured default, so the
+        // spreading discount never applied there.
+        if (!dist.count("main")) { dist["main"] = 0; q.push_back("main"); }
         for (const auto &p : mainPatterns)
             if (!dist.count(p)) { dist[p] = 0; q.push_back(p); }
         for (size_t head = 0; head < q.size(); ++head) {
