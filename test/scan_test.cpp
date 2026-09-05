@@ -586,6 +586,48 @@ void testCrossThreadFreeConjunct(const std::string &bin) {
     fs::remove_all(root);
 }
 
+// A cache that returns anything other than what a cold scan returns is worse
+// than no cache, so the contract is equality, not hit rate. The header arm is
+// the one that matters: keying on the TU alone would serve a stale record for
+// every dependent TU after a header edit, and nothing downstream would notice.
+void testTUCacheAgreesWithColdScan(const std::string &bin) {
+    std::cerr << "test: cached scan matches cold scan, and headers invalidate\n";
+    auto root = fs::temp_directory_path() /
+                ("lshaz_cache_" + std::to_string(getpid()));
+    auto cache = root / "cache";
+    fs::create_directories(root);
+
+    { std::ofstream f(root / "h.h");
+      f << "#pragma once\n#include <stdlib.h>\n"
+           "static inline void *wrap(size_t n) { return malloc(n); }\n"; }
+    { std::ofstream f(root / "a.c");
+      f << "#include \"h.h\"\n"
+           "void run(void) { for (int i = 0; i < 1000; ++i)"
+           " { void *p = wrap(8); (void)p; } }\n"
+           "int main(void) { run(); return 0; }\n"; }
+    { std::ofstream f(root / "compile_commands.json");
+      f << "[{\"directory\":\"" << root.string()
+        << "\",\"command\":\"cc -c a.c\",\"file\":\""
+        << (root / "a.c").string() << "\"}]\n"; }
+
+    const std::string args = " scan " + root.string() + " --no-ir --cache-dir " +
+                             cache.string();
+    auto cold = run(bin + args);
+    check(contains(cold.err, "0 from cache"), "first scan populates nothing");
+    auto warm = run(bin + args);
+    check(contains(warm.err, "1 from cache"), "second scan is served");
+    check(cold.out == warm.out, "cached scan output matches the cold scan");
+
+    { std::ofstream f(root / "h.h");
+      f << "#pragma once\n#include <stdlib.h>\n"
+           "static inline void *wrap(size_t n) { return calloc(1, n); }\n"; }
+    auto edited = run(bin + args);
+    check(contains(edited.err, "0 from cache"),
+          "editing a header the TU includes invalidates its entry");
+
+    fs::remove_all(root);
+}
+
 // ===== Compile DB resolution tests =====
 
 // init used to print "no recognized build system found" and then "ready. Run:
@@ -1148,6 +1190,7 @@ int main() {
     // Compile DB resolution.
     testEveryConfigFieldIsRead();
     testCrossThreadFreeConjunct(bin);
+    testTUCacheAgreesWithColdScan(bin);
     testJsonOutputConfigKey(bin, fixture);
     testInitWithoutBuildSystem(bin);
     testCMakeGeneration(bin, fixture);

@@ -69,6 +69,8 @@ struct ScanArgs {
     std::vector<std::string> excludeFiles;
     bool noIR = false;
     bool noIRCache = false;
+    bool noCache = false;
+    std::string cacheDir;
     bool watch = false;
     unsigned watchInterval = 2;
     bool trustBuildSystem = false;
@@ -110,6 +112,8 @@ void printScanUsage() {
         << "      --ir-jobs <N>        Max parallel IR jobs (default: nproc)\n"
         << "      --ir-batch-size <N>  TUs per IR shard (default: 1)\n"
         << "      --no-ir-cache        Disable incremental IR cache\n"
+        << "      --cache-dir <path>   Reuse per-TU results from <path> across scans\n"
+        << "      --no-cache           Ignore --cache-dir for this run\n"
         << "      --perf-profile <path> Path to perf profile for hotness guidance\n"
         << "      --allocator <name>   Linked allocator (tcmalloc|jemalloc|mimalloc)\n"
         << "      --calibration-store <p> Calibration feedback store (JSON)\n"
@@ -191,6 +195,8 @@ bool parseScanArgs(int argc, const char **argv, ScanArgs &args) {
         if (consumeArg(i, argc, argv, "--pmu-priors", args.pmuPriors)) continue;
         if (std::strcmp(argv[i], "--no-ir") == 0) { args.noIR = true; continue; }
         if (std::strcmp(argv[i], "--no-ir-cache") == 0) { args.noIRCache = true; continue; }
+        if (std::strcmp(argv[i], "--no-cache") == 0) { args.noCache = true; continue; }
+        if (consumeArg(i, argc, argv, "--cache-dir", args.cacheDir)) continue;
         if (std::strcmp(argv[i], "--watch") == 0 || std::strcmp(argv[i], "-w") == 0) { args.watch = true; continue; }
         if (std::strcmp(argv[i], "--include-vendored") == 0) {
             args.includeVendored = true;
@@ -329,6 +335,7 @@ int runScanCommand(int argc, const char **argv) {
             : Config::loadFromFile(args.configPath);
         if (!args.allocator.empty())
             request.config.linkedAllocator = args.allocator;
+        request.config.cacheDir = args.noCache ? std::string() : args.cacheDir;
         if (!applyTargetArch(request.config, args.targetArch))
             return 3;
         request.config.minSeverity = parseSeverity(args.minSeverity);
@@ -417,6 +424,9 @@ int runScanCommand(int argc, const char **argv) {
 
     if (!args.allocator.empty())
         cfg.linkedAllocator = args.allocator;
+    // Opt-in by name rather than a default location: a cache that nobody
+    // asked for and nobody can see is the shape a stale result hides in.
+    cfg.cacheDir = args.noCache ? std::string() : args.cacheDir;
     cfg.minSeverity = parseSeverity(args.minSeverity);
     applyRuleFilter(cfg, args.enabledRules);
 

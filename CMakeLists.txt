@@ -142,6 +142,7 @@ set(LSHAZ_SOURCES
     src/pipeline/compile_db.cpp
     src/pipeline/repo.cpp
     src/pipeline/filter.cpp
+    src/pipeline/tu_cache.cpp
     src/cli/scan.cpp
     src/cli/explain.cpp
     src/cli/init.cpp
@@ -193,6 +194,7 @@ target_link_libraries(output_test PRIVATE ${LSHAZ_LLVM_LIBS})
 add_executable(pipeline_test
     test/pipeline_test.cpp
     src/pipeline/filter.cpp
+    src/pipeline/tu_cache.cpp
     src/pipeline/compile_db.cpp
     src/pipeline/repo.cpp
     src/analysis/thread_role.cpp

@@ -3,6 +3,7 @@
 #include "lshaz/pipeline/abs_path_db.h"
 #include "lshaz/pipeline/compile_db.h"
 #include "lshaz/pipeline/filter.h"
+#include "lshaz/pipeline/tu_cache.h"
 
 #include "lshaz/analysis/action.h"
 #include "lshaz/analysis/vocabulary.h"
@@ -2238,8 +2239,24 @@ ScanResult ScanPipeline::run(
         unsigned parsed = 0;
         // A TU that crashes the prepass is skipped, not fatal: the vocabulary
         // is then smaller and the conjuncts fail closed.
+        // The prepass reads no config beyond the compile command, so its
+        // entries stay valid across rule and threshold edits that invalidate
+        // pass two.
+        TUCache vocabCache(request.config.cacheDir.empty()
+                               ? std::string()
+                               : request.config.cacheDir + "/vocab");
+        auto cacheKey = [&](const std::string &src) {
+            auto cmds = compDB.getCompileCommands(src);
+            return TUCache::keyFor(src,
+                                   cmds.empty()
+                                       ? std::vector<std::string>()
+                                       : cmds.front().CommandLine,
+                                   "vocab");
+        };
         auto prescanOne = [&](const std::string &src,
                               ThreadRoleSummary &into) -> bool {
+            const std::string key = vocabCache.enabled() ? cacheKey(src)
+                                                         : std::string();
             VocabularyActionFactory vf;
             llvm::CrashRecoveryContext CRC;
             int rc = 1;
@@ -2250,12 +2267,36 @@ ScanResult ScanPipeline::run(
                 addResourceDirAdjuster(tool, compDB, src);
                 rc = tool.run(&vf);
             });
+            const bool clean = ok && rc == 0;
+            // Only a clean parse is cached. Storing a crash would replay it
+            // forever without ever retrying the TU.
+            if (vocabCache.enabled() && clean && !vf.deps().empty())
+                vocabCache.store(key, vf.deps(),
+                                 serializeShardResult(0, {}, {}, {}, vf.facts(),
+                                                      {}, {}, src));
             into.merge(vf.facts());
-            return ok && rc == 0;
+            return clean;
         };
 
-        if (jobs <= 1 || sources.size() <= 1) {
-            for (const auto &src : sources)
+        // Served from cache in the parent, before any fork. Children cannot
+        // report their hit counts back without extending the protocol, and a
+        // hit costs a file read, so paying it here also shrinks the shards.
+        std::vector<std::string> toParse;
+        for (const auto &src : sources) {
+            std::string rec;
+            ShardIPC r;
+            if (vocabCache.enabled() &&
+                vocabCache.lookup(cacheKey(src), rec) &&
+                deserializeShardResult(rec, r)) {
+                vocabFacts.merge(r.threadRoles);
+                ++parsed;
+                continue;
+            }
+            toParse.push_back(src);
+        }
+
+        if (jobs <= 1 || toParse.size() <= 1) {
+            for (const auto &src : toParse)
                 if (prescanOne(src, vocabFacts))
                     ++parsed;
         } else {
@@ -2263,8 +2304,8 @@ ScanResult ScanPipeline::run(
             // same reason: ClangTool's global state is not thread-safe. On
             // rocksdb the sequential prepass dominated the scan.
             std::vector<std::vector<std::string>> vshards(jobs);
-            for (size_t i = 0; i < sources.size(); ++i)
-                vshards[i % jobs].push_back(sources[i]);
+            for (size_t i = 0; i < toParse.size(); ++i)
+                vshards[i % jobs].push_back(toParse[i]);
 
             std::vector<std::pair<pid_t, std::string>> kids;
             for (unsigned j = 0; j < jobs; ++j) {
@@ -2333,7 +2374,11 @@ ScanResult ScanPipeline::run(
                std::to_string(parsed) + "/" + std::to_string(sources.size()) +
                " TU(s) prescanned clean, " + std::to_string(av.size()) +
                " allocator and " + std::to_string(fv.size()) +
-               " release name(s) derived");
+               " release name(s) derived" +
+               (vocabCache.enabled()
+                    ? ", " + std::to_string(sources.size() - toParse.size()) +
+                          " from cache"
+                    : std::string()));
 
         // An undecidable wrapper and one that decided "no" are otherwise the
         // same silence.

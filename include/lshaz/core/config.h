@@ -133,6 +133,10 @@ struct Config {
     std::set<std::string> derivedAllocatorNames;
     std::set<std::string> derivedFreeNames;
 
+    // Per-TU result cache directory. Empty disables it. Not YAML-mapped: a
+    // cache is a property of the machine running the scan, not of the project.
+    std::string cacheDir;
+
     // Lock wrappers (fnmatch) added to FL012's POSIX set. nginx reaches its
     // mutexes through ngx_shmtx_lock at 48 sites and pthread_mutex_lock at 2,
     // so without these the rule sees 4% of the locks in that tree. Acquire and

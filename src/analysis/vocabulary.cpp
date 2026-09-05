@@ -277,10 +277,32 @@ void collectAllocOwnership(clang::ASTContext &Ctx, ThreadRoleSummary &out) {
     v.TraverseDecl(Ctx.getTranslationUnitDecl());
 }
 
+void collectReadFiles(clang::CompilerInstance &CI,
+                      std::vector<std::string> &out) {
+    const auto &SM = CI.getSourceManager();
+    std::set<std::string> uniq;
+    for (auto it = SM.fileinfo_begin(); it != SM.fileinfo_end(); ++it) {
+        llvm::StringRef n = it->first.getName();
+        if (!n.empty())
+            uniq.insert(n.str());
+    }
+    // The main file is not always among the fileinfos, and a cache entry that
+    // does not depend on its own source is the worst possible entry.
+    if (auto id = SM.getMainFileID(); id.isValid())
+        if (const auto *fe = SM.getFileEntryForID(id))
+            uniq.insert(fe->getName().str());
+    out.assign(uniq.begin(), uniq.end());
+}
+
 std::unique_ptr<clang::ASTConsumer>
 VocabularyAction::CreateASTConsumer(clang::CompilerInstance & /*CI*/,
                                     llvm::StringRef /*file*/) {
     return std::make_unique<VocabularyConsumer>(out_);
+}
+
+void VocabularyAction::EndSourceFileAction() {
+    if (deps_)
+        collectReadFiles(getCompilerInstance(), *deps_);
 }
 
 } // namespace lshaz
