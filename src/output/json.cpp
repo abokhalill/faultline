@@ -148,6 +148,7 @@ std::string JSONOutputFormatter::format(const std::vector<Diagnostic> &diagnosti
     emitNames("derivedLocks", meta.derivedLocks);
     emitNames("derivedUnlocks", meta.derivedUnlocks);
     emitNames("derivedMappings", meta.derivedMappings);
+    emitNames("derivedAtomicTypes", meta.derivedAtomicTypes);
     emitNames("undecidedWrappers", meta.undecidedWrappers);
     os << "    \"compilers\": [";
     for (size_t i = 0; i < meta.compilers.size(); ++i) {

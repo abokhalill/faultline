@@ -454,7 +454,9 @@ std::string serializeShardResult(int exitCode,
     emitNameSets(threadRoles.allocSitesByCallee);
     buf += "},\"freeSites\":{";
     emitNameSets(threadRoles.freeSitesByCallee);
-    buf += "},\"strictParFwd\":{";
+    buf += "},\"atomicTypes\":[";
+    emitNames(threadRoles.atomicTypes);
+    buf += "],\"strictParFwd\":{";
     emitNameSets(threadRoles.strictParamForwards);
     buf += "},\"spinAcq\":{";
     emitNameSets(threadRoles.spinAcquireOfType);
@@ -914,6 +916,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.freeSitesByCallee);
                 else if (tk == "overridden")
                     parseStrArray(out.threadRoles.overriddenVirtuals);
+                else if (tk == "atomicTypes")
+                    parseStrArray(out.threadRoles.atomicTypes);
                 else if (tk == "strictParFwd")
                     parseNameSets(out.threadRoles.strictParamForwards);
                 else if (tk == "spinAcq")
@@ -2407,6 +2411,13 @@ ScanResult ScanPipeline::run(
         result.metadata.derivedLocks.assign(lv.begin(), lv.end());
         result.metadata.derivedUnlocks.assign(uv.begin(), uv.end());
         result.metadata.derivedMappings.assign(mv.begin(), mv.end());
+        // Appended to the configured list so every consumer picks them up:
+        // CacheLineMap, EscapeAnalysis and the four false-sharing rules all
+        // read atomicTypeNames already and need no change.
+        for (const auto &t : vocabFacts.atomicTypes)
+            analysisConfig.atomicTypeNames.push_back(t);
+        result.metadata.derivedAtomicTypes.assign(vocabFacts.atomicTypes.begin(),
+                                                  vocabFacts.atomicTypes.end());
 
         analysisConfig.derivedAllocatorNames = av;
         analysisConfig.derivedFreeNames = fv;

@@ -97,6 +97,14 @@ struct ThreadRoleSummary {
     std::map<std::string, std::set<std::string>> spinAcquireOfType;
     std::map<std::string, std::set<std::string>> spinReleaseOfType;
 
+    // Types an atomic read-modify-write was performed on. A codebase wrapping
+    // its atomics in a plain typedef (atomic_t, spinlock_t, ngx_atomic_t) has
+    // no _Atomic and no std::atomic anywhere, so the fields simply do not
+    // exist as far as atomic detection is concerned, and the false-sharing
+    // rules read them as ordinary members. Being the operand of a lock-prefixed
+    // RMW is what makes a type atomic; the spelling never was.
+    std::set<std::string> atomicTypes;
+
     // A forward to a name absent here is a boundary the closure cannot cross,
     // not evidence that the wrapper does not allocate. Builtins are tracked
     // separately: memcpy has no body in any scan and never will, so counting
@@ -157,6 +165,7 @@ struct ThreadRoleSummary {
             spinAcquireOfType[t].insert(fns.begin(), fns.end());
         for (const auto &[t, fns] : other.spinReleaseOfType)
             spinReleaseOfType[t].insert(fns.begin(), fns.end());
+        atomicTypes.insert(other.atomicTypes.begin(), other.atomicTypes.end());
         definedFunctions.insert(other.definedFunctions.begin(),
                                 other.definedFunctions.end());
         builtinCallees.insert(other.builtinCallees.begin(),

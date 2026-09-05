@@ -32,6 +32,7 @@ struct ExecutionMetadata {
     std::vector<std::string> derivedLocks;
     std::vector<std::string> derivedUnlocks;
     std::vector<std::string> derivedMappings;
+    std::vector<std::string> derivedAtomicTypes;
     std::vector<std::string> undecidedWrappers;
 
     unsigned failedTUCount = 0;

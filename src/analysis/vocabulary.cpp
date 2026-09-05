@@ -363,6 +363,12 @@ private:
     // owner. ngx_shmtx_trylock has no loop and is still an acquire, and grading
     // it as a release decrements FL012's nesting depth on a try.
     void noteSpin(const clang::Expr *operand, const clang::CallExpr *E) {
+        // The operand's own type, independent of whether it roots at a
+        // parameter: an atomic global is still an atomic.
+        if (operand)
+            if (std::string a = sugaredTypeName(pointee(operand->getType()));
+                !a.empty())
+                out_.atomicTypes.insert(a);
         std::string t = paramRootType(operand);
         if (t.empty())
             return;
@@ -394,6 +400,22 @@ private:
         if (!callee || !callee->getIdentifier())
             return {};
         return threadRoleNodeName(callee, ctx_);
+    }
+
+    // The written name, not the canonical one. ngx_atomic_t canonicalizes to
+    // unsigned long, and feeding that to the false-sharing rules would mark
+    // every unsigned long field in the program atomic. Only a typedef or a
+    // record qualifies, so a bare builtin operand contributes nothing.
+    static std::string sugaredTypeName(clang::QualType QT) {
+        if (QT.isNull())
+            return {};
+        QT = QT.getLocalUnqualifiedType();
+        if (const auto *TT = QT->getAs<clang::TypedefType>())
+            return TT->getDecl()->getName().str();
+        if (const auto *RD = QT->getAsRecordDecl();
+            RD && !RD->getName().empty())
+            return RD->getCanonicalDecl()->getQualifiedNameAsString();
+        return {};
     }
 
     std::string typeKey(clang::QualType QT) const {
