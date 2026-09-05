@@ -42,6 +42,31 @@ bool diagnosticContentLess(const Diagnostic &a, const Diagnostic &b) {
         return a.structuralEvidence < b.structuralEvidence;
     if (a.escalations != b.escalations)
         return a.escalations < b.escalations;
-    return a.mitigation < b.mitigation;
+    if (a.mitigation != b.mitigation)
+        return a.mitigation < b.mitigation;
+    // Every sort has to bottom out here or shard arrival order leaks into the
+    // output. These three were missing, so two diagnostics differing only in
+    // their reasoning, hotness grade or claim set compared equal and std::sort
+    // left them in the order the shards happened to return. Reachability was
+    // never the argument: an invariant nothing enforces is one that stops
+    // holding without anyone noticing.
+    if (a.hardwareReasoning != b.hardwareReasoning)
+        return a.hardwareReasoning < b.hardwareReasoning;
+    if (a.hotness != b.hotness)
+        return a.hotness < b.hotness;
+    if (a.mechanismClaims.size() != b.mechanismClaims.size())
+        return a.mechanismClaims.size() < b.mechanismClaims.size();
+    for (size_t i = 0; i < a.mechanismClaims.size(); ++i) {
+        const auto &x = a.mechanismClaims[i], &y = b.mechanismClaims[i];
+        if (x.supports != y.supports)
+            return static_cast<uint8_t>(x.supports) <
+                   static_cast<uint8_t>(y.supports);
+        if (x.established != y.established) return x.established < y.established;
+        if (x.gating != y.gating)           return x.gating < y.gating;
+        if (x.effect != y.effect)           return x.effect < y.effect;
+        if (x.precondition != y.precondition)
+            return x.precondition < y.precondition;
+    }
+    return false;
 }
 } // namespace lshaz
