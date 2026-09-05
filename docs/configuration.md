@@ -274,6 +274,22 @@ generates headers (`configure_file()`, `custom_target()`) that TUs include.
 Make projects require a real build under `bear`, so dependencies must be
 installed.
 
+### `init` runs the project's own build commands
+
+Generating a compilation database means configuring and, for Make projects,
+building. `init` therefore executes commands from the project it is pointed at:
+the configure script, the generator, and the compiler invocations `bear`
+observes. `scan` then re-executes the compiler command recorded for each TU.
+This is inherent to `compile_commands.json` and is how every tool built on it
+works, but it is worth stating plainly, because it means **`lshaz init` on an
+untrusted repository is equivalent to building that repository.**
+
+The shipped CI templates run `scan`, not `init`, and expect a committed
+compilation database for this reason. If you wire `init` into a workflow that
+runs on pull requests, a fork PR can then run arbitrary build commands on your
+runner. Use a container or a self-hosted runner you are willing to lose, or
+require the database to be committed.
+
 After generating or discovering the database, init probes a random sample of
 TUs with `clang -fsyntax-only` and reports missing headers with the specific
 error message.
