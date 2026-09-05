@@ -153,6 +153,10 @@ std::string configDigest(const Config &cfg) {
     for (const auto &s : cfg.derivedFreeNames) add(s);
     m += '\1';
     for (const auto &s : cfg.derivedMappingNames) add(s);
+    m += '\1';
+    for (const auto &s : cfg.derivedLockNames) add(s);
+    m += '\1';
+    for (const auto &s : cfg.derivedUnlockNames) add(s);
     return hashOf(m);
 }
 

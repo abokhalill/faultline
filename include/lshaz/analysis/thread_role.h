@@ -55,6 +55,13 @@ struct ThreadRoleSummary {
     std::map<std::string, std::set<std::string>> returnForwards;
     std::map<std::string, std::set<std::string>> paramForwards;
 
+    // F passes a parameter to G unchanged, with no field access, arithmetic or
+    // local in between. Locks need this stricter edge than frees do: a release
+    // wrapper legitimately adjusts the pointer it frees, whereas
+    // "handle(conn *c) { lock(&c->mtx); }" locks without being a lock wrapper,
+    // and the relaxed edge makes every caller of it one too.
+    std::map<std::string, std::set<std::string>> strictParamForwards;
+
     // Call sites keyed by callee: "F|T" meaning that inside F, the callee
     // produced (or was handed) a T*. Attribution waits for the reduce phase,
     // which is the first point that knows whether the callee allocates.
@@ -72,6 +79,23 @@ struct ThreadRoleSummary {
     // these never cross the IPC boundary.
     std::set<std::string> declaredAllocators;
     std::set<std::string> declaredFreers;
+    std::set<std::string> declaredLocks;
+    std::set<std::string> declaredUnlocks;
+
+    // A spin lock has no POSIX call and no attribute to find it by: nginx's
+    // ngx_shmtx_lock reaches the mutex through __sync_bool_compare_and_swap
+    // and nothing else. What it does have is a mechanism, which is the bar a
+    // rule is held to here. An acquire is an atomic read-modify-write whose
+    // loop exits when it succeeds; the release is the same RMW with no loop
+    // around it.
+    //
+    // Keyed by the parameter's pointee type so the two sides can be paired.
+    // Pairing is what separates a lock from a lock-free retry loop, which
+    // executes the identical CAS: a queue push has no release counterpart
+    // taking the same type, and counting one as an acquire would leave
+    // FL012's nesting depth permanently raised.
+    std::map<std::string, std::set<std::string>> spinAcquireOfType;
+    std::map<std::string, std::set<std::string>> spinReleaseOfType;
 
     // A forward to a name absent here is a boundary the closure cannot cross,
     // not evidence that the wrapper does not allocate. Builtins are tracked
@@ -115,6 +139,8 @@ struct ThreadRoleSummary {
             returnForwards[f].insert(gs.begin(), gs.end());
         for (const auto &[f, gs] : other.paramForwards)
             paramForwards[f].insert(gs.begin(), gs.end());
+        for (const auto &[f, gs] : other.strictParamForwards)
+            strictParamForwards[f].insert(gs.begin(), gs.end());
         for (const auto &[g, sites] : other.allocSitesByCallee)
             allocSitesByCallee[g].insert(sites.begin(), sites.end());
         for (const auto &[g, sites] : other.freeSitesByCallee)
@@ -123,6 +149,14 @@ struct ThreadRoleSummary {
                                   other.declaredAllocators.end());
         declaredFreers.insert(other.declaredFreers.begin(),
                               other.declaredFreers.end());
+        declaredLocks.insert(other.declaredLocks.begin(),
+                             other.declaredLocks.end());
+        declaredUnlocks.insert(other.declaredUnlocks.begin(),
+                               other.declaredUnlocks.end());
+        for (const auto &[t, fns] : other.spinAcquireOfType)
+            spinAcquireOfType[t].insert(fns.begin(), fns.end());
+        for (const auto &[t, fns] : other.spinReleaseOfType)
+            spinReleaseOfType[t].insert(fns.begin(), fns.end());
         definedFunctions.insert(other.definedFunctions.begin(),
                                 other.definedFunctions.end());
         builtinCallees.insert(other.builtinCallees.begin(),
@@ -234,6 +268,22 @@ void inferAllocatorVocabulary(ThreadRoleSummary &facts,
 void inferMappingVocabulary(const ThreadRoleSummary &facts,
                             const std::vector<std::string> &extra,
                             std::set<std::string> &mappingsOut);
+
+// Acquire and release wrappers, closed over the strict forwarding edges from
+// the POSIX primitives. The two sets are computed separately because FL012
+// counts nesting depth: deriving the release side from the acquire spelling
+// desynchronizes the count on the first wrapper that does not say "unlock".
+// seededLock/seededUnlock report how many names came from the base case, so a
+// caller can say what this codebase contributed. Counting that in the reporter
+// meant a magic number there, and expanding the seed list silently turned it
+// into a claim of eleven derived names when none were.
+void inferLockVocabulary(const ThreadRoleSummary &facts,
+                         const std::vector<std::string> &extraLock,
+                         const std::vector<std::string> &extraUnlock,
+                         std::set<std::string> &locksOut,
+                         std::set<std::string> &unlocksOut,
+                         size_t *seededLock = nullptr,
+                         size_t *seededUnlock = nullptr);
 
 // Wrappers whose verdict turned on a callee with no definition in this scan.
 // redis reaches je_free_with_usize this way, and the 236 zfree sites behind

@@ -2372,13 +2372,32 @@ ScanResult ScanPipeline::run(
         inferMappingVocabulary(vocabFacts,
                                request.config.mappingFunctionPatterns, mv);
         analysisConfig.derivedMappingNames = mv;
+        std::set<std::string> lv, uv;
+        size_t seededLock = 0, seededUnlock = 0;
+        inferLockVocabulary(vocabFacts, request.config.lockFunctionPatterns,
+                            request.config.unlockFunctionPatterns, lv, uv,
+                            &seededLock, &seededUnlock);
+        analysisConfig.derivedLockNames = lv;
+        analysisConfig.derivedUnlockNames = uv;
         analysisConfig.derivedAllocatorNames = av;
         analysisConfig.derivedFreeNames = fv;
+        // Every derived vocabulary is reported, not just the allocator one.
+        // A config list is at least readable; an inference that says nothing
+        // about what it concluded is less inspectable than the thing it
+        // replaced. Counts exclude the seeds so the number is what this
+        // codebase contributed.
+        auto beyondSeeds = [](const std::set<std::string> &s, size_t seeds) {
+            return s.size() > seeds ? s.size() - seeds : 0;
+        };
         report("vocabulary",
                std::to_string(parsed) + "/" + std::to_string(sources.size()) +
-               " TU(s) prescanned clean, " + std::to_string(av.size()) +
-               " allocator and " + std::to_string(fv.size()) +
-               " release name(s) derived" +
+               " TU(s) prescanned clean, " +
+               std::to_string(beyondSeeds(av, 14)) + " allocator, " +
+               std::to_string(beyondSeeds(fv, 16)) + " release, " +
+               std::to_string(beyondSeeds(lv, seededLock)) + " lock, " +
+               std::to_string(beyondSeeds(uv, seededUnlock)) + " unlock, " +
+               std::to_string(beyondSeeds(mv, 4)) +
+               " mapping name(s) derived" +
                (vocabCache.enabled()
                     ? ", " + std::to_string(sources.size() - toParse.size()) +
                           " from cache"

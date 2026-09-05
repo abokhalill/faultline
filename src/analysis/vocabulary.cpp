@@ -13,6 +13,7 @@
 #include <clang/Frontend/CompilerInstance.h>
 
 #include <map>
+#include <set>
 
 namespace lshaz {
 
@@ -24,11 +25,61 @@ namespace {
 //
 // Sites whose pointee type cannot be named are dropped, so FL020's conjunct
 // fails closed rather than guessing.
+// A locked read-modify-write written as inline assembly. nginx reaches every
+// one of its shared-memory mutexes this way: ngx_atomic_cmp_set is a
+// "lock cmpxchgl" in an __asm__ block, so neither AtomicExpr nor a __sync_
+// builtin appears anywhere in the tree. These are ISA mnemonics, fixed by
+// Intel and ARM, and a lock-prefixed RMW is the coherence event FL012 grades
+// rather than a proxy for it.
+bool asmIsLockedRMW(llvm::StringRef a) {
+    for (const char *m : {"cmpxchg", "xchg", "xadd", "lock bts", "lock btr",
+                          "ldrex", "strex", "ldaxr", "stlxr", "casal", "cas ",
+                          "swpal", "ldadd"})
+        if (a.contains(m))
+            return true;
+    return false;
+}
+
+// Functions whose body performs one. A caller spinning on one of these is
+// spinning on the RMW itself, and nginx's lock is exactly that shape: the
+// primitive is a static inline in a header, the loop is in ngx_shmtx_lock.
+class RMWPrimitiveFinder
+    : public clang::RecursiveASTVisitor<RMWPrimitiveFinder> {
+public:
+    RMWPrimitiveFinder(clang::ASTContext &C, std::set<std::string> &out)
+        : ctx_(C), out_(out) {}
+
+    bool TraverseFunctionDecl(clang::FunctionDecl *FD) {
+        if (!FD || !FD->doesThisDeclarationHaveABody())
+            return true;
+        const auto *saved = fn_;
+        fn_ = FD;
+        bool r = clang::RecursiveASTVisitor<
+            RMWPrimitiveFinder>::TraverseFunctionDecl(FD);
+        fn_ = saved;
+        return r;
+    }
+    bool TraverseCXXMethodDecl(clang::CXXMethodDecl *MD) {
+        return TraverseFunctionDecl(MD);
+    }
+    bool VisitGCCAsmStmt(clang::GCCAsmStmt *S) {
+        const auto *lit = S->getAsmString();
+        if (fn_ && lit && asmIsLockedRMW(lit->getString()))
+            out_.insert(threadRoleNodeName(fn_, ctx_));
+        return true;
+    }
+private:
+    clang::ASTContext &ctx_;
+    std::set<std::string> &out_;
+    const clang::FunctionDecl *fn_ = nullptr;
+};
+
 class AllocOwnershipVisitor
     : public clang::RecursiveASTVisitor<AllocOwnershipVisitor> {
 public:
-    AllocOwnershipVisitor(clang::ASTContext &C, ThreadRoleSummary &out)
-        : ctx_(C), out_(out) {}
+    AllocOwnershipVisitor(clang::ASTContext &C, ThreadRoleSummary &out,
+                          const std::set<std::string> &rmw)
+        : ctx_(C), out_(out), rmw_(rmw) {}
 
     bool TraverseFunctionDecl(clang::FunctionDecl *FD) {
         if (!FD || !FD->doesThisDeclarationHaveABody())
@@ -49,6 +100,27 @@ public:
     }
     bool TraverseCXXMethodDecl(clang::CXXMethodDecl *MD) {
         return TraverseFunctionDecl(MD);
+    }
+
+    using Base = clang::RecursiveASTVisitor<AllocOwnershipVisitor>;
+    bool TraverseForStmt(clang::ForStmt *S) {
+        ++loopDepth_; bool r = Base::TraverseForStmt(S); --loopDepth_; return r;
+    }
+    bool TraverseWhileStmt(clang::WhileStmt *S) {
+        ++loopDepth_; bool r = Base::TraverseWhileStmt(S); --loopDepth_; return r;
+    }
+    bool TraverseDoStmt(clang::DoStmt *S) {
+        ++loopDepth_; bool r = Base::TraverseDoStmt(S); --loopDepth_; return r;
+    }
+
+    // An atomic read-modify-write. Inside a loop it is an acquire spin; on its
+    // own it is the release. Both are recorded against the parameter type they
+    // operate on, and only the reduce phase decides, since the pairing needs
+    // the whole program.
+    bool VisitAtomicExpr(clang::AtomicExpr *E) {
+        if (fn_ && isRMW(E->getOp()))
+            noteSpin(E->getPtr());
+        return true;
     }
 
     // new/delete need no inference: the operator is the allocator.
@@ -147,6 +219,22 @@ public:
         classifyDecl(callee, g);
         if (E->getNumArgs() < 1)
             return true;
+        // GCC and Clang spell these identically and have for twenty years, so
+        // matching the prefix is matching the compiler, not a codebase.
+        if (callee->getBuiltinID() != 0) {
+            llvm::StringRef bn = callee->getName();
+            if ((bn.starts_with("__sync_") || bn.starts_with("__atomic_")) &&
+                (bn.contains("compare") || bn.contains("exchange") ||
+                 bn.contains("test_and_set") || bn.contains("lock_release") ||
+                 bn.contains("fetch_")))
+                noteSpin(E->getArg(0));
+        }
+        if (rmw_.count(g))
+            for (unsigned i = 0; i < E->getNumArgs(); ++i)
+                if (!paramRootType(E->getArg(i)).empty()) {
+                    noteSpin(E->getArg(i));
+                    break;
+                }
         const clang::Expr *a0 = E->getArg(0)->IgnoreImpCasts();
         if (clang::QualType pt = pointee(a0->getType()); !pt.isNull())
             noteSite(out_.freeSitesByCallee, g, pt);
@@ -155,13 +243,21 @@ public:
         // "prefix = (unsigned char *)ptr - PREFIX_SIZE" and frees the prefix,
         // which is the same release; requiring a bare parameter reference saw
         // neither that nor the local it is assigned to first.
+        bool relaxed = false, strict = false;
         for (unsigned i = 0; i < E->getNumArgs(); ++i) {
             const clang::Expr *a = E->getArg(i)->IgnoreImpCasts();
-            if (!a->getType()->isPointerType() || !mentionsParam(a))
+            if (!a->getType()->isPointerType())
                 continue;
-            out_.paramForwards[threadRoleNodeName(fn_, ctx_)].insert(g);
-            break;
+            if (!relaxed && mentionsParam(a))
+                relaxed = true;
+            if (!strict)
+                if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(a))
+                    strict = llvm::isa<clang::ParmVarDecl>(DRE->getDecl());
         }
+        if (relaxed)
+            out_.paramForwards[threadRoleNodeName(fn_, ctx_)].insert(g);
+        if (strict)
+            out_.strictParamForwards[threadRoleNodeName(fn_, ctx_)].insert(g);
         return true;
     }
 
@@ -183,6 +279,18 @@ private:
             else if (OA->getOwnKind() == clang::OwnershipAttr::Takes)
                 out_.declaredFreers.insert(n);
         }
+        // The lock counterpart of alloc_size. Clang's thread-safety attributes
+        // say a function acquires or releases a capability, which is the same
+        // claim FL012 needs and is what an annotated codebase already tells the
+        // compiler. A project carrying these needs no pthread seed to be
+        // reached through, and no name in config.
+        if (FD->hasAttr<clang::AcquireCapabilityAttr>() ||
+            FD->hasAttr<clang::TryAcquireCapabilityAttr>() ||
+            FD->hasAttr<clang::ExclusiveTrylockFunctionAttr>() ||
+            FD->hasAttr<clang::SharedTrylockFunctionAttr>())
+            out_.declaredLocks.insert(n);
+        if (FD->hasAttr<clang::ReleaseCapabilityAttr>())
+            out_.declaredUnlocks.insert(n);
     }
 
     // void* is the release side of the discipline the return path uses: a
@@ -203,6 +311,59 @@ private:
             if (mentionsParam(C))
                 return true;
         return false;
+    }
+
+    static bool isRMW(clang::AtomicExpr::AtomicOp op) {
+        switch (op) {
+            case clang::AtomicExpr::AO__atomic_compare_exchange:
+            case clang::AtomicExpr::AO__atomic_compare_exchange_n:
+            case clang::AtomicExpr::AO__atomic_exchange:
+            case clang::AtomicExpr::AO__atomic_exchange_n:
+            case clang::AtomicExpr::AO__c11_atomic_compare_exchange_strong:
+            case clang::AtomicExpr::AO__c11_atomic_compare_exchange_weak:
+            case clang::AtomicExpr::AO__c11_atomic_exchange:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // The parameter an atomic operand is rooted at, through field access,
+    // address-of and indexing. A spin lock names its lock as a member of the
+    // struct it was handed, not as the whole argument.
+    std::string paramRootType(const clang::Expr *E) const {
+        const clang::Expr *cur = E ? E->IgnoreParenImpCasts() : nullptr;
+        while (cur) {
+            if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(cur)) {
+                cur = UO->getSubExpr()->IgnoreParenImpCasts();
+                continue;
+            }
+            if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(cur)) {
+                cur = ME->getBase()->IgnoreParenImpCasts();
+                continue;
+            }
+            if (const auto *AS =
+                    llvm::dyn_cast<clang::ArraySubscriptExpr>(cur)) {
+                cur = AS->getBase()->IgnoreParenImpCasts();
+                continue;
+            }
+            break;
+        }
+        const auto *DRE = llvm::dyn_cast_or_null<clang::DeclRefExpr>(cur);
+        if (!DRE || !llvm::isa<clang::ParmVarDecl>(DRE->getDecl()))
+            return {};
+        clang::QualType t = DRE->getDecl()->getType();
+        if (auto p = pointee(t); !p.isNull())
+            t = p;
+        return typeKey(t);
+    }
+
+    void noteSpin(const clang::Expr *operand) {
+        std::string t = paramRootType(operand);
+        if (t.empty())
+            return;
+        (loopDepth_ > 0 ? out_.spinAcquireOfType : out_.spinReleaseOfType)[t]
+            .insert(threadRoleNodeName(fn_, ctx_));
     }
 
     static clang::QualType pointee(clang::QualType QT) {
@@ -254,6 +415,8 @@ private:
     const clang::FunctionDecl *fn_ = nullptr;
     std::map<const clang::VarDecl *, std::set<std::string>> varSource_;
     std::set<const clang::VarDecl *> paramTainted_;
+    const std::set<std::string> &rmw_;
+    unsigned loopDepth_ = 0;
 };
 
 class VocabularyConsumer : public clang::ASTConsumer {
@@ -273,7 +436,12 @@ private:
 } // anonymous namespace
 
 void collectAllocOwnership(clang::ASTContext &Ctx, ThreadRoleSummary &out) {
-    AllocOwnershipVisitor v(Ctx, out);
+    // Which functions are RMW primitives has to be known before the main walk,
+    // since a spin loop calls one rather than containing it.
+    std::set<std::string> rmw;
+    RMWPrimitiveFinder f(Ctx, rmw);
+    f.TraverseDecl(Ctx.getTranslationUnitDecl());
+    AllocOwnershipVisitor v(Ctx, out, rmw);
     v.TraverseDecl(Ctx.getTranslationUnitDecl());
 }
 

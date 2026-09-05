@@ -196,6 +196,84 @@ void inferMappingVocabulary(const ThreadRoleSummary &facts,
     closeOver(facts.returnForwards, mappingsOut);
 }
 
+void inferLockVocabulary(const ThreadRoleSummary &facts,
+                         const std::vector<std::string> &extraLock,
+                         const std::vector<std::string> &extraUnlock,
+                         std::set<std::string> &locksOut,
+                         std::set<std::string> &unlocksOut,
+                         size_t *seededLock,
+                         size_t *seededUnlock) {
+    // POSIX and C11, on the same footing as the libc allocator seeds: frozen by
+    // the standards, identical in every codebase, never typed by a user. The
+    // base case a fixpoint needs, since "F forwards a parameter to G" has to
+    // terminate somewhere. Unlike allocation there is no attribute the
+    // toolchain synthesizes onto these, so the acquire side of the standard
+    // API is the one vocabulary that cannot be derived.
+    //
+    // A codebase whose locks are none of these is still reached: by the
+    // capability attributes if it annotates, and by the acquire/release
+    // pairing on an atomic RMW if it rolls its own.
+    for (const char *s : {"pthread_mutex_lock", "pthread_mutex_trylock",
+                          "pthread_mutex_timedlock", "pthread_spin_lock",
+                          "pthread_spin_trylock", "pthread_rwlock_rdlock",
+                          "pthread_rwlock_wrlock", "pthread_rwlock_tryrdlock",
+                          "pthread_rwlock_trywrlock",
+                          "pthread_rwlock_timedrdlock",
+                          "pthread_rwlock_timedwrlock",
+                          "pthread_cond_wait", "pthread_cond_timedwait",
+                          "pthread_barrier_wait",
+                          "sem_wait", "sem_trywait", "sem_timedwait",
+                          "mtx_lock", "mtx_trylock", "mtx_timedlock",
+                          "cnd_wait", "cnd_timedwait"})
+        locksOut.insert(s);
+    for (const char *s : {"pthread_mutex_unlock", "pthread_spin_unlock",
+                          "pthread_rwlock_unlock", "sem_post",
+                          "mtx_unlock", "cnd_signal", "cnd_broadcast",
+                          "pthread_cond_signal", "pthread_cond_broadcast"})
+        unlocksOut.insert(s);
+    if (seededLock) *seededLock = locksOut.size();
+    if (seededUnlock) *seededUnlock = unlocksOut.size();
+    locksOut.insert(facts.declaredLocks.begin(), facts.declaredLocks.end());
+    unlocksOut.insert(facts.declaredUnlocks.begin(),
+                      facts.declaredUnlocks.end());
+
+    std::set<std::string> known;
+    for (const auto &[f, _] : facts.strictParamForwards) known.insert(f);
+    auto seed = [&](const std::vector<std::string> &pats,
+                    std::set<std::string> &dst) {
+        for (const auto &p : pats)
+            for (const auto &fn : known)
+                if (fnmatch(p.c_str(), fn.c_str(), 0) == 0)
+                    dst.insert(fn);
+    };
+    seed(extraLock, locksOut);
+    seed(extraUnlock, unlocksOut);
+
+    // Spin locks, paired by the type both sides operate on. A CAS retry loop
+    // with no release counterpart taking the same type is a lock-free
+    // operation, not an acquire, and is left out.
+    for (const auto &[type, acquirers] : facts.spinAcquireOfType) {
+        auto rel = facts.spinReleaseOfType.find(type);
+        if (rel == facts.spinReleaseOfType.end())
+            continue;
+        for (const auto &f : acquirers)
+            if (!rel->second.count(f))
+                locksOut.insert(f);
+        for (const auto &f : rel->second)
+            if (!acquirers.count(f))
+                unlocksOut.insert(f);
+    }
+
+    closeOver(facts.strictParamForwards, locksOut);
+    closeOver(facts.strictParamForwards, unlocksOut);
+
+    // A wrapper that forwards to both sides is a critical section, not an
+    // acquire. Counting it as one leaves FL012's nesting depth permanently
+    // raised for every caller after it.
+    for (auto it = locksOut.begin(); it != locksOut.end();)
+        it = unlocksOut.count(*it) ? locksOut.erase(it) : std::next(it);
+}
+
 std::vector<std::string> unresolvedVocabularyBoundaries(
     const ThreadRoleSummary &facts,
     const std::set<std::string> &allocators,

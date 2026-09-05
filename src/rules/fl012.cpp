@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <fnmatch.h>
+
+#include <set>
 #include "lshaz/core/rule.h"
 #include "lshaz/core/registry.h"
 #include "lshaz/core/hot_path.h"
@@ -30,8 +32,11 @@ struct LockSite {
 class LockVisitor : public clang::RecursiveASTVisitor<LockVisitor> {
 public:
     LockVisitor(const std::vector<std::string> &lockPats,
-                const std::vector<std::string> &unlockPats)
-        : lockPats_(lockPats), unlockPats_(unlockPats) {}
+                const std::vector<std::string> &unlockPats,
+                const std::set<std::string> *derivedLock = nullptr,
+                const std::set<std::string> *derivedUnlock = nullptr)
+        : lockPats_(lockPats), unlockPats_(unlockPats),
+          derivedLock_(derivedLock), derivedUnlock_(derivedUnlock) {}
 
     bool VisitCXXMemberCallExpr(clang::CXXMemberCallExpr *E) {
         const auto *MD = E->getMethodDecl();
@@ -77,12 +82,12 @@ public:
 
         // Project wrappers first: a codebase reaching its mutexes through
         // ngx_shmtx_lock or LWLockAcquire has no pthread_ call to match.
-        if (matches(unlockPats_, n)) {
+        if (isUnlock(n)) {
             if (lockDepth_ > 0)
                 --lockDepth_;
             return true;
         }
-        if (matches(lockPats_, n)) {
+        if (isLock(n)) {
             sites_.push_back({E->getBeginLoc(), n.str(), lockDepth_ > 0,
                               inLoop_});
             ++lockDepth_;
@@ -197,6 +202,20 @@ private:
         return false;
     }
 
+    // Derived names are exact; the pattern lists remain for wrappers the
+    // prepass cannot reach, such as a spin lock built on atomics with no
+    // POSIX call anywhere in its chain.
+    bool isLock(llvm::StringRef n) const {
+        return (derivedLock_ && derivedLock_->count(n.str())) ||
+               matches(lockPats_, n);
+    }
+    bool isUnlock(llvm::StringRef n) const {
+        return (derivedUnlock_ && derivedUnlock_->count(n.str())) ||
+               matches(unlockPats_, n);
+    }
+
+    const std::set<std::string> *derivedLock_ = nullptr;
+    const std::set<std::string> *derivedUnlock_ = nullptr;
     const std::vector<std::string> &lockPats_;
     const std::vector<std::string> &unlockPats_;
     std::vector<LockSite> sites_;
@@ -242,7 +261,8 @@ public:
             return;
 
         LockVisitor visitor(Cfg.lockFunctionPatterns,
-                            Cfg.unlockFunctionPatterns);
+                            Cfg.unlockFunctionPatterns,
+                            &Cfg.derivedLockNames, &Cfg.derivedUnlockNames);
         visitor.TraverseStmt(FD->getBody());
 
         const auto &SM = Ctx.getSourceManager();
