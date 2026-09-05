@@ -569,14 +569,16 @@ void testCrossThreadFreeConjunct(const std::string &bin) {
     build(root / "cross", true);
     build(root / "same", false);
 
+    // Assert on the per-finding escalation, not the summary line: that line
+    // reports the join's reach and prints the same phrase with a count of 0.
     auto cross = run(bin + " scan " + (root / "cross").string() + " --no-ir");
-    check(contains(cross.err, "cross-thread free established"),
+    check(contains(cross.out, "cross-TU: every allocation of 'Job'"),
           "disjoint alloc/free roles establish the conjunct");
     check(contains(cross.out, "[High] FL020"),
           "the allocating site outranks Medium once established");
 
     auto same = run(bin + " scan " + (root / "same").string() + " --no-ir");
-    check(!contains(same.err, "cross-thread free established"),
+    check(!contains(same.out, "cross-TU: every allocation of"),
           "same-thread free does not establish it");
     check(!contains(same.out, "[High] FL020"),
           "same-thread free stays capped");
