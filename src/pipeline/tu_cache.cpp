@@ -4,6 +4,9 @@
 #include "lshaz/core/version.h"
 
 #include <llvm/ADT/StringRef.h>
+
+#include <algorithm>
+#include <vector>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MD5.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -119,6 +122,39 @@ void TUCache::store(const std::string &key,
     }
     if (llvm::sys::fs::rename(tmp, p))
         llvm::sys::fs::remove(tmp);
+}
+
+void TUCache::prune(const std::string &dir, uint64_t capBytes) {
+    if (dir.empty() || capBytes == 0)
+        return;
+    struct Entry { std::string path; uint64_t size; int64_t atime; };
+    std::vector<Entry> entries;
+    uint64_t total = 0;
+    std::error_code ec;
+    for (llvm::sys::fs::recursive_directory_iterator it(dir, ec), end;
+         it != end && !ec; it.increment(ec)) {
+        llvm::sys::fs::file_status st;
+        if (llvm::sys::fs::status(it->path(), st) ||
+            !llvm::sys::fs::is_regular_file(st))
+            continue;
+        const uint64_t sz = st.getSize();
+        total += sz;
+        entries.push_back({it->path(), sz,
+                           st.getLastAccessedTime().time_since_epoch().count()});
+    }
+    if (total <= capBytes)
+        return;
+    std::sort(entries.begin(), entries.end(),
+              [](const Entry &a, const Entry &b) {
+                  return a.atime != b.atime ? a.atime < b.atime
+                                            : a.path < b.path;
+              });
+    for (const auto &e : entries) {
+        if (total <= capBytes)
+            break;
+        if (!llvm::sys::fs::remove(e.path))
+            total -= e.size;
+    }
 }
 
 std::string configDigest(const Config &cfg) {

@@ -2965,6 +2965,13 @@ ScanResult ScanPipeline::run(
     // silently disabled refinement for the entire scan, confidence on
     // every finding shifted because of an unrelated file. refine what
     // parsed; failures are already reported per-TU.
+    // Once per scan, after both passes have written. Content-keyed entries mean
+    // a survivor is never wrong, so this is a disk-space bound rather than a
+    // correctness mechanism.
+    if (tuCache.enabled() && request.config.cacheMaxMB)
+        TUCache::prune(request.config.cacheDir,
+                       static_cast<uint64_t>(request.config.cacheMaxMB) << 20);
+
     if (request.ir.enabled && sources.size() > failedTUsDetailed.size()) {
         report("ir", "IR emission and analysis");
         std::unordered_set<std::string> failedFiles;

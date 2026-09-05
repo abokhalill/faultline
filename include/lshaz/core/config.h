@@ -139,6 +139,7 @@ struct Config {
     // Per-TU result cache directory. Empty disables it. Not YAML-mapped: a
     // cache is a property of the machine running the scan, not of the project.
     std::string cacheDir;
+    unsigned cacheMaxMB = 4096;
 
     // Lock wrappers (fnmatch) added to FL012's POSIX set. nginx reaches its
     // mutexes through ngx_shmtx_lock at 48 sites and pthread_mutex_lock at 2,
