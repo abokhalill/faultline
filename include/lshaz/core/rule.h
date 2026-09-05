@@ -43,7 +43,7 @@ public:
                          clang::ASTContext &Ctx,
                          const HotPathOracle &Oracle,
                          const Config &Cfg,
-                         EscapeAnalysis &Escape,
+                         const EscapeAnalysis &Escape,
                          std::vector<Diagnostic> &out) = 0;
 };
 

@@ -38,7 +38,7 @@ public:
                  clang::ASTContext &Ctx,
                  const HotPathOracle & /*Oracle*/,
                  const Config & /*Cfg*/,
-                 EscapeAnalysis &escape,
+                 const EscapeAnalysis &escape,
                  std::vector<Diagnostic> &out) override {
 
         const auto *VD = llvm::dyn_cast_or_null<clang::VarDecl>(D);
