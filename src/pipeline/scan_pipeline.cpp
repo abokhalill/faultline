@@ -40,9 +40,7 @@
 
 #include <algorithm>
 #include <chrono>
-#include <future>
 #include <memory>
-#include <semaphore>
 #include <string>
 #include <thread>
 #include <map>
@@ -1216,44 +1214,71 @@ static void runIRPass(
 
     unsigned shardWorkers = std::min(maxWorkers,
                                       static_cast<unsigned>(shards.size()));
-    std::counting_semaphore<> sem(shardWorkers);
-
     struct ShardResult {
         IRAnalyzer analyzer;
         std::vector<std::pair<size_t, IRResult>> jobResults;
     };
 
-    std::vector<std::future<ShardResult>> futures;
-    futures.reserve(shards.size());
+    // A fixed pool pulling shard indices, not one task per shard. std::async
+    // with launch::async is required to start a thread immediately, and the
+    // semaphore throttled execution rather than creation: at the default batch
+    // size of one that is a thread per translation unit, so a large project
+    // exhausted the thread limit and the resulting std::system_error escaped
+    // uncaught.
+    //
+    // The pool also removes the permit that used to leak. parseIRFile and
+    // analyzeModule run on whole-program IR and can throw, and the release
+    // sat after them, so one bad module left a permit held forever while the
+    // unwind blocked in ~future waiting on threads parked in acquire(). A
+    // hang inside a destructor is the worst shape that failure can take.
+    std::vector<std::unique_ptr<ShardResult>> results(shards.size());
+    std::vector<std::string> shardErrors(shards.size());
+    {
+        std::atomic<size_t> nextShard{0};
+        std::vector<std::thread> pool;
+        pool.reserve(shardWorkers);
+        for (unsigned w = 0; w < shardWorkers; ++w) {
+            pool.emplace_back([&]() {
+                for (size_t si = nextShard++; si < shards.size();
+                     si = nextShard++) {
+                    auto sr = std::make_unique<ShardResult>();
+                    try {
+                        for (size_t i = shards[si].begin; i < shards[si].end;
+                             ++i)
+                            sr->jobResults.push_back({i, emitOneIR(jobs[i])});
 
-    for (const auto &shard : shards) {
-        futures.push_back(std::async(std::launch::async,
-            [&sem, &jobs](size_t begin, size_t end) -> ShardResult {
-                sem.acquire();
-                ShardResult sr;
-
-                for (size_t i = begin; i < end; ++i)
-                    sr.jobResults.push_back({i, emitOneIR(jobs[i])});
-
-                llvm::LLVMContext llvmCtx;
-                for (const auto &[idx, result] : sr.jobResults) {
-                    if (result.exitCode == 0) {
-                        llvm::SMDiagnostic parseErr;
-                        auto mod = llvm::parseIRFile(
-                            jobs[idx].irFile, parseErr, llvmCtx);
-                        if (mod)
-                            sr.analyzer.analyzeModule(*mod);
+                        llvm::LLVMContext llvmCtx;
+                        for (const auto &[idx, result] : sr->jobResults) {
+                            if (result.exitCode != 0)
+                                continue;
+                            llvm::SMDiagnostic parseErr;
+                            auto mod = llvm::parseIRFile(
+                                jobs[idx].irFile, parseErr, llvmCtx);
+                            if (mod)
+                                sr->analyzer.analyzeModule(*mod);
+                        }
+                    } catch (const std::exception &e) {
+                        // Named and counted, not swallowed: the IR pass only
+                        // refines AST findings, so losing a shard costs
+                        // confidence rather than recall, but a silent loss
+                        // reads identically to a shard that found nothing.
+                        shardErrors[si] = e.what();
                     }
+                    results[si] = std::move(sr);
                 }
-
-                sem.release();
-                return sr;
-            },
-            shard.begin, shard.end));
+            });
+        }
+        for (auto &t : pool)
+            t.join();
+    }
+    for (size_t si = 0; si < shards.size(); ++si) {
+        if (!shardErrors[si].empty())
+            llvm::errs() << "lshaz: IR shard " << si << " failed: "
+                         << shardErrors[si] << " (continuing)\n";
     }
 
-    for (auto &future : futures) {
-        auto sr = future.get();
+    for (auto &slot : results) {
+        auto &sr = *slot;
         for (const auto &[idx, result] : sr.jobResults) {
             if (result.exitCode != 0) {
                 auto errBuf = llvm::MemoryBuffer::getFile(jobs[idx].errFile);
