@@ -283,6 +283,17 @@ private:
     // The enclosing function was handed to a thread primitive, so its
     // parameters are what the spawn passed it. That is the thread identity by
     // construction, whatever the parameter is named.
+    // "F|i" from the prepass fixpoint: parameter i of F carries a thread
+    // identity, however many calls from the entry it arrived through.
+    bool identParam(const clang::ValueDecl *D) const {
+        if (!currentFn) return false;
+        const auto *PV = llvm::dyn_cast<clang::ParmVarDecl>(D);
+        if (!PV || PV->getDeclContext() != currentFn) return false;
+        return cfg.threadIdentParams.count(
+                   threadRoleNodeName(currentFn, ctx) + "|" +
+                   std::to_string(PV->getFunctionScopeIndex())) > 0;
+    }
+
     bool inThreadEntry() const {
         return currentFn &&
                threadEntries.count(threadRoleNodeName(currentFn, ctx)) > 0;
@@ -324,6 +335,10 @@ private:
                     (llvm::isa<clang::ParmVarDecl>(D) ||
                      identDerived.count(VD->getCanonicalDecl())))
                     return IndexProvenance::ThreadIdent;
+            // Identity that reached here through a call. A thread entry is
+            // almost always a trampoline, so stopping at its own body saw one
+            // shape and missed the worker it delegates to.
+            if (identParam(D)) return IndexProvenance::ThreadIdent;
         }
         if (inThreadEntry() && rootsAtEntryParam(idx))
             return IndexProvenance::ThreadIdent;

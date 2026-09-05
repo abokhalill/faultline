@@ -87,8 +87,10 @@ public:
         const auto *savedFn = fn_;
         auto savedVars = std::move(varSource_);
         auto savedTaint = std::move(paramTainted_);
+        auto savedIdent = std::move(identLocal_);
         varSource_.clear();
         paramTainted_.clear();
+        identLocal_.clear();
         fn_ = FD;
         out_.definedFunctions.insert(threadRoleNodeName(FD, ctx_));
         bool r = clang::RecursiveASTVisitor<
@@ -96,6 +98,7 @@ public:
         fn_ = savedFn;
         varSource_ = std::move(savedVars);
         paramTainted_ = std::move(savedTaint);
+        identLocal_ = std::move(savedIdent);
         return r;
     }
     bool TraverseCXXMethodDecl(clang::CXXMethodDecl *MD) {
@@ -141,6 +144,8 @@ public:
             return true;
         if (mentionsParam(VD->getInit()))
             paramTainted_.insert(VD->getCanonicalDecl());
+        if (int pi = paramIndexOf(VD->getInit()); pi >= 0)
+            identLocal_[VD->getCanonicalDecl()] = pi;
         std::string g = calleeOf(VD->getInit());
         if (g.empty())
             return true;
@@ -229,6 +234,30 @@ public:
                  bn.contains("fetch_")))
                 noteSpin(E->getArg(0), E);
         }
+        // Thread entries, so the identity fixpoint has a seed in the prepass.
+        // Pass two's call graph knows these too, but it runs after the rules
+        // that need the answer.
+        if (g == "pthread_create" || g == "thrd_create") {
+            const unsigned fnArg = (g == "pthread_create") ? 2u : 1u;
+            if (E->getNumArgs() > fnArg)
+                if (const auto *fref = llvm::dyn_cast<clang::DeclRefExpr>(
+                        E->getArg(fnArg)->IgnoreParenImpCasts()))
+                    if (const auto *FD = llvm::dyn_cast<clang::FunctionDecl>(
+                            fref->getDecl()))
+                        out_.threadEntries.insert(threadRoleNodeName(FD, ctx_));
+        }
+        // "F|i|G|j": this call hands F's parameter i to G's parameter j.
+        for (unsigned j = 0; j < E->getNumArgs(); ++j) {
+            // Integer arguments only. An identity used as an index is an
+            // integer, and propagating into pointer parameters put memset's
+            // first argument in the set, which can only ever be noise.
+            if (!E->getArg(j)->getType()->isIntegerType()) continue;
+            int src = paramIndexOf(E->getArg(j));
+            if (src < 0) continue;
+            out_.identArgFlow.insert(threadRoleNodeName(fn_, ctx_) + "|" +
+                                     std::to_string(src) + "|" + g + "|" +
+                                     std::to_string(j));
+        }
         if (rmw_.count(g))
             for (unsigned i = 0; i < E->getNumArgs(); ++i)
                 if (!paramRootType(E->getArg(i)).empty()) {
@@ -291,6 +320,29 @@ private:
             out_.declaredLocks.insert(n);
         if (FD->hasAttr<clang::ReleaseCapabilityAttr>())
             out_.declaredUnlocks.insert(n);
+    }
+
+    // Which parameter of the current function an expression roots at, or -1.
+    // Casts and arithmetic are transparent: "(long)arg" and "id - 1" both
+    // carry the identity, and a payload struct's field does too.
+    int paramIndexOf(const clang::Stmt *S) const {
+        if (!S) return -1;
+        if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(S)) {
+            const auto *D = DRE->getDecl();
+            if (const auto *PV = llvm::dyn_cast<clang::ParmVarDecl>(D)) {
+                if (PV->getDeclContext() == fn_)
+                    return static_cast<int>(PV->getFunctionScopeIndex());
+                return -1;
+            }
+            if (const auto *VD = llvm::dyn_cast<clang::VarDecl>(D)) {
+                auto it = identLocal_.find(VD->getCanonicalDecl());
+                if (it != identLocal_.end()) return it->second;
+            }
+            return -1;
+        }
+        for (const auto *C : S->children())
+            if (int r = paramIndexOf(C); r >= 0) return r;
+        return -1;
     }
 
     // void* is the release side of the discipline the return path uses: a
@@ -449,6 +501,7 @@ private:
     const clang::FunctionDecl *fn_ = nullptr;
     std::map<const clang::VarDecl *, std::set<std::string>> varSource_;
     std::set<const clang::VarDecl *> paramTainted_;
+    std::map<const clang::VarDecl *, int> identLocal_;
     const std::set<std::string> &rmw_;
     unsigned loopDepth_ = 0;
 };

@@ -105,6 +105,13 @@ struct ThreadRoleSummary {
     // RMW is what makes a type atomic; the spelling never was.
     std::set<std::string> atomicTypes;
 
+    // "F|i|G|j": inside F, the argument at position j of a call to G was
+    // derived from F's own parameter i. Thread identity flows along these
+    // edges, so a worker two hops from the entry is still indexing by thread.
+    // Entries are almost always trampolines, which is why the identity cannot
+    // stop at the entry's own body.
+    std::set<std::string> identArgFlow;
+
     // A forward to a name absent here is a boundary the closure cannot cross,
     // not evidence that the wrapper does not allocate. Builtins are tracked
     // separately: memcpy has no body in any scan and never will, so counting
@@ -166,6 +173,8 @@ struct ThreadRoleSummary {
         for (const auto &[t, fns] : other.spinReleaseOfType)
             spinReleaseOfType[t].insert(fns.begin(), fns.end());
         atomicTypes.insert(other.atomicTypes.begin(), other.atomicTypes.end());
+        identArgFlow.insert(other.identArgFlow.begin(),
+                            other.identArgFlow.end());
         definedFunctions.insert(other.definedFunctions.begin(),
                                 other.definedFunctions.end());
         builtinCallees.insert(other.builtinCallees.begin(),
@@ -286,6 +295,12 @@ void inferMappingVocabulary(const ThreadRoleSummary &facts,
 // caller can say what this codebase contributed. Counting that in the reporter
 // meant a magic number there, and expanding the seed list silently turned it
 // into a claim of eleven derived names when none were.
+// Parameter positions carrying a thread identity, as "F|i". Seeded from every
+// parameter of every thread entry, since that is what the spawn passed, then
+// closed over the argument-flow edges.
+void inferThreadIdentParams(const ThreadRoleSummary &facts,
+                            std::set<std::string> &out);
+
 void inferLockVocabulary(const ThreadRoleSummary &facts,
                          const std::vector<std::string> &extraLock,
                          const std::vector<std::string> &extraUnlock,

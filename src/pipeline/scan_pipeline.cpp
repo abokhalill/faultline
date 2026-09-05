@@ -2476,6 +2476,9 @@ ScanResult ScanPipeline::run(
         inferLockVocabulary(vocabFacts, request.config.lockFunctionPatterns,
                             request.config.unlockFunctionPatterns, lv, uv,
                             &seededLock, &seededUnlock);
+        std::set<std::string> tip;
+        inferThreadIdentParams(vocabFacts, tip);
+        analysisConfig.threadIdentParams = tip;
         analysisConfig.derivedLockNames = lv;
         analysisConfig.derivedUnlockNames = uv;
         // Names, not counts: a count cannot be diffed and cannot be checked.

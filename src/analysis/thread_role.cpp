@@ -179,6 +179,35 @@ void inferAllocatorVocabulary(ThreadRoleSummary &facts,
     attribute(facts.freeSitesByCallee, freersOut, facts.freersOfType);
 }
 
+void inferThreadIdentParams(const ThreadRoleSummary &facts,
+                            std::set<std::string> &out) {
+    for (const auto &e : facts.threadEntries)
+        for (unsigned i = 0; i < 8; ++i)
+            out.insert(e + "|" + std::to_string(i));
+
+    // "F|i|G|j" joins when F|i is already an identity, adding G|j. Monotone
+    // over a finite set, so the loop settles.
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto &edge : facts.identArgFlow) {
+            auto p1 = edge.find('|');
+            if (p1 == std::string::npos) continue;
+            auto p2 = edge.find('|', p1 + 1);
+            if (p2 == std::string::npos) continue;
+            auto p3 = edge.rfind('|');
+            if (p3 == p2 || p3 == std::string::npos) continue;
+            std::string src = edge.substr(0, p2);
+            std::string dst = edge.substr(p2 + 1, p3 - p2 - 1) + "|" +
+                              edge.substr(p3 + 1);
+            if (out.count(src) && !out.count(dst)) {
+                out.insert(dst);
+                changed = true;
+            }
+        }
+    }
+}
+
 void inferMappingVocabulary(const ThreadRoleSummary &facts,
                             const std::vector<std::string> &extra,
                             std::set<std::string> &mappingsOut) {

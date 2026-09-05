@@ -135,6 +135,8 @@ struct Config {
     std::set<std::string> derivedMappingNames;
     std::set<std::string> derivedLockNames;
     std::set<std::string> derivedUnlockNames;
+    // "F|i": parameter i of F carries a thread identity.
+    std::set<std::string> threadIdentParams;
 
     // Per-TU result cache directory. Empty disables it. Not YAML-mapped: a
     // cache is a property of the machine running the scan, not of the project.
