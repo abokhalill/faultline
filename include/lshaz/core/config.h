@@ -132,6 +132,7 @@ struct Config {
     // or whose result leaves through an out-parameter.
     std::set<std::string> derivedAllocatorNames;
     std::set<std::string> derivedFreeNames;
+    std::set<std::string> derivedMappingNames;
 
     // Per-TU result cache directory. Empty disables it. Not YAML-mapped: a
     // cache is a property of the machine running the scan, not of the project.

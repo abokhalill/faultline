@@ -2368,6 +2368,10 @@ ScanResult ScanPipeline::run(
                                      .allocatorFunctionPatterns, av, fv);
         result.threadRoleFacts.merge(vocabFacts);
         result.coverage.distinctFunctions = vocabFacts.definedFunctions.size();
+        std::set<std::string> mv;
+        inferMappingVocabulary(vocabFacts,
+                               request.config.mappingFunctionPatterns, mv);
+        analysisConfig.derivedMappingNames = mv;
         analysisConfig.derivedAllocatorNames = av;
         analysisConfig.derivedFreeNames = fv;
         report("vocabulary",

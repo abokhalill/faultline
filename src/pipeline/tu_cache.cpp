@@ -151,6 +151,8 @@ std::string configDigest(const Config &cfg) {
     for (const auto &s : cfg.derivedAllocatorNames) add(s);
     m += '\1';
     for (const auto &s : cfg.derivedFreeNames) add(s);
+    m += '\1';
+    for (const auto &s : cfg.derivedMappingNames) add(s);
     return hashOf(m);
 }
 

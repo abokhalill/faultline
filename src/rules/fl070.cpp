@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <fnmatch.h>
+
+#include <set>
 #include "lshaz/core/rule.h"
 #include "lshaz/analysis/layout_safety.h"
 #include "lshaz/core/registry.h"
@@ -74,8 +76,9 @@ public:
     clang::ASTContext &ctx;
     std::vector<AllocSite> sites;
 
-    AllocVisitor(clang::ASTContext &C, const std::vector<std::string> &wrappers)
-        : ctx(C), wrappers_(wrappers) {}
+    AllocVisitor(clang::ASTContext &C, const std::vector<std::string> &wrappers,
+                 const std::set<std::string> *derived = nullptr)
+        : ctx(C), wrappers_(wrappers), derived_(derived) {}
 
     bool VisitCallExpr(clang::CallExpr *E) {
         const auto *FD = E->getDirectCallee();
@@ -142,6 +145,23 @@ private:
     // and a first-integer-wins rule would grade the alignment as the mapping.
     bool matchWrapper(llvm::StringRef n, clang::CallExpr *E) {
         std::string name = n.str();
+        // Derived names carry no index, so the largest constant integer
+        // argument is the length. Largest rather than first for the reason
+        // below: ngx_memalign's alignment precedes its size, and an alignment
+        // big enough to win here is a huge-page request anyway.
+        if (derived_ && derived_->count(name)) {
+            uint64_t len = 0;
+            for (unsigned i = 0; i < E->getNumArgs(); ++i) {
+                clang::Expr::EvalResult r;
+                if (E->getArg(i)->EvaluateAsInt(r, ctx))
+                    len = std::max(len, r.Val.getInt().getZExtValue());
+            }
+            if (len >= kTLBSpanBytes) {
+                sites.push_back({E->getBeginLoc(), len, name,
+                                 "wrapper-internal"});
+                return true;
+            }
+        }
         for (const auto &pat : wrappers_) {
             auto colon = pat.rfind(':');
             std::string glob = pat;
@@ -172,6 +192,7 @@ private:
     }
 
     const std::vector<std::string> &wrappers_;
+    const std::set<std::string> *derived_ = nullptr;
 };
 
 bool allocatorIsTHPAware(const Config &cfg) {
@@ -279,7 +300,8 @@ public:
         // Path 2: allocation sites with provable sizes. Not hot-gated,
         // the mapping outlives the allocating function; grading carries
         // the uncertainty instead.
-        AllocVisitor allocs(Ctx, Cfg.mappingFunctionPatterns);
+        AllocVisitor allocs(Ctx, Cfg.mappingFunctionPatterns,
+                            &Cfg.derivedMappingNames);
         allocs.TraverseStmt(FD->getBody());
         bool thpAllocator = allocatorIsTHPAware(Cfg);
         for (const auto &s : allocs.sites) {

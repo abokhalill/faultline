@@ -179,6 +179,23 @@ void inferAllocatorVocabulary(ThreadRoleSummary &facts,
     attribute(facts.freeSitesByCallee, freersOut, facts.freersOfType);
 }
 
+void inferMappingVocabulary(const ThreadRoleSummary &facts,
+                            const std::vector<std::string> &extra,
+                            std::set<std::string> &mappingsOut) {
+    // Kernel-facing mapping calls. ABI, like the libc allocator seeds.
+    for (const char *s : {"mmap", "mmap64", "mremap", "shmat"})
+        mappingsOut.insert(s);
+    if (!extra.empty()) {
+        std::set<std::string> known;
+        for (const auto &[f, _] : facts.returnForwards) known.insert(f);
+        for (const auto &pat : extra)
+            for (const auto &fn : known)
+                if (fnmatch(pat.c_str(), fn.c_str(), 0) == 0)
+                    mappingsOut.insert(fn);
+    }
+    closeOver(facts.returnForwards, mappingsOut);
+}
+
 std::vector<std::string> unresolvedVocabularyBoundaries(
     const ThreadRoleSummary &facts,
     const std::set<std::string> &allocators,

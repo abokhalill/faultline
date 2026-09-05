@@ -227,6 +227,14 @@ void inferAllocatorVocabulary(ThreadRoleSummary &facts,
                               std::set<std::string> &allocatorsOut,
                               std::set<std::string> &freersOut);
 
+// Mapping wrappers, closed over the same return-forward edges from the mapping
+// primitives alone. Separate from the allocator set because the mechanism is:
+// a wrapper over mmap costs page faults and TLB pressure, not arena
+// contention, and FL070 grades the first while FL020 grades the second.
+void inferMappingVocabulary(const ThreadRoleSummary &facts,
+                            const std::vector<std::string> &extra,
+                            std::set<std::string> &mappingsOut);
+
 // Wrappers whose verdict turned on a callee with no definition in this scan.
 // redis reaches je_free_with_usize this way, and the 236 zfree sites behind
 // it look exactly like a clean result. Ordered by how many distinct callers
