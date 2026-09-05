@@ -91,7 +91,13 @@ public:
 
         if (minLines >= 3) {
             if (writerLines == 0) {
-                sev = Severity::Critical;
+                // Not Critical: seeing no writes is absence of evidence, not
+                // evidence that the writes are clustered, so it cannot outrank
+                // the case where they were observed and counted. It used to,
+                // which made severity fall as evidence arrived and then shipped
+                // both the Critical rationale and "clamped from Critical" in
+                // one finding, since the claim needs writerLines >= 3 anyway.
+                sev = Severity::High;
                 escalations.push_back(
                     "occupies " + std::to_string(minLines) +
                     " cache lines at any alignment (worst case " +
