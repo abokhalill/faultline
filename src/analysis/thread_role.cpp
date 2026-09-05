@@ -3,6 +3,7 @@
 
 #include <fnmatch.h>
 
+#include <algorithm>
 #include <deque>
 
 namespace lshaz {
@@ -90,16 +91,12 @@ const char *kAllocSeeds[] = {
     "valloc", "pvalloc", "memalign", "strdup", "strndup", "mmap", "mmap64",
     "operator new", "operator new[]",
 };
-// The release side needs names where the allocation side does not. GCC and
-// Clang give an allocator alloc_size, which jemalloc, tcmalloc and mimalloc
-// all carry, so their allocation entry points are derived without being
-// listed. There is no equivalently-used counterpart for deallocation
-// (ownership_takes exists and essentially nobody applies it), so a free chain
-// ending in a replacement allocator's ABI terminates at a bare extern with no
-// evidence at all. These are published third-party ABIs on the same footing
-// as libc, not any scanned project's vocabulary: valkey reaches je_sdallocx
-// through zfree_internal, and every jemalloc-linked program reaches it the
-// same way.
+// The release side needs names where the allocation side does not: alloc_size
+// covers jemalloc, tcmalloc and mimalloc alike, and no deallocation attribute
+// is used in practice, so a free chain ending in a replacement allocator's ABI
+// terminates at a bare extern carrying no evidence. Published third-party ABIs
+// on the same footing as libc, not any scanned project's vocabulary. valkey
+// reaches je_sdallocx through zfree_internal.
 const char *kFreeSeeds[] = {
     "free", "cfree", "munmap", "operator delete", "operator delete[]",
     "dallocx", "sdallocx", "je_dallocx", "je_sdallocx", "je_free",
@@ -180,6 +177,51 @@ void inferAllocatorVocabulary(ThreadRoleSummary &facts,
         };
     attribute(facts.allocSitesByCallee, allocatorsOut, facts.allocatorsOfType);
     attribute(facts.freeSitesByCallee, freersOut, facts.freersOfType);
+}
+
+std::vector<std::string> unresolvedVocabularyBoundaries(
+    const ThreadRoleSummary &facts,
+    const std::set<std::string> &allocators,
+    const std::set<std::string> &freers) {
+
+    std::set<std::string> out;
+    auto scan = [&](const std::map<std::string, std::set<std::string>> &edges,
+                    const std::set<std::string> &decided) {
+        for (const auto &[fn, callees] : edges) {
+            if (decided.count(fn))
+                continue;
+            for (const auto &c : callees)
+                if (!facts.definedFunctions.count(c) &&
+                    !facts.builtinCallees.count(c)) {
+                    out.insert(fn);
+                    break;
+                }
+        }
+    };
+    scan(facts.returnForwards, allocators);
+    scan(facts.paramForwards, freers);
+
+    // Sites recorded against the name, which is what the undecided verdict
+    // actually costs. callEdges would be the obvious weight and is empty here:
+    // the prepass collects ownership only, and the call graph is built in the
+    // pass after it.
+    auto weight = [&](const std::string &n) {
+        size_t w = 0;
+        if (auto it = facts.allocSitesByCallee.find(n);
+            it != facts.allocSitesByCallee.end())
+            w += it->second.size();
+        if (auto it = facts.freeSitesByCallee.find(n);
+            it != facts.freeSitesByCallee.end())
+            w += it->second.size();
+        return w;
+    };
+    std::vector<std::string> ranked(out.begin(), out.end());
+    std::sort(ranked.begin(), ranked.end(),
+              [&](const std::string &a, const std::string &b) {
+                  size_t wa = weight(a), wb = weight(b);
+                  return wa != wb ? wa > wb : a < b;
+              });
+    return ranked;
 }
 
 

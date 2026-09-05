@@ -73,6 +73,13 @@ struct ThreadRoleSummary {
     std::set<std::string> declaredAllocators;
     std::set<std::string> declaredFreers;
 
+    // A forward to a name absent here is a boundary the closure cannot cross,
+    // not evidence that the wrapper does not allocate. Builtins are tracked
+    // separately: memcpy has no body in any scan and never will, so counting
+    // it as unresolved buries the boundaries that are.
+    std::set<std::string> definedFunctions;
+    std::set<std::string> builtinCallees;
+
     // Virtual methods some class actually overrides, qualified names. A call
     // to a method absent here is monomorphic program-wide, which is the
     // difference between paying ~1ns and ~9ns. Only the merged set can say,
@@ -116,6 +123,10 @@ struct ThreadRoleSummary {
                                   other.declaredAllocators.end());
         declaredFreers.insert(other.declaredFreers.begin(),
                               other.declaredFreers.end());
+        definedFunctions.insert(other.definedFunctions.begin(),
+                                other.definedFunctions.end());
+        builtinCallees.insert(other.builtinCallees.begin(),
+                              other.builtinCallees.end());
         overriddenVirtuals.insert(other.overriddenVirtuals.begin(),
                                   other.overriddenVirtuals.end());
     }
@@ -215,6 +226,16 @@ void inferAllocatorVocabulary(ThreadRoleSummary &facts,
                               const std::vector<std::string> &extraAlloc,
                               std::set<std::string> &allocatorsOut,
                               std::set<std::string> &freersOut);
+
+// Wrappers whose verdict turned on a callee with no definition in this scan.
+// redis reaches je_free_with_usize this way, and the 236 zfree sites behind
+// it look exactly like a clean result. Ordered by how many distinct callers
+// the wrapper has, since that is what decides whether naming it is worth a
+// config line.
+std::vector<std::string> unresolvedVocabularyBoundaries(
+    const ThreadRoleSummary &facts,
+    const std::set<std::string> &allocators,
+    const std::set<std::string> &freers);
 
 // BFS role propagation over the merged call graph. Roots: "main" (plus
 // mainPatterns matches) seed ROLE_MAIN; threadEntries (plus entryPatterns

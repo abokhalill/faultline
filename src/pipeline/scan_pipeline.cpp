@@ -2246,6 +2246,23 @@ ScanResult ScanPipeline::run(
                " TU(s) prescanned clean, " + std::to_string(av.size()) +
                " allocator and " + std::to_string(fv.size()) +
                " release name(s) derived");
+
+        // An undecidable wrapper and one that decided "no" are otherwise the
+        // same silence.
+        const auto opaque = unresolvedVocabularyBoundaries(vocabFacts, av, fv);
+        if (!opaque.empty()) {
+            std::string names;
+            for (size_t i = 0; i < opaque.size() && i < 5; ++i)
+                names += (i ? ", " : "") + opaque[i];
+            if (opaque.size() > 5)
+                names += ", and " + std::to_string(opaque.size() - 5) + " more";
+            report("vocabulary",
+                   std::to_string(opaque.size()) +
+                   " wrapper(s) undecided, forwarding to a callee with no "
+                   "definition in this scan: " + names +
+                   ". Add to allocator_function_patterns if they allocate or "
+                   "release");
+        }
     }
 
     int toolRet = 0;

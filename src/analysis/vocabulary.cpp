@@ -18,11 +18,9 @@ namespace lshaz {
 
 namespace {
 
-// Raw material for inferring who allocates and who frees, without being told
-// the project's vocabulary. Nothing here matches a name: the reduce phase
-// closes the allocator and freer sets over these edges from the libc seeds,
-// which is what lets zmalloc, ngx_palloc, palloc and kmalloc be discovered
-// rather than declared.
+// Nothing here matches a name. The reduce phase closes the allocator and freer
+// sets over these edges from the libc seeds, which is what lets zmalloc,
+// ngx_palloc, palloc and kmalloc be discovered rather than declared.
 //
 // Sites whose pointee type cannot be named are dropped, so FL020's conjunct
 // fails closed rather than guessing.
@@ -41,6 +39,7 @@ public:
         varSource_.clear();
         paramTainted_.clear();
         fn_ = FD;
+        out_.definedFunctions.insert(threadRoleNodeName(FD, ctx_));
         bool r = clang::RecursiveASTVisitor<
             AllocOwnershipVisitor>::TraverseFunctionDecl(FD);
         fn_ = savedFn;
@@ -92,10 +91,9 @@ public:
         if (g.empty())
             return true;
         noteSite(out_.allocSitesByCallee, g, pointee(BO->getLHS()->getType()));
-        // Reassignment is not a second-class source. redis returns the result
-        // of "ptr = extend_to_usable(ptr, n)" through a variable declared from
-        // an earlier call, so tracking only the declaration loses the one that
-        // carries the alloc_size attribute.
+        // redis returns "ptr = extend_to_usable(ptr, n)" through a variable
+        // declared from an earlier call, so tracking only the declaration
+        // loses the source that carries the alloc_size attribute.
         if (const auto *DRE = llvm::dyn_cast<clang::DeclRefExpr>(
                 BO->getLHS()->IgnoreParenImpCasts()))
             if (const auto *VD =
@@ -122,14 +120,11 @@ public:
         // Several sources means several branches reached this return. A
         // function allocates if any path through it does, which is also the
         // direction a hazard detector should err in.
-        // Only a void* return propagates the vocabulary. A generic allocator
-        // is type-agnostic by construction (zmalloc, ngx_palloc, palloc,
-        // kmalloc, je_mallocx all return void*), whereas a constructor that
-        // happens to allocate returns its own type. Without this the closure
-        // is transitively true and useless: redis's zzlDelete reaches zrealloc
-        // through four hops, so every caller of a container mutation became an
-        // allocation site and FL020 went to 633 findings on the wrong lines.
-        // The constructor's own allocation is still a direct site in its body.
+        // A generic allocator is type-agnostic by construction; a constructor
+        // that happens to allocate returns its own type, and its allocation is
+        // already a direct site in its body. Propagating through both made the
+        // closure transitively true and useless: zzlDelete reaches zrealloc in
+        // four hops, which put FL020 at 633 findings on the wrong lines.
         const bool generic = fn_->getReturnType()
                                  .getCanonicalType()->isVoidPointerType();
         for (const auto &g : srcs) {
@@ -171,16 +166,15 @@ public:
     }
 
 private:
-    // What the compiler already knows about the callee. __attribute__((malloc))
-    // reaches Clang as RestrictAttr (there is no MallocAttr); alloc_size is
-    // synthesized implicitly onto libc even when the header omits it; the
-    // ownership_* family exists specifically so a non-libc allocator can say
-    // so. None of these depend on what the function is called.
+    // None of this depends on what the function is called. Clang spells
+    // __attribute__((malloc)) as RestrictAttr, there is no MallocAttr, and it
+    // synthesizes alloc_size onto libc even where the header omits it.
     void classifyDecl(const clang::FunctionDecl *FD, const std::string &n) {
-        // alloc_size, not the bare malloc attribute: glibc marks fopen and
-        // opendir __attribute__((malloc)) too, and they do return a fresh
-        // block, but FL020 grades contention on caller-sized allocation. A
-        // named size parameter is what separates the two.
+        if (FD->getBuiltinID() != 0)
+            out_.builtinCallees.insert(n);
+        // Not the bare malloc attribute: glibc marks fopen and opendir that
+        // way too, and they do return a fresh block, but this rule grades
+        // caller-sized allocation.
         if (FD->hasAttr<clang::AllocSizeAttr>())
             out_.declaredAllocators.insert(n);
         for (const auto *OA : FD->specific_attrs<clang::OwnershipAttr>()) {
@@ -191,13 +185,10 @@ private:
         }
     }
 
-    // A void* parameter referenced anywhere in the expression, directly or
-    // through a local derived from one. The void* requirement is the release
-    // side of the same discipline the return path uses: a generic deallocator
-    // is type-agnostic by construction, whereas a function taking a typed
-    // pointer is doing its own work and merely happens to release. Without it
-    // the closure runs away, since nearly every function hands some pointer
-    // parameter to something that eventually frees.
+    // void* is the release side of the discipline the return path uses: a
+    // function taking a typed pointer is doing its own work and merely happens
+    // to release. Accepting those ran the closure away, since nearly every
+    // function hands some pointer parameter to something that eventually frees.
     bool mentionsParam(const clang::Stmt *S) const {
         if (!S)
             return false;
