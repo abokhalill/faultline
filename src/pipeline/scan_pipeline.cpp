@@ -454,7 +454,17 @@ std::string serializeShardResult(int exitCode,
     emitNameSets(threadRoles.allocSitesByCallee);
     buf += "},\"freeSites\":{";
     emitNameSets(threadRoles.freeSitesByCallee);
-    buf += "},\"declAlloc\":[";
+    buf += "},\"strictParFwd\":{";
+    emitNameSets(threadRoles.strictParamForwards);
+    buf += "},\"spinAcq\":{";
+    emitNameSets(threadRoles.spinAcquireOfType);
+    buf += "},\"spinRel\":{";
+    emitNameSets(threadRoles.spinReleaseOfType);
+    buf += "},\"declLock\":[";
+    emitNames(threadRoles.declaredLocks);
+    buf += "],\"declUnlock\":[";
+    emitNames(threadRoles.declaredUnlocks);
+    buf += "],\"declAlloc\":[";
     emitNames(threadRoles.declaredAllocators);
     buf += "],\"declFree\":[";
     emitNames(threadRoles.declaredFreers);
@@ -904,6 +914,16 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.freeSitesByCallee);
                 else if (tk == "overridden")
                     parseStrArray(out.threadRoles.overriddenVirtuals);
+                else if (tk == "strictParFwd")
+                    parseNameSets(out.threadRoles.strictParamForwards);
+                else if (tk == "spinAcq")
+                    parseNameSets(out.threadRoles.spinAcquireOfType);
+                else if (tk == "spinRel")
+                    parseNameSets(out.threadRoles.spinReleaseOfType);
+                else if (tk == "declLock")
+                    parseStrArray(out.threadRoles.declaredLocks);
+                else if (tk == "declUnlock")
+                    parseStrArray(out.threadRoles.declaredUnlocks);
                 else if (tk == "declAlloc")
                     parseStrArray(out.threadRoles.declaredAllocators);
                 else if (tk == "declFree")
