@@ -68,24 +68,66 @@ const clang::ValueDecl *baseDeclOf(const clang::Expr *E) {
     return nullptr;
 }
 
-const clang::ArraySubscriptExpr *asSubscript(const clang::Expr *E) {
-    if (!E) return nullptr;
-    E = E->IgnoreParenImpCasts();
-    if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E))
-        if (UO->getOpcode() == clang::UO_AddrOf)
-            E = UO->getSubExpr()->IgnoreParenImpCasts();
-    // "stats[id].hits++" writes a field of the element, so the write target is
-    // the member and the subscript is its base. Only matching the bare
-    // subscript saw arrays of scalars and missed every array of per-thread
-    // structs, which is the more common of the two shapes.
-    while (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
-        E = ME->getBase()->IgnoreParenImpCasts();
-        if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E))
-            if (UO->getOpcode() == clang::UO_Deref)
-                E = UO->getSubExpr()->IgnoreParenImpCasts();
+// Descends through casts, address-of, deref, member access and subscripts
+// to whichever DeclRefExpr the expression is rooted at.
+const clang::Expr *peelToRoot(const clang::Expr *E) {
+    while (E) {
+        E = E->IgnoreParenImpCasts();
+        if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E)) {
+            if (UO->getOpcode() != clang::UO_AddrOf &&
+                UO->getOpcode() != clang::UO_Deref)
+                return E;
+            E = UO->getSubExpr();
+        } else if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
+            E = ME->getBase();
+        } else if (const auto *ASE =
+                       llvm::dyn_cast<clang::ArraySubscriptExpr>(E)) {
+            E = ASE->getBase();
+        } else {
+            return E;
+        }
     }
-    return llvm::dyn_cast<clang::ArraySubscriptExpr>(E);
+    return nullptr;
 }
+
+// Writes through a parameter, directly or by handing it on. An unseen body
+// cannot be cleared, so only a visible one that does neither counts as
+// read-only.
+class ParamWriteFinder
+    : public clang::RecursiveASTVisitor<ParamWriteFinder> {
+public:
+    explicit ParamWriteFinder(const clang::ValueDecl *P) : param(P) {}
+    bool writes = false;
+
+    bool VisitBinaryOperator(clang::BinaryOperator *B) {
+        if (B->isAssignmentOp() && rootsAtParam(B->getLHS())) writes = true;
+        return !writes;
+    }
+    bool VisitUnaryOperator(clang::UnaryOperator *U) {
+        if (U->isIncrementDecrementOp() && rootsAtParam(U->getSubExpr()))
+            writes = true;
+        return !writes;
+    }
+    bool VisitAtomicExpr(clang::AtomicExpr *E) {
+        if (rootsAtParam(E->getPtr())) writes = true;
+        return !writes;
+    }
+    // Handing the pointer on puts the write out of view, which is not the
+    // same as establishing there is none.
+    bool VisitCallExpr(clang::CallExpr *CE) {
+        for (const auto *A : CE->arguments())
+            if (rootsAtParam(A)) { writes = true; break; }
+        return !writes;
+    }
+
+private:
+    bool rootsAtParam(const clang::Expr *E) const {
+        const auto *root = peelToRoot(E);
+        const auto *DRE = llvm::dyn_cast_or_null<clang::DeclRefExpr>(root);
+        return DRE && DRE->getDecl()->getCanonicalDecl() == param;
+    }
+    const clang::ValueDecl *param;
+};
 
 bool isAtomicWriteBuiltin(llvm::StringRef n) {
     return n.starts_with("__atomic_") || n.starts_with("__c11_atomic_") ||
@@ -116,17 +158,27 @@ public:
     // Locals carrying a thread identity forward. "long id = (long)arg" is the
     // canonical spelling and the cast erases nothing that matters.
     llvm::SmallPtrSet<const clang::VarDecl *, 8> identDerived;
+    // Locals aimed at one slot by "T *p = &arr[id]".
+    std::map<const clang::VarDecl *, const clang::ArraySubscriptExpr *>
+        slotPointers;
+    // Whether parameter i of a callee is only read, memoised because the
+    // refutation walks that callee's whole body.
+    std::map<std::pair<const clang::FunctionDecl *, unsigned>, bool>
+        readOnlyParam;
 
     bool TraverseFunctionDecl(clang::FunctionDecl *FD) {
         if (!FD->doesThisDeclarationHaveABody())
             return RecursiveASTVisitor::TraverseFunctionDecl(FD);
         const auto *prev = currentFn;
         auto savedIdent = identDerived;
+        auto savedSlots = slotPointers;
         identDerived.clear();
+        slotPointers.clear();
         currentFn = FD;
         bool r = RecursiveASTVisitor::TraverseFunctionDecl(FD);
         currentFn = prev;
         identDerived = savedIdent;
+        slotPointers = savedSlots;
         return r;
     }
     bool TraverseCXXMethodDecl(clang::CXXMethodDecl *MD) {
@@ -134,9 +186,10 @@ public:
     }
 
     bool VisitVarDecl(clang::VarDecl *VD) {
-        if (VD && VD->hasInit() && inThreadEntry() &&
-            rootsAtEntryParam(VD->getInit()))
+        if (!VD || !VD->hasInit()) return true;
+        if (inThreadEntry() && rootsAtEntryParam(VD->getInit()))
             identDerived.insert(VD->getCanonicalDecl());
+        aimPointer(VD, VD->getInit());
         return true;
     }
 
@@ -151,21 +204,50 @@ public:
     // write forms; extracting the subscript from the write itself is
     // exact where a parent lookup on every subscript is not.
     bool VisitBinaryOperator(clang::BinaryOperator *B) {
-        if (B->isAssignmentOp())
-            noteWrite(asSubscript(B->getLHS()));
+        if (!B->isAssignmentOp()) return true;
+        // Assigning the pointer re-aims it and writes no slot. Left to
+        // noteWrite it would book the old target as written.
+        if (const auto *VD = pointerVar(B->getLHS())) {
+            aimPointer(VD, B->getRHS());
+            return true;
+        }
+        noteWrite(B->getLHS());
         return true;
     }
     bool VisitUnaryOperator(clang::UnaryOperator *U) {
-        if (U->isIncrementDecrementOp())
-            noteWrite(asSubscript(U->getSubExpr()));
+        if (!U->isIncrementDecrementOp()) return true;
+        // p++ walks off the recorded slot rather than writing it.
+        if (const auto *VD = pointerVar(U->getSubExpr())) {
+            slotPointers.erase(VD);
+            return true;
+        }
+        noteWrite(U->getSubExpr());
         return true;
     }
     bool VisitCallExpr(clang::CallExpr *CE) {
         const auto *FD = CE->getDirectCallee();
         if (!FD || !FD->getIdentifier() || CE->getNumArgs() == 0)
             return true;
-        if (isAtomicWriteBuiltin(FD->getName()))
-            noteWrite(asSubscript(CE->getArg(0)));
+        if (isAtomicWriteBuiltin(FD->getName())) {
+            noteWrite(CE->getArg(0));
+            return true;
+        }
+        // A slot handed over as a pointer to non-const is written by the
+        // callee unless the callee is visible here and provably only
+        // reads. This is what reaches memset(&slot[id], ...) and every
+        // per-thread init helper, neither of which is an assignment.
+        const unsigned n =
+            std::min<unsigned>(CE->getNumArgs(), FD->getNumParams());
+        for (unsigned i = 0; i < n; ++i) {
+            clang::QualType pt = FD->getParamDecl(i)->getType();
+            if (!pt->isPointerType() ||
+                pt->getPointeeType().isConstQualified())
+                continue;
+            const clang::Expr *slot = slotAddressArg(CE->getArg(i));
+            if (!slot || !resolveSlot(slot).first) continue;
+            if (calleeOnlyReads(FD, i)) continue;
+            noteWrite(slot);
+        }
         return true;
     }
     // C11/GNU atomic builtins are AtomicExpr, not CallExpr, the shape
@@ -180,7 +262,7 @@ public:
         default:
             break;
         }
-        noteWrite(asSubscript(E->getPtr()));
+        noteWrite(E->getPtr());
         return true;
     }
 
@@ -190,7 +272,7 @@ public:
         llvm::StringRef n = MD->getName();
         if (n == "store" || n == "exchange" || n.starts_with("fetch_") ||
             n.starts_with("compare_exchange"))
-            noteWrite(asSubscript(CE->getImplicitObjectArgument()));
+            noteWrite(CE->getImplicitObjectArgument());
         return true;
     }
 
@@ -230,11 +312,149 @@ private:
         return it == out.end() ? nullptr : &it->second;
     }
 
-    void noteWrite(const clang::ArraySubscriptExpr *E) {
-        if (!E || !currentFn) return;
-        auto *s = siteFor(E);
+    // Every subscript on the path from the write down to the base, outermost
+    // first. "stats[id].pad[0]" and "grid[id][j]" both put the striped
+    // subscript under an outer one, and matching only the outermost resolved
+    // the first to the inner member array and missed the striping entirely.
+    void subscriptChain(
+            const clang::Expr *E,
+            std::vector<const clang::ArraySubscriptExpr *> &chain) {
+        while (E) {
+            E = E->IgnoreParenImpCasts();
+            if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(E)) {
+                if (UO->getOpcode() == clang::UO_AddrOf) {
+                    E = UO->getSubExpr();
+                    continue;
+                }
+                if (UO->getOpcode() != clang::UO_Deref) return;
+                return followPointer(UO->getSubExpr(), chain);
+            }
+            if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
+                if (ME->isArrow()) return followPointer(ME->getBase(), chain);
+                E = ME->getBase();
+                continue;
+            }
+            if (const auto *ASE =
+                    llvm::dyn_cast<clang::ArraySubscriptExpr>(E)) {
+                const auto *base = ASE->getBase()->IgnoreParenImpCasts();
+                // Indexing an array stays inside it; indexing a pointer
+                // lands wherever that pointer aims. A file-scope
+                // "T *p = &arr[K]" is the one pointer whose target
+                // collectAliases already settled, so try it before giving up.
+                if (!base->getType()->isArrayType()) {
+                    if (siteFor(ASE)) chain.push_back(ASE);
+                    else              followPointer(base, chain);
+                    return;
+                }
+                chain.push_back(ASE);
+                E = base;
+                continue;
+            }
+            if (llvm::isa<clang::DeclRefExpr>(E))
+                return followPointer(E, chain);
+            return;
+        }
+    }
+
+    // Crossing a pointer indirection leaves the array: "slots[id]->field"
+    // writes whatever the slot pointed at, not the slot. Only a pointer
+    // this function already aimed at a slot carries the location through,
+    // which is what makes "p = &arr[id]; p->field = x" a slot write.
+    void followPointer(
+            const clang::Expr *E,
+            std::vector<const clang::ArraySubscriptExpr *> &chain) {
+        const auto *VD = pointerVar(E);
+        if (!VD) return;
+        auto it = slotPointers.find(VD);
+        if (it != slotPointers.end()) chain.push_back(it->second);
+    }
+
+    // The level of the chain that names a catalogued array under a
+    // thread-identity index, if any.
+    std::pair<StripedArraySite *, const clang::ArraySubscriptExpr *>
+    resolveSlot(const clang::Expr *target) {
+        if (!target || !currentFn) return {nullptr, nullptr};
+        std::vector<const clang::ArraySubscriptExpr *> chain;
+        subscriptChain(target, chain);
+        for (const auto *E : chain) {
+            auto *s = siteFor(E);
+            if (s && classify(E->getIdx()) == IndexProvenance::ThreadIdent)
+                return {s, E};
+        }
+        return {nullptr, nullptr};
+    }
+
+    // A pointer variable, for the two statements that move one rather than
+    // write through it.
+    const clang::VarDecl *pointerVar(const clang::Expr *E) const {
+        const auto *DRE =
+            llvm::dyn_cast<clang::DeclRefExpr>(E->IgnoreParenImpCasts());
+        if (!DRE) return nullptr;
+        const auto *VD = llvm::dyn_cast<clang::VarDecl>(DRE->getDecl());
+        if (!VD || !VD->getType()->isPointerType()) return nullptr;
+        return VD->getCanonicalDecl();
+    }
+
+    // "T *p = &arr[id]" aims p at one slot, and writing through p writes
+    // that slot. Anything else the pointer is set to drops the record, so a
+    // re-aimed or advanced pointer never carries a stale index.
+    void aimPointer(const clang::VarDecl *VD, const clang::Expr *init) {
+        if (!VD || !VD->getType()->isPointerType() || !init) return;
+        const auto *canon = VD->getCanonicalDecl();
+        std::vector<const clang::ArraySubscriptExpr *> chain;
+        // The slot's address, not merely an expression mentioning it:
+        // "listFirst(slots[worker])" reads the slot and yields a pointer
+        // into the object it held, which aims nowhere near the array.
+        if (const clang::Expr *slot = slotAddressArg(init))
+            subscriptChain(slot, chain);
+        if (chain.empty()) { slotPointers.erase(canon); return; }
+        slotPointers[canon] = chain.front();
+    }
+
+    // A callee can only write a slot whose address it was handed: "&arr[id]",
+    // or "arr[id]" where the element is itself an array and decays. Passing
+    // "arr[id]" by value loads the slot and hands over whatever it held, so
+    // the callee writes that object and never touches the array.
+    const clang::Expr *slotAddressArg(const clang::Expr *A) const {
+        while (A) {
+            A = A->IgnoreParens();
+            if (const auto *C = llvm::dyn_cast<clang::CastExpr>(A)) {
+                if (C->getCastKind() == clang::CK_ArrayToPointerDecay)
+                    return C->getSubExpr();
+                if (C->getCastKind() == clang::CK_LValueToRValue) {
+                    const auto *VD = pointerVar(C->getSubExpr());
+                    return VD && slotPointers.count(VD) ? C->getSubExpr()
+                                                        : nullptr;
+                }
+                A = C->getSubExpr();
+                continue;
+            }
+            if (const auto *UO = llvm::dyn_cast<clang::UnaryOperator>(A))
+                if (UO->getOpcode() == clang::UO_AddrOf)
+                    return UO->getSubExpr();
+            return nullptr;
+        }
+        return nullptr;
+    }
+
+    bool calleeOnlyReads(const clang::FunctionDecl *FD, unsigned i) {
+        const auto key = std::make_pair(FD->getCanonicalDecl(), i);
+        auto it = readOnlyParam.find(key);
+        if (it != readOnlyParam.end()) return it->second;
+        const clang::FunctionDecl *def = nullptr;
+        bool ro = false;
+        if (FD->hasBody(def) && def && i < def->getNumParams()) {
+            ParamWriteFinder f(def->getParamDecl(i)->getCanonicalDecl());
+            f.TraverseStmt(def->getBody());
+            ro = !f.writes;
+        }
+        readOnlyParam.emplace(key, ro);
+        return ro;
+    }
+
+    void noteWrite(const clang::Expr *target) {
+        auto [s, E] = resolveSlot(target);
         if (!s) return;
-        if (classify(E->getIdx()) != IndexProvenance::ThreadIdent) return;
         std::string wn = threadRoleNodeName(currentFn, ctx);
         s->stripedWriters.insert(wn);
         s->writerTier = std::max(s->writerTier, tierOf(wn));

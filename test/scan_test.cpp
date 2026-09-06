@@ -263,6 +263,13 @@ void testStripeIndexIdentity(const std::string &bin,
     check(identityOf("canary_clients_per_thread") == "owner",
           "a subscript through a handed-in object reads as owner identity");
 
+    // Write forms other than assignment to a bare subscript. Each of these
+    // was silently missed, and a miss is indistinguishable from a clean
+    // scan without a named symbol to look for.
+    check(identityOf("g_slot_via_ptr") == "writer",
+          "a write through a pointer taken to a slot is a striped write");
+    check(identityOf("g_slot_nested") == "writer",
+          "a write to a member array inside a slot is a striped write");
     check(identityOf("g_slot_stride") == "writer",
           "an element stride that is not a line multiple straddles lines "
           "whatever the base alignment");

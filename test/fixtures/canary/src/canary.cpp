@@ -68,11 +68,19 @@ uint64_t total_accounted() {
     return t;
 }
 
-// FL003. 96B stride: not a line multiple, so element boundaries fall
-// mid-line wherever the linker puts the base.
+// FL003 write forms that are not assignments to a bare subscript. Each was
+// a miss until the write side learned to reach the striped subscript
+// through the shape wrapping it.
+static uint64_t g_slot_via_ptr[64];
+static struct { uint64_t v; char pad[16]; } g_slot_nested[64];
+// 96B stride: not a line multiple, so element boundaries fall mid-line
+// wherever the linker puts the base.
 static struct { uint64_t a, b, c, d, e, f, g, h, i, j, k, l; } g_slot_stride[64];
 
-void account_wide(int thread_id, uint64_t n) {
+void account_indirect(int thread_id, uint64_t n) {
+    uint64_t *slot = &g_slot_via_ptr[thread_id];
+    *slot += n;
+    g_slot_nested[thread_id].pad[0] = static_cast<char>(n);
     g_slot_stride[thread_id].a += n;
 }
 
