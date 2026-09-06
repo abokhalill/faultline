@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/core/rule.h"
+#include "lshaz/analysis/loop_shape.h"
 #include "lshaz/core/registry.h"
 #include "lshaz/core/hot_path.h"
 #include "lshaz/analysis/allocator.h"
@@ -142,30 +143,34 @@ public:
 
     // Track loop nesting for escalation.
     bool TraverseForStmt(clang::ForStmt *S) {
-        ++inLoop_;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        inLoop_ += st;
         bool r = clang::RecursiveASTVisitor<AllocVisitor>::TraverseForStmt(S);
-        --inLoop_;
+        inLoop_ -= st;
         return r;
     }
 
     bool TraverseWhileStmt(clang::WhileStmt *S) {
-        ++inLoop_;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        inLoop_ += st;
         bool r = clang::RecursiveASTVisitor<AllocVisitor>::TraverseWhileStmt(S);
-        --inLoop_;
+        inLoop_ -= st;
         return r;
     }
 
     bool TraverseDoStmt(clang::DoStmt *S) {
-        ++inLoop_;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        inLoop_ += st;
         bool r = clang::RecursiveASTVisitor<AllocVisitor>::TraverseDoStmt(S);
-        --inLoop_;
+        inLoop_ -= st;
         return r;
     }
 
     bool TraverseCXXForRangeStmt(clang::CXXForRangeStmt *S) {
-        ++inLoop_;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        inLoop_ += st;
         bool r = clang::RecursiveASTVisitor<AllocVisitor>::TraverseCXXForRangeStmt(S);
-        --inLoop_;
+        inLoop_ -= st;
         return r;
     }
 

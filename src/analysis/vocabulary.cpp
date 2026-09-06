@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/vocabulary.h"
+#include "lshaz/analysis/loop_shape.h"
 #include "lshaz/analysis/symbols.h"
 
 #include <clang/AST/ASTConsumer.h>
@@ -107,13 +108,19 @@ public:
 
     using Base = clang::RecursiveASTVisitor<AllocOwnershipVisitor>;
     bool TraverseForStmt(clang::ForStmt *S) {
-        ++loopDepth_; bool r = Base::TraverseForStmt(S); --loopDepth_; return r;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        loopDepth_ += st; bool r = Base::TraverseForStmt(S);
+        loopDepth_ -= st; return r;
     }
     bool TraverseWhileStmt(clang::WhileStmt *S) {
-        ++loopDepth_; bool r = Base::TraverseWhileStmt(S); --loopDepth_; return r;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        loopDepth_ += st; bool r = Base::TraverseWhileStmt(S);
+        loopDepth_ -= st; return r;
     }
     bool TraverseDoStmt(clang::DoStmt *S) {
-        ++loopDepth_; bool r = Base::TraverseDoStmt(S); --loopDepth_; return r;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        loopDepth_ += st; bool r = Base::TraverseDoStmt(S);
+        loopDepth_ -= st; return r;
     }
 
     // An atomic read-modify-write. Inside a loop it is an acquire spin; on its

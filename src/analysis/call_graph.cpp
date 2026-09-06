@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/call_graph.h"
+#include "lshaz/analysis/loop_shape.h"
 #include "lshaz/analysis/symbols.h"
 
 #include <clang/AST/RecursiveASTVisitor.h>
@@ -67,6 +68,7 @@ public:
     // Entries whose role runs on more than one thread at once.
     std::unordered_set<const clang::FunctionDecl *> poolEntries;
     std::unordered_set<const clang::FunctionDecl *> spawnSites;
+    const clang::ASTContext *ctx = nullptr;
     // The fn-slot argument was a parameter of the enclosing function, so that
     // function is a spawner wrapper and function literals at the same argument
     // position of its call sites are entries. Resolved TU-wide once all
@@ -98,10 +100,13 @@ public:
 
     template <typename Node, typename Base>
     bool traverseLoop(Node *N, Base base) {
-        ++loopDepth;
+        // A do/while(0) macro wrapper is not repetition, and counting it
+        // inflates the loop depth that hotness relaxation weighs.
+        const unsigned step = (ctx && isDegenerateLoop(N, *ctx)) ? 0u : 1u;
+        loopDepth += step;
         if (loopDepth > ownLoopDepth) ownLoopDepth = loopDepth;
         bool r = (this->*base)(N);
-        --loopDepth;
+        loopDepth -= step;
         return r;
     }
     bool TraverseForStmt(clang::ForStmt *S) {
@@ -288,6 +293,7 @@ void CallGraph::processFunction(const clang::FunctionDecl *FD) {
         return; // already processed
 
     CallEdgeVisitor visitor;
+    visitor.ctx = &ctx_;
     visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));
 
     ownLoopDepth_[canon] = visitor.ownLoopDepth;

@@ -3,6 +3,7 @@
 
 #include <set>
 #include "lshaz/core/rule.h"
+#include "lshaz/analysis/loop_shape.h"
 #include "lshaz/core/registry.h"
 #include "lshaz/core/hot_path.h"
 
@@ -31,11 +32,12 @@ struct LockSite {
 
 class LockVisitor : public clang::RecursiveASTVisitor<LockVisitor> {
 public:
-    LockVisitor(const std::vector<std::string> &lockPats,
+    LockVisitor(clang::ASTContext &Ctx,
+                const std::vector<std::string> &lockPats,
                 const std::vector<std::string> &unlockPats,
                 const std::set<std::string> *derivedLock = nullptr,
                 const std::set<std::string> *derivedUnlock = nullptr)
-        : lockPats_(lockPats), unlockPats_(unlockPats),
+        : ctx_(Ctx), lockPats_(lockPats), unlockPats_(unlockPats),
           derivedLock_(derivedLock), derivedUnlock_(derivedUnlock) {}
 
     bool VisitCXXMemberCallExpr(clang::CXXMemberCallExpr *E) {
@@ -166,27 +168,31 @@ public:
     }
 
     bool TraverseForStmt(clang::ForStmt *S) {
-        ++inLoop_;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        inLoop_ += st;
         bool r = clang::RecursiveASTVisitor<LockVisitor>::TraverseForStmt(S);
-        --inLoop_;
+        inLoop_ -= st;
         return r;
     }
     bool TraverseWhileStmt(clang::WhileStmt *S) {
-        ++inLoop_;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        inLoop_ += st;
         bool r = clang::RecursiveASTVisitor<LockVisitor>::TraverseWhileStmt(S);
-        --inLoop_;
+        inLoop_ -= st;
         return r;
     }
     bool TraverseDoStmt(clang::DoStmt *S) {
-        ++inLoop_;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        inLoop_ += st;
         bool r = clang::RecursiveASTVisitor<LockVisitor>::TraverseDoStmt(S);
-        --inLoop_;
+        inLoop_ -= st;
         return r;
     }
     bool TraverseCXXForRangeStmt(clang::CXXForRangeStmt *S) {
-        ++inLoop_;
+        const unsigned st = isDegenerateLoop(S, ctx_) ? 0u : 1u;
+        inLoop_ += st;
         bool r = clang::RecursiveASTVisitor<LockVisitor>::TraverseCXXForRangeStmt(S);
-        --inLoop_;
+        inLoop_ -= st;
         return r;
     }
 
@@ -216,6 +222,7 @@ private:
 
     const std::set<std::string> *derivedLock_ = nullptr;
     const std::set<std::string> *derivedUnlock_ = nullptr;
+    clang::ASTContext &ctx_;
     const std::vector<std::string> &lockPats_;
     const std::vector<std::string> &unlockPats_;
     std::vector<LockSite> sites_;
@@ -260,7 +267,7 @@ public:
         if (!Oracle.isFunctionHot(FD))
             return;
 
-        LockVisitor visitor(Cfg.lockFunctionPatterns,
+        LockVisitor visitor(Ctx, Cfg.lockFunctionPatterns,
                             Cfg.unlockFunctionPatterns,
                             &Cfg.derivedLockNames, &Cfg.derivedUnlockNames);
         visitor.TraverseStmt(FD->getBody());

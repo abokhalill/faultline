@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/escape.h"
+#include "lshaz/analysis/loop_shape.h"
 
 #include "lshaz/analysis/atomics.h"
 #include "lshaz/analysis/types.h"
@@ -624,6 +625,7 @@ public:
     FieldWrites &fieldWrites;
     GlobalWriters &globalWriters;
     std::unordered_set<const clang::FunctionDecl *> &opaqueCallFns;
+    const clang::ASTContext &ctx;
     const clang::FunctionDecl *currentFn = nullptr;
     unsigned loopDepth = 0;
 
@@ -631,9 +633,16 @@ public:
         std::unordered_map<const clang::VarDecl *, unsigned> &c,
         std::unordered_map<const clang::VarDecl *, unsigned> &lc,
         FieldWrites &fw, GlobalWriters &gw,
-        std::unordered_set<const clang::FunctionDecl *> &ocf)
+        std::unordered_set<const clang::FunctionDecl *> &ocf,
+        const clang::ASTContext &Ctx)
         : counts(c), loopCounts(lc), fieldWrites(fw), globalWriters(gw),
-          opaqueCallFns(ocf) {}
+          opaqueCallFns(ocf), ctx(Ctx) {}
+
+    // A syntactic loop that cannot repeat contributes no write rate. See
+    // isDegenerateLoop: do/while(0) is how C wraps a macro.
+    unsigned loopStep(const clang::Stmt *S) const {
+        return isDegenerateLoop(S, ctx) ? 0u : 1u;
+    }
 
     // write rate, not site count, is what coherence sees: a write under
     // any of these is repeatable per iteration.
@@ -658,27 +667,31 @@ public:
     }
 
     bool TraverseForStmt(clang::ForStmt *S) {
-        ++loopDepth;
+        const unsigned step = loopStep(S);
+        loopDepth += step;
         bool r = RecursiveASTVisitor::TraverseForStmt(S);
-        --loopDepth;
+        loopDepth -= step;
         return r;
     }
     bool TraverseWhileStmt(clang::WhileStmt *S) {
-        ++loopDepth;
+        const unsigned step = loopStep(S);
+        loopDepth += step;
         bool r = RecursiveASTVisitor::TraverseWhileStmt(S);
-        --loopDepth;
+        loopDepth -= step;
         return r;
     }
     bool TraverseDoStmt(clang::DoStmt *S) {
-        ++loopDepth;
+        const unsigned step = loopStep(S);
+        loopDepth += step;
         bool r = RecursiveASTVisitor::TraverseDoStmt(S);
-        --loopDepth;
+        loopDepth -= step;
         return r;
     }
     bool TraverseCXXForRangeStmt(clang::CXXForRangeStmt *S) {
-        ++loopDepth;
+        const unsigned step = loopStep(S);
+        loopDepth += step;
         bool r = RecursiveASTVisitor::TraverseCXXForRangeStmt(S);
-        --loopDepth;
+        loopDepth -= step;
         return r;
     }
 
@@ -865,7 +878,8 @@ void EscapeAnalysis::collectTypeAccessors(
 void EscapeAnalysis::collectGlobalWriteSites(
     const std::vector<const clang::FunctionDecl *> &bodies) {
     GlobalWriteVisitor visitor(globalWriteCounts_, globalLoopWriteCounts_,
-                               fieldWrites_, globalWriters_, opaqueCallFns_);
+                               fieldWrites_, globalWriters_, opaqueCallFns_,
+                               ctx_);
     for (const auto *FD : bodies) {
         visitor.currentFn = FD;
         visitor.TraverseStmt(const_cast<clang::Stmt *>(FD->getBody()));

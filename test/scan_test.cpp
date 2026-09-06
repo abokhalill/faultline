@@ -677,6 +677,63 @@ void testReducePhaseRulesAreAccountedFor(const std::string &bin,
           "a reduce-phase rule that fired is not named as inert");
 }
 
+// "do { ... } while(0)" is how C wraps a multi-statement macro, and it is a
+// DoStmt in the AST like any other. Counted as a loop it makes a global
+// written twice at startup look like one written in a loop, which is the
+// difference between a lifecycle signal and sustained coherence traffic.
+// Every atomic in redis, nginx and the kernel is written through such a
+// macro, so this was not an edge case: it kept redisAsciiArt, which prints
+// a banner once, graded as an allocation on a hot path.
+void testMacroWrapperIsNotALoop(const std::string &bin) {
+    std::cerr << "test: a do/while(0) macro wrapper is not counted as a loop\n";
+    auto root = fs::temp_directory_path() /
+                ("lshaz_dw0_" + std::to_string(getpid()));
+    fs::create_directories(root);
+
+    // Line numbers are the handle: FL040 reports the declaration site and
+    // carries no symbol in its evidence.
+    { std::ofstream f(root / "a.c");
+      f << "#include <pthread.h>\n"                                  // 1
+           "#define bump(v,n) do { (v) += (n); } while(0)\n"         // 2
+           "static long macro_written;\n"                            // 3
+           "static long loop_written;\n"                             // 4
+           "static void *w1(void *a) { bump(macro_written, 1);\n"    // 5
+           "  for (int i = 0; i < 1000; ++i) loop_written += i;\n"   // 6
+           "  return a; }\n"                                         // 7
+           "static void *w2(void *a) { bump(macro_written, 2);\n"    // 8
+           "  loop_written = 0; return a; }\n"                       // 9
+           "int main(void) {\n"
+           "  pthread_t t[2];\n"
+           "  pthread_create(&t[0],0,w1,0); pthread_create(&t[1],0,w2,0);\n"
+           "  pthread_join(t[0],0); pthread_join(t[1],0);\n"
+           "  return 0; }\n"; }
+    { std::ofstream f(root / "compile_commands.json");
+      f << "[{\"directory\":\"" << root.string()
+        << "\",\"command\":\"cc -c a.c\",\"file\":\""
+        << (root / "a.c").string() << "\"}]\n"; }
+
+    auto r = run(bin + " scan " + root.string() + " --no-ir --rule FL040"
+                 " --format json");
+    auto loopWritesAtLine = [&](const std::string &line) {
+        auto at = r.out.find("\"line\": " + line + ",");
+        if (at == std::string::npos) return std::string("<absent>");
+        auto k = r.out.find("\"global_loop_writes\"", at);
+        if (k == std::string::npos) return std::string("<absent>");
+        auto q = r.out.find('"', r.out.find(':', k));
+        return r.out.substr(q + 1, r.out.find('"', q + 1) - q - 1);
+    };
+    // Two writes, both through the macro. Counted as loops this read as 2.
+    check(loopWritesAtLine("3") == "0",
+          "a write inside a do/while(0) macro is not a loop write");
+    // The guard must fold only the degenerate condition, or it would trade
+    // one blind spot for another and stop seeing real repetition.
+    const std::string real = loopWritesAtLine("4");
+    check(real != "0" && real != "<absent>",
+          "a write inside a real loop is still a loop write");
+
+    fs::remove_all(root);
+}
+
 // A project that needs a build before it can be scanned reports zero
 // findings, which is what a clean project reports. B001 is the only thing
 // that tells those apart, and it was dead: it searched the stored error for
@@ -1342,6 +1399,7 @@ int main() {
     testTUCacheAgreesWithColdScan(bin);
     testVocabularyIsJobsInvariant(bin);
     testMissingHeaderIsReported(bin);
+    testMacroWrapperIsNotALoop(bin);
     testJsonOutputConfigKey(bin, fixture);
     testInitWithoutBuildSystem(bin);
     testCMakeGeneration(bin, fixture);
