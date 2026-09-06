@@ -296,7 +296,8 @@ std::string resolveCompiler(const std::string &dbCompiler) {
 // --- Fork-based parallel IPC ---
 
 // Minimal JSON serializer for child→parent IPC.
-// Format: {"exitCode":N,"failedTUs":[{"file":"...","error":"..."}],"diagnostics":[...]}
+// Format: {"exitCode":N,"failedTUs":[{"file":"...","error":"...",
+//           "missingHeader":"..."}],"diagnostics":[...]}
 std::string serializeShardResult(int exitCode,
                                   const std::vector<FailedTU> &failedTUs,
                                   const std::vector<Diagnostic> &diagnostics,
@@ -331,7 +332,9 @@ std::string serializeShardResult(int exitCode,
     for (size_t i = 0; i < failedTUs.size(); ++i) {
         if (i) buf += ',';
         buf += "{\"file\":\""; buf += esc(failedTUs[i].file); buf += "\",";
-        buf += "\"error\":\""; buf += esc(failedTUs[i].error); buf += "\"}";
+        buf += "\"error\":\""; buf += esc(failedTUs[i].error); buf += "\",";
+        buf += "\"missingHeader\":\"";
+        buf += esc(failedTUs[i].missingHeader); buf += "\"}";
     }
     buf += "],\"diagnostics\":[";
     for (size_t i = 0; i < diagnostics.size(); ++i) {
@@ -849,6 +852,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                         ftu.file = ipc::parseStr(json, i);
                     } else if (subkey == "error") {
                         ftu.error = ipc::parseStr(json, i);
+                    } else if (subkey == "missingHeader") {
+                        ftu.missingHeader = ipc::parseStr(json, i);
                     } else {
                         ipc::skipValue(json, i);
                     }
@@ -3440,19 +3445,9 @@ ScanResult ScanPipeline::run(
 
     // Header fingerprint detection: identify missing header patterns.
     std::map<std::string, unsigned> missingHeaderCounts;
-    for (const auto &ftu : failedTUsDetailed) {
-        // Look for "fatal error: 'header.h' file not found" pattern.
-        std::string err = ftu.error;
-        auto fatalPos = err.find("fatal error:");
-        if (fatalPos != std::string::npos) {
-            auto start = err.find('\'', fatalPos);
-            auto end = err.find('\'', start + 1);
-            if (start != std::string::npos && end != std::string::npos && end > start + 1) {
-                std::string header = err.substr(start + 1, end - start - 1);
-                ++missingHeaderCounts[header];
-            }
-        }
-    }
+    for (const auto &ftu : failedTUsDetailed)
+        if (!ftu.missingHeader.empty())
+            ++missingHeaderCounts[ftu.missingHeader];
 
     // Emit warnings for headers missing from >= 3 TUs. B001 reports a
     // broken scan, so it bypasses severity/evidence filters by design,

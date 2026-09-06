@@ -4,12 +4,35 @@
 #include "lshaz/analysis/vocabulary.h"
 
 #include <clang/Basic/Diagnostic.h>
+#include <clang/Basic/DiagnosticLex.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <llvm/ADT/SmallString.h>
 
 namespace lshaz {
 
 namespace {
+
+// The include Clang could not resolve, taken from the diagnostic's own ID
+// and argument. The rendered message carries no "fatal error:" prefix, so
+// B001 spent its whole life matching text FormatDiagnostic never produces.
+bool missingIncludeName(const clang::Diagnostic &info, std::string &out) {
+    switch (info.getID()) {
+    case clang::diag::err_pp_file_not_found:
+    case clang::diag::err_pp_file_not_found_angled_include_not_fatal:
+    case clang::diag::err_pp_file_not_found_typo_not_fatal:
+        break;
+    default:
+        return false;
+    }
+    // getArgStdStr asserts on any other kind. All three spell the filename
+    // as argument 0 today; checking keeps a future respelling a miss rather
+    // than an abort inside a shard.
+    if (info.getNumArgs() == 0 ||
+        info.getArgKind(0) != clang::DiagnosticsEngine::ak_std_string)
+        return false;
+    out = info.getArgStdStr(0);
+    return !out.empty();
+}
 
 // Forwarding consumer that captures the first error/fatal diagnostic message
 // while delegating everything to the original consumer. Takes ownership of
@@ -18,15 +41,20 @@ namespace {
 class ErrorCapture : public clang::DiagnosticConsumer {
 public:
     ErrorCapture(std::unique_ptr<clang::DiagnosticConsumer> target,
-                 std::string &out)
-        : target_(std::move(target)), out_(out) {}
+                 std::string &out, std::string &missingHeader)
+        : target_(std::move(target)), out_(out),
+          missingHeader_(missingHeader) {}
 
     void HandleDiagnostic(clang::DiagnosticsEngine::Level level,
                           const clang::Diagnostic &info) override {
-        if (out_.empty() && level >= clang::DiagnosticsEngine::Error) {
-            llvm::SmallString<256> buf;
-            info.FormatDiagnostic(buf);
-            out_ = std::string(buf.str());
+        if (level >= clang::DiagnosticsEngine::Error) {
+            if (out_.empty()) {
+                llvm::SmallString<256> buf;
+                info.FormatDiagnostic(buf);
+                out_ = std::string(buf.str());
+            }
+            if (missingHeader_.empty())
+                missingIncludeName(info, missingHeader_);
         }
         target_->HandleDiagnostic(level, info);
     }
@@ -41,6 +69,7 @@ public:
 private:
     std::unique_ptr<clang::DiagnosticConsumer> target_;
     std::string &out_;
+    std::string &missingHeader_;
 };
 
 } // anonymous namespace
@@ -62,13 +91,15 @@ LshazAction::LshazAction(
 
 bool LshazAction::BeginSourceFileAction(clang::CompilerInstance &CI) {
     firstError_.clear();
+    missingHeader_.clear();
     auto &diags = CI.getDiagnostics();
     // takeClient() transfers ownership so setClient() won't destroy it.
     auto orig = diags.takeClient();
     if (!orig)
         return true;
-    diags.setClient(new ErrorCapture(std::move(orig), firstError_),
-                    /*ShouldOwnClient=*/true);
+    diags.setClient(
+        new ErrorCapture(std::move(orig), firstError_, missingHeader_),
+        /*ShouldOwnClient=*/true);
     return true;
 }
 
@@ -89,6 +120,7 @@ void LshazAction::EndSourceFileAction() {
         FailedTU ftu;
         ftu.file = currentFile_;
         ftu.error = firstError_.empty() ? "compilation error" : firstError_;
+        ftu.missingHeader = missingHeader_;
         failedTUs_.push_back(std::move(ftu));
     }
 }

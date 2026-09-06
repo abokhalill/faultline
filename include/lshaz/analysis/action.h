@@ -21,7 +21,11 @@ namespace lshaz {
 
 struct FailedTU {
     std::string file;
-    std::string error; // e.g., "fatal error: 'generated.h' file not found"
+    std::string error; // e.g., "'generated.h' file not found"
+    // Name from the missing-include diagnostic's own argument, not parsed
+    // back out of the rendered message. Empty when the TU failed for any
+    // other reason.
+    std::string missingHeader;
 };
 
 class LshazAction : public clang::ASTFrontendAction {
@@ -56,6 +60,7 @@ private:
     std::vector<std::string> *deps_;
     std::string currentFile_;
     std::string firstError_;
+    std::string missingHeader_;
 };
 
 class LshazActionFactory : public clang::tooling::FrontendActionFactory {

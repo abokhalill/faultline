@@ -647,6 +647,51 @@ void testTUCacheAgreesWithColdScan(const std::string &bin) {
 // Asserting the whole vocabulary line is identical across job counts catches
 // the next one by construction, whatever kind of fact it is. Needs several
 // TUs, or there is nothing to shard.
+// A project that needs a build before it can be scanned reports zero
+// findings, which is what a clean project reports. B001 is the only thing
+// that tells those apart, and it was dead: it searched the stored error for
+// a "fatal error:" prefix that FormatDiagnostic does not emit, so it never
+// matched and nothing failed. Nothing referenced B001 in any harness.
+void testMissingHeaderIsReported(const std::string &bin) {
+    std::cerr << "test: a project needing a build says so rather than "
+                 "reporting clean\n";
+    auto root = fs::temp_directory_path() /
+                ("lshaz_b001_" + std::to_string(getpid()));
+    fs::create_directories(root);
+
+    const int kTUs = 4;   // B001 needs at least three
+    for (int i = 0; i < kTUs; ++i) {
+        std::ofstream f(root / ("a" + std::to_string(i) + ".c"));
+        f << "#include \"generated_config.h\"\n"
+             "int f" << i << "(void) { return CONFIG_VALUE; }\n";
+    }
+    { std::ofstream f(root / "compile_commands.json");
+      f << "[";
+      for (int i = 0; i < kTUs; ++i)
+          f << (i ? "," : "") << "{\"directory\":\"" << root.string()
+            << "\",\"command\":\"cc -c a" << i << ".c\",\"file\":\""
+            << (root / ("a" + std::to_string(i) + ".c")).string() << "\"}";
+      f << "]\n"; }
+
+    auto scan = [&](const std::string &jobs) {
+        return run(bin + " scan " + root.string() + " --no-ir --format json"
+                   " --jobs " + jobs).out;
+    };
+    const std::string one = scan("1");
+    check(contains(one, "\"B001\""),
+          "a header missing from every TU is reported, not scanned past");
+    check(contains(one, "generated_config.h"),
+          "the report names the header that could not be found");
+    // The header name is collected in a forked child. Anything the parent
+    // needs has to cross the IPC boundary explicitly, and the symptom of
+    // forgetting is a scan that is correct at --jobs 1 only.
+    check(countOccurrences(one, "\"B001\"") ==
+              countOccurrences(scan("4"), "\"B001\""),
+          "the missing-header report survives the shard boundary");
+
+    fs::remove_all(root);
+}
+
 void testVocabularyIsJobsInvariant(const std::string &bin) {
     std::cerr << "test: derived vocabulary is identical across job counts\n";
     auto root = fs::temp_directory_path() /
@@ -1266,6 +1311,7 @@ int main() {
     testCrossThreadFreeConjunct(bin);
     testTUCacheAgreesWithColdScan(bin);
     testVocabularyIsJobsInvariant(bin);
+    testMissingHeaderIsReported(bin);
     testJsonOutputConfigKey(bin, fixture);
     testInitWithoutBuildSystem(bin);
     testCMakeGeneration(bin, fixture);
