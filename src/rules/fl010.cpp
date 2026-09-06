@@ -552,7 +552,11 @@ public:
                  isARM ? "an atomic op whose relaxed form emits fewer barriers"
                        : "a seq_cst store on x86-64",
                  true, sev},
-                {"the operation is on a path executed often enough to matter",
+                // Says repetition within one call, which a loop does
+                // establish. Phrased as frequency it restated the hotness
+                // claim beside it, which is separately unestablished, so
+                // one finding asserted the same thing true and false.
+                {"the barrier is paid once per iteration, not once per call",
                  "the write sits inside a loop", site.inLoop != 0,
                  Severity::Critical},
             };
