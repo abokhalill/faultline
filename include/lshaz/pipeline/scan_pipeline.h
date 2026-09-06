@@ -15,6 +15,13 @@ namespace lshaz {
 using ProgressCallback = std::function<void(const std::string &stage,
                                             const std::string &detail)>;
 
+// Hazard rules emitted in the reduce phase rather than by a registered
+// Rule, so RuleRegistry does not enumerate them and the coverage report
+// cannot tell "ran and saw nothing" from "never ran" without this list.
+// B001 and C002 are deliberately absent: they report a broken scan, and
+// their silence is the healthy outcome rather than an unanswered question.
+const std::vector<std::string> &reducePhaseHazardRules();
+
 class ScanPipeline {
 public:
     explicit ScanPipeline(ProgressCallback progress = nullptr);

@@ -2175,6 +2175,11 @@ static void filterAndSort(const FilterOptions &filter,
 
 // --- Entry points ---
 
+const std::vector<std::string> &reducePhaseHazardRules() {
+    static const std::vector<std::string> kIDs = {"FL003", "FL091", "FL092"};
+    return kIDs;
+}
+
 ScanResult ScanPipeline::execute(const ScanRequest &request) {
     std::string dbPath = request.compileDBPath;
 

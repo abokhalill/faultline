@@ -610,6 +610,9 @@ int runScanCommand(int argc, const char **argv) {
                 if (!fired.count(id) && !off.count(id))
                     inert.push_back(id);
             }
+            for (const auto &id : reducePhaseHazardRules())
+                if (!fired.count(id) && !off.count(id))
+                    inert.push_back(id);
             std::sort(inert.begin(), inert.end());
             if (!inert.empty()) {
                 llvm::errs() << "lshaz: " << inert.size()

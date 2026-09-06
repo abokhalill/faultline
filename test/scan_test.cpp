@@ -647,6 +647,36 @@ void testTUCacheAgreesWithColdScan(const std::string &bin) {
 // Asserting the whole vocabulary line is identical across job counts catches
 // the next one by construction, whatever kind of fact it is. Needs several
 // TUs, or there is nothing to shard.
+// The inert-rule line is what distinguishes "looked and found nothing" from
+// "never ran", and it enumerated RuleRegistry only. Rules emitted in the
+// reduce phase are not in the registry, so they were the one class the
+// report could never speak for.
+void testReducePhaseRulesAreAccountedFor(const std::string &bin,
+                                         const std::string &hftFixture,
+                                         const std::string &canaryFixture) {
+    std::cerr << "test: reduce-phase rules appear in the inert-rule line\n";
+    if (hftFixture.empty() || canaryFixture.empty()) {
+        check(false, "both fixtures present for the inert-rule gate");
+        return;
+    }
+    auto inertLine = [&](const std::string &fixture, const char *suffix) {
+        auto tmp = isolateFixture(fixture, suffix);
+        auto r = run(bin + " scan " + (tmp / "project").string() + " --no-ir");
+        fs::remove_all(tmp);
+        auto at = r.err.find("rule(s) produced no findings:");
+        if (at == std::string::npos) return std::string("<absent>");
+        return r.err.substr(at, r.err.find('\n', at) - at);
+    };
+
+    // FL003 finds nothing in hft_core, which spawns no threads, and fires on
+    // the canary. Naming it in one and not the other is the whole contract.
+    const std::string quiet = inertLine(hftFixture, "inerthft");
+    check(contains(quiet, "FL003"),
+          "a reduce-phase rule that found nothing is named as inert");
+    check(!contains(inertLine(canaryFixture, "inertcan"), "FL003"),
+          "a reduce-phase rule that fired is not named as inert");
+}
+
 // A project that needs a build before it can be scanned reports zero
 // findings, which is what a clean project reports. B001 is the only thing
 // that tells those apart, and it was dead: it searched the stored error for
@@ -1325,6 +1355,7 @@ int main() {
     testOptRemarkChannel(bin, canaryPath());
     testAllocatorWrapperNames(bin, canaryPath());
     testMechanismClaimsBoundSeverity(bin, fixture, canaryPath());
+    testReducePhaseRulesAreAccountedFor(bin, fixture, canaryPath());
 
     // Hazard detection.
     testHazardDetectionWithConfig(bin, fixture);
