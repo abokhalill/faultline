@@ -68,6 +68,14 @@ uint64_t total_accounted() {
     return t;
 }
 
+// FL003. 96B stride: not a line multiple, so element boundaries fall
+// mid-line wherever the linker puts the base.
+static struct { uint64_t a, b, c, d, e, f, g, h, i, j, k, l; } g_slot_stride[64];
+
+void account_wide(int thread_id, uint64_t n) {
+    g_slot_stride[thread_id].a += n;
+}
+
 // FL061. Centralized dispatcher: hot function with high fan-out.
 static void op_add(uint64_t v)  { g_registry.sequence.fetch_add(v); }
 static void op_sub(uint64_t v)  { g_registry.sequence.fetch_sub(v); }

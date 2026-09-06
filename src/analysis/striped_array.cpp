@@ -390,7 +390,16 @@ void StripedArrayAnalysis::catalogue(const std::vector<clang::Decl *> &decls) {
         if (!canComputeTypeSize(elem, ctx_)) return;
         // stride, not data size: indexing steps by the padded layout size.
         const uint64_t es = ctx_.getTypeSizeInChars(elem).getQuantity();
-        if (es == 0 || es >= cfg_.cacheLineBytes) return;
+        if (es == 0) return;
+        // A wider-than-line stride still shares a boundary line when it is
+        // not a line multiple, and that holds for any base, so no alignment
+        // has to be assumed. Three elements are needed to say so: with two
+        // there is a single boundary, and a base can always be found that
+        // puts it on a line start. A stride that is a line multiple depends
+        // entirely on the base, which the linker picks, so it stays out.
+        if (es >= cfg_.cacheLineBytes &&
+            (n < 3 || !strideStraddlesLines(es, cfg_.cacheLineBytes)))
+            return;
 
         std::string key = stripedKeyForDecl(D, ctx_);
         if (key.empty()) return;

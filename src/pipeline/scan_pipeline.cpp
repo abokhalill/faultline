@@ -1732,15 +1732,26 @@ static unsigned emitStripedArrayFindings(
         d.location.line = s.line;
         d.location.column = 1;
 
+        const bool straddles =
+            strideStraddlesLines(s.elemSizeBytes, lineBytes) &&
+            s.elemSizeBytes > lineBytes;
         std::ostringstream hw;
-        hw << (s.isFileStatic ? "Static array '" : "Array '")
-           << s.displayName << "' packs " << v.slotsPerLine
-           << " slots per " << lineBytes << "B line across "
-           << v.contendedLines << " line(s) (" << s.elemCount
-           << " x " << s.elemSizeBytes << "B). Slots are written under a "
-           << "thread-identity index, so distinct cores update distinct "
-           << "slots on the same line: every write takes the line in "
-           << "Modified state and invalidates it in the other core.";
+        hw << (s.isFileStatic ? "Static array '" : "Array '") << s.displayName;
+        if (straddles)
+            hw << "' has a " << s.elemSizeBytes << "B stride that is not a "
+               << "multiple of the " << lineBytes << "B line, so element "
+               << "boundaries fall mid-line whatever the base address is: "
+               << v.contendedLines << " boundary line(s) across "
+               << s.elemCount << " slots are each written by the pair of "
+               << "elements that meet there.";
+        else
+            hw << "' packs " << v.slotsPerLine << " slots per " << lineBytes
+               << "B line across " << v.contendedLines << " line(s) ("
+               << s.elemCount << " x " << s.elemSizeBytes << "B).";
+        hw << " Slots are written under a thread-identity index, so distinct "
+           << "cores update distinct slots on the same line: every write "
+           << "takes the line in Modified state and invalidates it in the "
+           << "other core.";
         if (!s.elementIsAtomic)
             hw << " Elements are non-atomic, striping makes each slot "
                   "single-writer, so this is coherence traffic without a "
@@ -1785,8 +1796,10 @@ static unsigned emitStripedArrayFindings(
         // discipline FL040 and FL011 now follow.
         d.mechanismClaims = {
             {"several thread slots share one cache line",
-             "an element stride narrower than the line, unpadded", true,
-             Severity::Medium},
+             straddles ? "an element stride that is not a line multiple, so "
+                         "boundaries fall mid-line for any base address"
+                       : "an element stride narrower than the line, unpadded",
+             true, Severity::Medium},
             {"per-write RFO transfer between the owning cores",
              "distinct thread-indexed writers reaching separate slots",
              v.writerCount >= 2 || s.tlsIndexed,

@@ -1,7 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "lshaz/analysis/striped_array_summary.h"
 
+#include <numeric>
+
 namespace lshaz {
+
+// Element boundaries sit at b + k*stride, so their offsets within a line
+// step by gcd(stride, line) and can return to a line start only once every
+// line/gcd values of k. Whatever b is, the remaining boundaries fall
+// mid-line and are shared by the pair of elements that meet there.
+static uint64_t straddledBoundaries(uint64_t elemCount, uint64_t elemSizeBytes,
+                                    uint64_t lineBytes) {
+    if (elemCount < 2 || lineBytes == 0) return 0;
+    const uint64_t d = std::gcd(elemSizeBytes % lineBytes, lineBytes);
+    if (d == 0) return 0;
+    const uint64_t period = lineBytes / d;
+    const uint64_t boundaries = elemCount - 1;
+    const uint64_t maxAligned = (boundaries + period - 1) / period;
+    return boundaries > maxAligned ? boundaries - maxAligned : 0;
+}
 
 StripeVerdict gradeStripedArray(const StripedArraySite &s,
                                 const ThreadRoleVerdicts &roles,
@@ -14,6 +31,12 @@ StripeVerdict gradeStripedArray(const StripedArraySite &s,
         v.slotsPerLine = lineBytes / s.elemSizeBytes;
         v.contendedLines =
             (s.elemCount + v.slotsPerLine - 1) / v.slotsPerLine;
+    } else if (strideStraddlesLines(s.elemSizeBytes, lineBytes)) {
+        // An element wider than the line owns interior lines outright; only
+        // the two elements meeting at a straddled boundary share one.
+        v.slotsPerLine = 2;
+        v.contendedLines =
+            straddledBoundaries(s.elemCount, s.elemSizeBytes, lineBytes);
     }
 
     // Any unattributed writer collapses the mask: a partial attribution
@@ -43,8 +66,14 @@ StripeVerdict gradeStripedArray(const StripedArraySite &s,
 void applyStripeROI(StripeVerdict &v, const StripedArraySite &s,
                     uint64_t lineBytes, uint64_t l1dSizeBytes,
                     bool alignedOwnerAvailable) {
+    // Round the stride up rather than assuming one line per slot: an
+    // element already wider than a line pads to the next multiple, and
+    // elemCount * lineBytes would underflow the difference below.
+    const uint64_t padStride =
+        lineBytes ? ((s.elemSizeBytes + lineBytes - 1) / lineBytes) * lineBytes
+                  : s.elemSizeBytes;
     v.currentFootprint = s.elemCount * s.elemSizeBytes;
-    v.paddedFootprint  = s.elemCount * lineBytes;
+    v.paddedFootprint  = s.elemCount * padStride;
     v.l1dCostFraction =
         l1dSizeBytes ? static_cast<double>(v.paddedFootprint -
                                            v.currentFootprint) /
@@ -66,6 +95,26 @@ void applyStripeROI(StripeVerdict &v, const StripedArraySite &s,
         v.fixShape = StripeFixShape::RelocateToOwner;
         v.fixRationale = "an already line-aligned per-thread structure "
                          "exists; relocating costs no extra footprint";
+        return;
+    }
+    // Head padding only shifts the base, which leaves a straddling stride
+    // straddling, so the shapes below cannot be offered here. Rounding the
+    // element up is the whole fix, and it costs the remainder rather than a
+    // full line per slot, so it is worth naming well short of hot.
+    if (strideStraddlesLines(s.elemSizeBytes, lineBytes) &&
+        s.elemSizeBytes > lineBytes) {
+        if (!expensive) {
+            v.fixShape = StripeFixShape::FullPad;
+            v.fixRationale = "rounding the element up to a line multiple is "
+                             "the only shape that separates these slots, and "
+                             "it costs a small share of L1D";
+            return;
+        }
+        v.fixShape = StripeFixShape::None;
+        v.fixRationale = "the stride is not a line multiple, so element "
+                         "boundaries fall mid-line wherever the array sits, "
+                         "and rounding the element up costs more L1D than "
+                         "the coherence traffic it saves";
         return;
     }
     if (hot) {

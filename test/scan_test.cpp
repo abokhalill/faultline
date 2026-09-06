@@ -262,6 +262,10 @@ void testStripeIndexIdentity(const std::string &bin,
           "a subscript on the writer's own parameter reads as writer identity");
     check(identityOf("canary_clients_per_thread") == "owner",
           "a subscript through a handed-in object reads as owner identity");
+
+    check(identityOf("g_slot_stride") == "writer",
+          "an element stride that is not a line multiple straddles lines "
+          "whatever the base alignment");
 }
 
 // The channel rides the IR pass, so every other canary run here misses it:

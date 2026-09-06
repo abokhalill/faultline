@@ -115,13 +115,27 @@ enum class StripeMitigation : uint8_t {
     FullyPadded,          // stride >= line: every slot owns a line
 };
 
+// Adjacent elements avoid sharing a line only when the boundary between
+// them, at b + k*stride, lands on a line start. Requiring that for two
+// successive k subtracts to stride % line == 0, so a stride that is not a
+// line multiple shares a boundary line wherever the array sits.
+inline bool strideStraddlesLines(uint64_t elemSizeBytes, uint64_t lineBytes) {
+    return lineBytes != 0 && elemSizeBytes != 0 &&
+           elemSizeBytes % lineBytes != 0;
+}
+
 // stride, not data size: array indexing steps by the padded layout size.
 inline StripeMitigation classifyStripeMitigation(const StripedArraySite &s,
                                                  uint64_t lineBytes) {
     if (lineBytes == 0) return StripeMitigation::None;
     if (s.elemSizeBytes != 0 && s.elemSizeBytes % lineBytes == 0)
         return StripeMitigation::FullyPadded;
-    if (s.hasHeadPaddingOffset && s.declAlignBytes >= lineBytes)
+    // Head padding moves the base, and the straddle argument does not
+    // depend on the base, so it mitigates nothing once the stride itself
+    // is off. Grading it as partial isolation would cap the severity for
+    // a fix that cannot work.
+    if (s.hasHeadPaddingOffset && s.declAlignBytes >= lineBytes &&
+        s.elemSizeBytes < lineBytes)
         return StripeMitigation::HeadPadded;
     return StripeMitigation::None;
 }
