@@ -76,6 +76,9 @@ struct StripedArraySite {
     // it crosses the shard protocol as one integer.
     uint8_t writerTier = 0;
     std::set<std::string> aggregators;     // loop-swept readers/resetters
+    // Touching every slot once per INFO command is free, once per allocation
+    // is not, so FL004's whole cost is this number.
+    uint8_t aggregatorTier = 0;
 
     void merge(const StripedArraySite &o) {
         elementIsAtomic       |= o.elementIsAtomic;
@@ -92,6 +95,7 @@ struct StripedArraySite {
                             isFileStatic = o.isFileStatic; }
         stripedWriters.insert(o.stripedWriters.begin(), o.stripedWriters.end());
         writerTier = std::max(writerTier, o.writerTier);
+        aggregatorTier = std::max(aggregatorTier, o.aggregatorTier);
         aggregators.insert(o.aggregators.begin(), o.aggregators.end());
     }
 };

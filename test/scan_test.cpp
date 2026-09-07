@@ -273,6 +273,17 @@ void testStripeIndexIdentity(const std::string &bin,
     check(identityOf("g_slot_stride") == "writer",
           "an element stride that is not a line multiple straddles lines "
           "whatever the base alignment");
+
+    // g_swept is padded and aligned correctly. Asserting both directions
+    // keeps FL003 and FL004 from collapsing into each other.
+    check(contains(r.out, "\"FL004\""),
+          "a sweep over correctly padded per-thread slots is reported");
+    check(contains(r.out, "\"symbol\": \"g_swept\""),
+          "the swept array is named in the sweep finding");
+    // Reading index_identity here would assert nothing: that field is
+    // FL003's, and FL003 is supposed to be silent on a padded array.
+    check(identityOf("g_swept") == "<absent>",
+          "FL003 stays silent on slots that are padded apart");
 }
 
 // The channel rides the IR pass, so every other canary run here misses it:

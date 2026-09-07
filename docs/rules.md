@@ -346,6 +346,37 @@ nothing for slot 0 versus slot 1.
 
 ## Synchronization risks
 
+### FL004, Aggregation Sweep Over Per-Thread Slots
+
+**Base severity:** High &nbsp;|&nbsp; **Scope:** array (struct member or file-static) &nbsp;|&nbsp; **Gate:** sweep hotness
+
+**Hardware mechanism:** a loop reads every slot of an array written under a
+thread-identity index. Reading slot `i` takes its line in Shared, downgrading
+the owning core out of Modified, and that owner pays an Exclusive re-acquire
+on its next write. The sweep costs about `2 x lines` coherence transactions
+per call.
+
+Padding cannot fix this and increases the line count, so the correctly padded
+array FL003 skips is exactly where it lives. redis pads and aligns
+`used_memory[]`, FL003 stays silent, and `zmalloc_used_memory()` still
+measured second on a loaded redis at 64 of 1198 HITM (i9-9900K, recorded in
+`reports/measured-constants.md`). FL003 was already collecting the evidence
+as `aggregators` and grading it "read side, not a striped write".
+
+**Gates:** at least one thread-identity writer, since with no writer no line
+is in Modified state and the sweep downgrades nothing; not `mainThreadOnly`,
+since one thread owning every slot means no line is owned elsewhere; at least
+4 lines swept.
+
+**Severity** is the sweep's call rate. Hot over 16 or more lines is Critical,
+hot is High, dispatch is Medium, tick is Informational, because sweeping on a
+stats timer is the correct design. The reported line count is the array's
+declared bound, an upper bound on what any one loop touches: a loop stopping
+at a configured thread count touches proportionally fewer.
+
+**Fix:** keep a running total the writers update, or cache the aggregate and
+refresh it off the hot path.
+
 ### FL010, Overly Strong Atomic Ordering
 
 **Base severity:** High &nbsp;|&nbsp; **Scope:** function &nbsp;|&nbsp; **Gate:** hot path

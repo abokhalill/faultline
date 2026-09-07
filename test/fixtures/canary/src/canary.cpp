@@ -84,6 +84,21 @@ void account_indirect(int thread_id, uint64_t n) {
     g_slot_stride[thread_id].a += n;
 }
 
+// FL004. Correctly padded and aligned, so FL003 is right to stay silent, and
+// a loop that reads every slot still downgrades each owner out of Modified.
+// The shape measurement found second-most-expensive in redis.
+struct alignas(64) SweptSlot { uint64_t v; char pad[56]; };
+static SweptSlot g_swept[64];
+
+void account_swept(int thread_id, uint64_t n) { g_swept[thread_id].v += n; }
+
+__attribute__((hot))
+uint64_t total_swept() {
+    uint64_t t = 0;
+    for (int i = 0; i < 64; ++i) t += g_swept[i].v;
+    return t;
+}
+
 // FL061. Centralized dispatcher: hot function with high fan-out.
 static void op_add(uint64_t v)  { g_registry.sequence.fetch_add(v); }
 static void op_sub(uint64_t v)  { g_registry.sequence.fetch_sub(v); }
@@ -121,6 +136,8 @@ static void worker(int id) {
         g_amplified.tail.fetch_add(1);
         g_amplified.drops.fetch_add(id & 1);
         account(id, static_cast<uint64_t>(i));
+        account_swept(id, static_cast<uint64_t>(i));
+        (void)total_swept();
         dispatch(i & 7, static_cast<uint64_t>(i));
     }
 }

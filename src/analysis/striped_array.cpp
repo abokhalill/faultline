@@ -281,8 +281,11 @@ public:
         if (!currentFn) return true;
         if (classify(E->getIdx()) != IndexProvenance::LoopInduction)
             return true;
-        if (auto *s = siteFor(E))
-            s->aggregators.insert(threadRoleNodeName(currentFn, ctx));
+        if (auto *s = siteFor(E)) {
+            std::string an = threadRoleNodeName(currentFn, ctx);
+            s->aggregators.insert(an);
+            s->aggregatorTier = std::max(s->aggregatorTier, tierOf(an));
+        }
         return true;
     }
 
@@ -611,15 +614,23 @@ void StripedArrayAnalysis::catalogue(const std::vector<clang::Decl *> &decls) {
         // stride, not data size: indexing steps by the padded layout size.
         const uint64_t es = ctx_.getTypeSizeInChars(elem).getQuantity();
         if (es == 0) return;
-        // A wider-than-line stride still shares a boundary line when it is
-        // not a line multiple, and that holds for any base, so no alignment
-        // has to be assumed. Three elements are needed to say so: with two
-        // there is a single boundary, and a base can always be found that
-        // puts it on a line start. A stride that is a line multiple depends
-        // entirely on the base, which the linker picks, so it stays out.
-        if (es >= cfg_.cacheLineBytes &&
-            (n < 3 || !strideStraddlesLines(es, cfg_.cacheLineBytes)))
-            return;
+        if (es >= cfg_.cacheLineBytes) {
+            // A wider-than-line stride still shares a boundary line when it
+            // is not a line multiple, and that holds for any base, so no
+            // alignment has to be assumed. Three elements are needed to say
+            // so: with two there is a single boundary, and a base can always
+            // be found that puts it on a line start.
+            if (strideStraddlesLines(es, cfg_.cacheLineBytes)) {
+                if (n < 3) return;
+            } else {
+                // Adjacent slots never share, so FL003 stays silent, but
+                // FL004 grades the sweep over exactly these. Bounded because
+                // a per-thread slot is a counter or a small struct, and
+                // without it every lookup table in the program is catalogued.
+                constexpr uint64_t kMaxSlotLines = 4;
+                if (es > kMaxSlotLines * cfg_.cacheLineBytes) return;
+            }
+        }
 
         std::string key = stripedKeyForDecl(D, ctx_);
         if (key.empty()) return;

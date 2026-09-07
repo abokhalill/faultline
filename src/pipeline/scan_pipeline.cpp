@@ -546,6 +546,7 @@ std::string serializeShardResult(int exitCode,
             buf += ",\"oi\":" + std::to_string(a.indexIsOwnIdentity ? 1 : 0);
             buf += ",\"hp\":" + std::to_string(a.hasHeadPaddingOffset ? 1 : 0);
             buf += ",\"wt\":" + std::to_string(a.writerTier);
+            buf += ",\"agt\":" + std::to_string(a.aggregatorTier);
             buf += ",\"w\":[";
             bool fw = true;
             for (const auto &w : a.stripedWriters) {
@@ -1078,6 +1079,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                         else if (f == "oi") a.indexIsOwnIdentity = v != 0;
                         else if (f == "hp") a.hasHeadPaddingOffset = v != 0;
                         else if (f == "wt") a.writerTier =
+                            static_cast<uint8_t>(v);
+                        else if (f == "agt") a.aggregatorTier =
                             static_cast<uint8_t>(v);
                     }
                     ipc::expect(json, i, ',');
@@ -1855,6 +1858,125 @@ static unsigned emitStripedArrayFindings(
     return emitted;
 }
 
+// FL004: a loop reading every per-thread slot takes each one in Shared,
+// downgrading its owner out of Modified and costing that owner an Exclusive
+// re-acquire on its next write. Padding cannot fix it and increases the line
+// count, so the correctly padded array FL003 skips is where this lives.
+// Measured second on redis under load, 64 of 1198 HITM.
+static unsigned emitAggregationSweepFindings(
+        std::vector<Diagnostic> &diagnostics,
+        const StripedArraySummary &striped,
+        const ThreadRoleVerdicts &roles,
+        uint64_t lineBytes) {
+    // Below this the sweep touches a couple of lines and no call rate
+    // makes that matter.
+    constexpr uint64_t kMinSweptLines = 4;
+    unsigned emitted = 0;
+    for (const auto &[key, s] : striped) {
+        if (s.aggregators.empty()) continue;
+        // No writer means no line is ever in Modified state, so the sweep
+        // costs nothing to downgrade.
+        if (s.stripedWriters.empty()) continue;
+        if (lineBytes == 0 || s.elemSizeBytes == 0 || s.elemCount == 0)
+            continue;
+
+        StripeVerdict v = gradeStripedArray(s, roles, lineBytes);
+        // Every writer on one thread means no line is ever owned elsewhere.
+        if (v.mainThreadOnly) continue;
+
+        const uint64_t bytes = s.elemCount * s.elemSizeBytes;
+        const uint64_t sweptLines = (bytes + lineBytes - 1) / lineBytes;
+        if (sweptLines < kMinSweptLines) continue;
+
+        const auto tier = static_cast<WriteFrequencyTier>(s.aggregatorTier);
+        Diagnostic d;
+        d.ruleID = "FL004";
+        d.title = "Aggregation Sweep Over Per-Thread Slots";
+        d.location.file = s.file;
+        d.location.line = s.line;
+        d.location.column = 1;
+        d.confidence = v.multiRole ? 0.85 : 0.70;
+        d.evidenceTier = v.multiRole ? EvidenceTier::Proven
+                                     : EvidenceTier::Likely;
+
+        // Sweeping on a stats timer is the correct design, so tick must not
+        // grade as a hazard however many lines it covers.
+        if (tier == WriteFrequencyTier::Hot)
+            d.severity = sweptLines >= 16 ? Severity::Critical : Severity::High;
+        else if (tier == WriteFrequencyTier::Dispatch)
+            d.severity = Severity::Medium;
+        else if (tier == WriteFrequencyTier::Tick)
+            d.severity = Severity::Informational;
+        else {
+            d.severity = Severity::Medium;
+            d.escalations.push_back(
+                "sweep frequency unestablished: no hot-path signal reaches "
+                "these readers, so the cost per call is known and the call "
+                "rate is not");
+        }
+
+        std::ostringstream hw;
+        hw << "'" << s.displayName << "' is swept by " << s.aggregators.size()
+           << " loop(s) over as many as " << s.elemCount
+           << " slots spanning up to " << sweptLines << " cache line(s), "
+           << "while " << v.writerCount
+           << " thread-identity writer(s) own those slots. "
+           << "Reading a slot takes its line in Shared and downgrades the "
+           << "owning core from Modified; that owner then pays an Exclusive "
+           << "re-acquire on its next write, so the sweep costs about "
+           << (2 * sweptLines) << " coherence transactions per call. That "
+           << "count is the declared bound and an upper bound on it: a loop "
+           << "that stops at a configured thread count touches "
+           << "proportionally fewer lines. Padding the slots apart does not "
+           << "reduce any of it, since separating the writers from each "
+           << "other does nothing about a reader that touches every line.";
+        d.hardwareReasoning = hw.str();
+
+        d.structuralEvidence = {
+            {"symbol", s.displayName},
+            {"elem_count", std::to_string(s.elemCount)},
+            {"elem_size", std::to_string(s.elemSizeBytes)},
+            {"swept_lines_max", std::to_string(sweptLines)},
+            {"transactions_per_sweep_max", std::to_string(2 * sweptLines)},
+            {"sweep_frequency", writeFrequencyName(tier)},
+            {"sweepers", std::to_string(s.aggregators.size())},
+            {"striped_writers", std::to_string(v.writerCount)},
+            {"slots_padded_apart",
+             classifyStripeMitigation(s, lineBytes) ==
+                     StripeMitigation::FullyPadded ? "yes" : "no"},
+        };
+        if (!s.typeName.empty())
+            d.structuralEvidence["type_name"] = s.typeName;
+        for (const auto &g : s.aggregators)
+            d.escalations.push_back("sweeps every slot in '" + g + "'");
+
+        d.mechanismClaims = {
+            {"each swept slot's line is taken in Shared, downgrading its "
+             "owner out of Modified",
+             "a loop reads every slot of an array written under a "
+             "thread-identity index", true, Severity::Medium},
+            {"the owner pays an Exclusive re-acquire on its next write",
+             "writers observed on the swept array", v.writerCount >= 1,
+             Severity::High},
+            {"the sweep runs often enough for the cost to recur",
+             "sweep hotness established rather than assumed",
+             tier == WriteFrequencyTier::Hot, Severity::Critical},
+        };
+
+        d.mitigation =
+            "Keep a running total the writers update, or cache the aggregate "
+            "and refresh it off the hot path. Sweeping is correct on a stats "
+            "timer and wrong per operation, and no amount of padding changes "
+            "that: the cost is the number of lines touched, which padding "
+            "increases. If the sweep genuinely must be live, read it from "
+            "one thread and publish the result.";
+
+        diagnostics.push_back(std::move(d));
+        ++emitted;
+    }
+    return emitted;
+}
+
 // Findings from the compiler's own remark stream. Hot-filtered because one
 // mid-sized C file emits ~12.8k records.
 static unsigned emitOptRemarkFindings(
@@ -2176,7 +2298,8 @@ static void filterAndSort(const FilterOptions &filter,
 // --- Entry points ---
 
 const std::vector<std::string> &reducePhaseHazardRules() {
-    static const std::vector<std::string> kIDs = {"FL003", "FL091", "FL092"};
+    static const std::vector<std::string> kIDs = {"FL003", "FL004",
+                                                 "FL091", "FL092"};
     return kIDs;
 }
 
@@ -3307,6 +3430,12 @@ ScanResult ScanPipeline::run(
     if (stripedEmitted > 0)
         report("striped_arrays", std::to_string(stripedEmitted) +
                " per-thread striped array finding(s)");
+    unsigned sweepEmitted = emitAggregationSweepFindings(
+        result.diagnostics, result.stripedArrays, result.threadRoles,
+        request.config.cacheLineBytes);
+    if (sweepEmitted > 0)
+        report("aggregation_sweeps", std::to_string(sweepEmitted) +
+               " aggregation sweep finding(s)");
 
     // Affinity respect runs before dedup so all duplicates demote alike.
     std::string affinityAPI =
