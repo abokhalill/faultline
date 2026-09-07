@@ -284,6 +284,13 @@ void testStripeIndexIdentity(const std::string &bin,
     // FL003's, and FL003 is supposed to be silent on a padded array.
     check(identityOf("g_swept") == "<absent>",
           "FL003 stays silent on slots that are padded apart");
+
+    // A store invalidates the whole line, so a reader of a different field
+    // on it pays the same miss a second writer would. FL002 required both
+    // sides written and could not express this at all.
+    check(contains(r.out, "read/write evidence"),
+          "a stored field beside a field read by another function is "
+          "reported without a second writer");
 }
 
 // The channel rides the IR pass, so every other canary run here misses it:

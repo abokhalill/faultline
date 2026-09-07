@@ -99,6 +99,23 @@ uint64_t total_swept() {
     return t;
 }
 
+// FL002 read/write pair. A store to one field invalidates the line, so a
+// core reading a different field on it re-fetches and pays the same miss a
+// second writer would. Measured as redis's hottest static line: call()
+// stores real_cmd->calls beside key specs the lookup path reads.
+struct DispatchEntry {
+    uint64_t spec_a, spec_b, spec_c;   // read on the lookup path
+    uint64_t calls;                    // stored on the dispatch path
+};
+static DispatchEntry g_dispatch_table[8];
+
+void bump_dispatch(int slot) { g_dispatch_table[slot & 7].calls++; }
+
+uint64_t read_specs(int slot) {
+    const DispatchEntry &e = g_dispatch_table[slot & 7];
+    return e.spec_a + e.spec_b + e.spec_c;
+}
+
 // FL061. Centralized dispatcher: hot function with high fan-out.
 static void op_add(uint64_t v)  { g_registry.sequence.fetch_add(v); }
 static void op_sub(uint64_t v)  { g_registry.sequence.fetch_sub(v); }
@@ -127,6 +144,7 @@ void dispatch(int opcode, uint64_t v) {
 
 static void worker(int id) {
     long buf[64] = {0}, bound = 3;
+    uint64_t acc = 0;
     for (int i = 0; i < 1000; ++i) {
         canary_scale_into(buf, &bound, 64);
         canary_drain_pending(id);
@@ -137,9 +155,12 @@ static void worker(int id) {
         g_amplified.drops.fetch_add(id & 1);
         account(id, static_cast<uint64_t>(i));
         account_swept(id, static_cast<uint64_t>(i));
+        bump_dispatch(i);
+        acc += read_specs(i);
         (void)total_swept();
         dispatch(i & 7, static_cast<uint64_t>(i));
     }
+    (void)acc;
 }
 
 void run() {

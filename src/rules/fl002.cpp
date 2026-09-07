@@ -74,7 +74,7 @@ public:
 
         // Write evidence is computed before the gate because it *is* the
         // gate for non-atomic records.
-        enum { kNoWrites, kPartial, kMultiWriter };
+        enum { kNoWrites, kPartial, kWriterReader, kMultiWriter };
         int wev = kNoWrites;
         // Co-residency in space is not co-residency in time. Two threads
         // writing one line microseconds apart never find it in each other's
@@ -119,6 +119,33 @@ public:
                             " site(s)/" + std::to_string(eb.writerFunctions) +
                             " fn(s)) written from distinct functions in this TU");
                 }
+            } else if (const bool aStores =
+                           ea.writeSites &&
+                           escape.pairHasWriterAndDistinctReader(p.a->decl,
+                                                                 p.b->decl),
+                       bStores = eb.writeSites &&
+                           escape.pairHasWriterAndDistinctReader(p.b->decl,
+                                                                 p.a->decl);
+                       aStores || bStores) {
+                // One field stored, the other read from a function that is
+                // not the writer. The store invalidates the line and the
+                // reader re-fetches, which is the same coherence miss a
+                // second writer pays. redis's hottest static line is this:
+                // call() stores real_cmd->calls at offset 0x30 while the key
+                // specs at 0x00-0x10 are read by getKeysFromCommandWithSpecs.
+                level = kWriterReader;
+                if (wev < kWriterReader) {
+                    const auto &wn = aStores ? p.a->name : p.b->name;
+                    const auto &rn = aStores ? p.b->name : p.a->name;
+                    auto rr = escape.fieldReadEvidence(
+                        aStores ? p.b->decl : p.a->decl);
+                    writeEvidence.push_back(
+                        "read/write evidence: '" + wn + "' is stored while '" +
+                        rn + "' on the same line is read from " +
+                        std::to_string(rr.readerFunctions) +
+                        " other function(s) across " +
+                        std::to_string(rr.readSites) + " site(s) in this TU");
+                }
             } else if (ea.writeSites || eb.writeSites) {
                 level = kPartial;
             }
@@ -130,7 +157,7 @@ public:
         // gate on atomics scores zero against it. Gate on concurrent
         // independent writes: escape verdict plus distinct writers.
         const bool anyAtomics = hasAtomicPairs || map.totalAtomicFields() > 0;
-        if (!anyAtomics && wev != kMultiWriter)
+        if (!anyAtomics && wev < kWriterReader)
             return;
         // Not gated on in-TU writes when atomics are present: write evidence
         // is per-TU, so a header-defined struct written from another TU shows
@@ -160,6 +187,10 @@ public:
             CacheLineMap::hasTrailingLinePad(RD, Ctx, Cfg.cacheLineBytes);
 
         Severity sev = hasAtomicPairs ? Severity::Critical : Severity::High;
+        // A reader pays one miss per remote store; two writers trade the line
+        // in both directions. Real, and not the same cost.
+        if (wev == kWriterReader && sev > Severity::Medium)
+            sev = Severity::Medium;
         std::vector<std::string> escalations;
         if (!anyAtomics)
             escalations.push_back(

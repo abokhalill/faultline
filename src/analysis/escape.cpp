@@ -702,6 +702,24 @@ public:
         return true;
     }
 
+    // Every member access that is not itself a store target. A compound
+    // assignment reads and writes, and is deliberately booked only as a
+    // write: it already trades the line, so counting it as a reader too
+    // would let a field pair with itself.
+    bool VisitMemberExpr(clang::MemberExpr *ME) {
+        if (writeTargets.count(ME))
+            return true;
+        const auto *FD =
+            llvm::dyn_cast<clang::FieldDecl>(ME->getMemberDecl());
+        if (!FD) return true;
+        auto &rec =
+            fieldWrites[llvm::cast<clang::FieldDecl>(FD->getCanonicalDecl())];
+        ++rec.readSites;
+        if (currentFn)
+            rec.readers.insert(currentFn->getCanonicalDecl());
+        return true;
+    }
+
     bool VisitUnaryOperator(clang::UnaryOperator *UO) {
         if (UO->isIncrementDecrementOp())
             recordWrite(UO->getSubExpr());
@@ -764,6 +782,11 @@ public:
     }
 
 private:
+    // Pre-order traversal reaches the assignment before its LHS, so a
+    // MemberExpr already booked as a write is in here by the time
+    // VisitMemberExpr sees it.
+    std::unordered_set<const clang::MemberExpr *> writeTargets;
+
     void recordWrite(const clang::Expr *E) {
         if (!E) return;
         E = E->IgnoreParenImpCasts();
@@ -791,6 +814,7 @@ private:
         if (const auto *ME = llvm::dyn_cast<clang::MemberExpr>(E)) {
             if (const auto *FD =
                     llvm::dyn_cast<clang::FieldDecl>(ME->getMemberDecl())) {
+                writeTargets.insert(ME);
                 auto &rec = fieldWrites[llvm::cast<clang::FieldDecl>(
                     FD->getCanonicalDecl())];
                 ++rec.sites;
@@ -897,6 +921,37 @@ EscapeAnalysis::fieldWriteEvidence(const clang::FieldDecl *FD) const {
     return {it->second.sites,
             static_cast<unsigned>(it->second.writers.size()),
             it->second.loopSites};
+}
+
+EscapeAnalysis::FieldReadEvidence
+EscapeAnalysis::fieldReadEvidence(const clang::FieldDecl *FD) const {
+    if (!FD)
+        return {};
+    auto it = fieldWrites_.find(
+        llvm::cast<clang::FieldDecl>(FD->getCanonicalDecl()));
+    if (it == fieldWrites_.end())
+        return {};
+    return {it->second.readSites,
+            static_cast<unsigned>(it->second.readers.size())};
+}
+
+bool EscapeAnalysis::pairHasWriterAndDistinctReader(
+        const clang::FieldDecl *w, const clang::FieldDecl *r) const {
+    if (!w || !r)
+        return false;
+    auto wi = fieldWrites_.find(llvm::cast<clang::FieldDecl>(
+        w->getCanonicalDecl()));
+    auto ri = fieldWrites_.find(llvm::cast<clang::FieldDecl>(
+        r->getCanonicalDecl()));
+    if (wi == fieldWrites_.end() || ri == fieldWrites_.end())
+        return false;
+    // A reader on the writer's own thread costs nothing: it finds the line
+    // already Modified locally. The hazard needs the read to come from a
+    // function the writer is not.
+    for (const auto *rd : ri->second.readers)
+        if (!wi->second.writers.count(rd))
+            return true;
+    return false;
 }
 
 bool EscapeAnalysis::fieldWritersAllOpaque(const clang::FieldDecl *FD) const {

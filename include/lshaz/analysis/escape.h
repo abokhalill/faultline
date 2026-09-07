@@ -159,6 +159,22 @@ public:
     };
     FieldWriteEvidence fieldWriteEvidence(const clang::FieldDecl *FD) const;
 
+    // A store invalidates the whole line, so a core that only reads another
+    // field on it re-fetches. That reader pays the same coherence miss a
+    // second writer would, which is why write/write is sufficient for the
+    // hazard and not necessary. Measured as redis's dominant shape: `call()`
+    // stores real_cmd->calls while IO threads read the key specs beside it.
+    struct FieldReadEvidence {
+        unsigned readSites = 0;
+        unsigned readerFunctions = 0;
+    };
+    FieldReadEvidence fieldReadEvidence(const clang::FieldDecl *FD) const;
+
+    // Union of one field's writers and the other's readers has >=2 members:
+    // the line is stored by one function and read by a different one.
+    bool pairHasWriterAndDistinctReader(const clang::FieldDecl *w,
+                                        const clang::FieldDecl *r) const;
+
     // Every writer of this field is separated from its next write by a body
     // this TU cannot see: positive evidence of microsecond spacing, which a
     // writer count cannot supply. Absence proves nothing; a leaf setter has
@@ -206,6 +222,8 @@ public:
         // 125ns. Field-level twin of globalLoopWriteCounts_ (FL040).
         unsigned loopSites     = 0;
         std::unordered_set<const clang::FunctionDecl *> writers;
+        unsigned readSites = 0;
+        std::unordered_set<const clang::FunctionDecl *> readers;
     };
 
 private:
