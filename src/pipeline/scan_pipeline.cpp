@@ -417,6 +417,26 @@ std::string serializeShardResult(int exitCode,
             buf += ",\"sw\":" + std::to_string(sig.hasStandingWrites ? 1 : 0);
             buf += ",\"l\":" + std::to_string(sig.hasDeliberateLayout ? 1 : 0);
             buf += ",\"n\":" + std::to_string(sig.accessorCount);
+            if (sig.recordAlignBytes)
+                buf += ",\"ra\":" + std::to_string(sig.recordAlignBytes);
+            if (!sig.fieldExtents.empty()) {
+                buf += ",\"fx\":{";
+                bool firstField = true;
+                for (const auto &[fname, e] : sig.fieldExtents) {
+                    if (!firstField) buf += ',';
+                    buf += '"'; buf += esc(fname); buf += "\":[";
+                    buf += std::to_string(e.offsetBytes) + ',' +
+                           std::to_string(e.sizeBytes) + ',' +
+                           std::to_string(e.isAtomic ? 1 : 0);
+                    buf += ']';
+                    firstField = false;
+                }
+                buf += '}';
+            }
+            if (sig.declLine) {
+                buf += ",\"df\":\""; buf += esc(sig.declFile); buf += '"';
+                buf += ",\"dl\":" + std::to_string(sig.declLine);
+            }
             buf += '}';
             first = false;
         }
@@ -456,6 +476,8 @@ std::string serializeShardResult(int exitCode,
     emitNameSets(threadRoles.callEdges);
     buf += "},\"fieldWriters\":{";
     emitNameSets(threadRoles.fieldWriters);
+    buf += "},\"fieldReaders\":{";
+    emitNameSets(threadRoles.fieldReaders);
     buf += "},\"allocOf\":{";
     emitNameSets(threadRoles.allocatorsOfType);
     buf += "},\"freeOf\":{";
@@ -889,6 +911,37 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     if (i >= json.size() || json[i] == '}') { if (i < json.size()) ++i; break; }
                     std::string sk = ipc::parseStr(json, i);
                     ipc::expect(json, i, ':');
+                    if (sk == "fx") {
+                        ipc::expect(json, i, '{');
+                        while (true) {
+                            ipc::skipWS(json, i);
+                            if (i >= json.size() || json[i] == '}') {
+                                if (i < json.size()) ++i;
+                                break;
+                            }
+                            std::string fname = ipc::parseStr(json, i);
+                            ipc::expect(json, i, ':');
+                            ipc::expect(json, i, '[');
+                            FieldExtent e;
+                            e.offsetBytes =
+                                static_cast<uint64_t>(ipc::parseNum(json, i));
+                            ipc::expect(json, i, ',');
+                            e.sizeBytes =
+                                static_cast<uint64_t>(ipc::parseNum(json, i));
+                            ipc::expect(json, i, ',');
+                            e.isAtomic = ipc::parseNum(json, i) != 0;
+                            ipc::expect(json, i, ']');
+                            sig.fieldExtents[fname] = e;
+                            ipc::expect(json, i, ',');
+                        }
+                        ipc::expect(json, i, ',');
+                        continue;
+                    }
+                    if (sk == "df") {
+                        sig.declFile = ipc::parseStr(json, i);
+                        ipc::expect(json, i, ',');
+                        continue;
+                    }
                     auto val = static_cast<int>(ipc::parseNum(json, i));
                     if (sk == "a") sig.hasAtomics = val != 0;
                     else if (sk == "s") sig.hasSyncPrims = val != 0;
@@ -901,6 +954,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     else if (sk == "sw") sig.hasStandingWrites = val != 0;
                     else if (sk == "l") sig.hasDeliberateLayout = val != 0;
                     else if (sk == "n") sig.accessorCount = static_cast<unsigned>(val);
+                    else if (sk == "ra") sig.recordAlignBytes = static_cast<uint64_t>(val);
+                    else if (sk == "dl") sig.declLine = static_cast<unsigned>(val);
                     ipc::expect(json, i, ',');
                 }
                 out.escapeSummary[typeName].merge(sig);
@@ -949,6 +1004,8 @@ bool deserializeShardResult(const std::string &json, ShardIPC &out) {
                     parseNameSets(out.threadRoles.callEdges);
                 else if (tk == "fieldWriters")
                     parseNameSets(out.threadRoles.fieldWriters);
+                else if (tk == "fieldReaders")
+                    parseNameSets(out.threadRoles.fieldReaders);
                 else if (tk == "allocOf")
                     parseNameSets(out.threadRoles.allocatorsOfType);
                 else if (tk == "freeOf")

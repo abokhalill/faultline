@@ -1007,9 +1007,9 @@ bool EscapeAnalysis::fieldHasPoolWriter(const clang::FieldDecl *FD) const {
     return false;
 }
 
-void EscapeAnalysis::appendFieldWriterNames(ThreadRoleSummary &out) const {
+void EscapeAnalysis::appendFieldAccessNames(ThreadRoleSummary &out) const {
     for (const auto &[FD, rec] : fieldWrites_) {
-        if (rec.writers.empty())
+        if (rec.writers.empty() && rec.readers.empty())
             continue;
         const auto *parent = FD->getParent();
         if (!parent)
@@ -1018,11 +1018,29 @@ void EscapeAnalysis::appendFieldWriterNames(ThreadRoleSummary &out) const {
             parent->getCanonicalDecl()->getQualifiedNameAsString();
         if (typeName.empty())
             continue;
-        auto &writers =
-            out.fieldWriters[typeName + "::" + FD->getNameAsString()];
-        for (const auto *w : rec.writers)
-            writers.insert(threadRoleNodeName(w, ctx_));
+        const std::string key = typeName + "::" + FD->getNameAsString();
+        if (!rec.writers.empty()) {
+            auto &writers = out.fieldWriters[key];
+            for (const auto *w : rec.writers)
+                writers.insert(threadRoleNodeName(w, ctx_));
+        }
+        if (!rec.readers.empty()) {
+            auto &readers = out.fieldReaders[key];
+            for (const auto *r : rec.readers)
+                readers.insert(threadRoleNodeName(r, ctx_));
+        }
     }
+}
+
+std::unordered_set<const clang::RecordDecl *>
+EscapeAnalysis::accessedRecords() const {
+    std::unordered_set<const clang::RecordDecl *> out;
+    for (const auto &[FD, rec] : fieldWrites_) {
+        (void)rec;
+        if (const auto *parent = FD->getParent())
+            out.insert(llvm::cast<clang::RecordDecl>(parent->getCanonicalDecl()));
+    }
+    return out;
 }
 
 unsigned EscapeAnalysis::getGlobalWriteCount(const clang::VarDecl *VD) const {

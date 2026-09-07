@@ -271,6 +271,7 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
 
     // Layout-intent annotation for the FL092 precedent join. Alignment
     // reads Clang's cached record layout; no recomputation.
+    const auto touched = escape.accessedRecords();
     for (const auto *RD : records) {
         auto it = escapeSummary_.find(
             RD->getCanonicalDecl()->getQualifiedNameAsString());
@@ -283,13 +284,42 @@ void LshazASTConsumer::HandleTranslationUnit(clang::ASTContext &Ctx) {
         if (aligned || CacheLineMap::hasTrailingLinePad(
                            RD, Ctx, config_.cacheLineBytes))
             it->second.hasDeliberateLayout = true;
+
+        // Field extents for the reduce-phase read/write join. Restricted to
+        // records this TU actually reaches: a record no TU touches has no
+        // access to join against, and the map costs one pass per record per
+        // TU either way.
+        if (!touched.count(
+                llvm::cast<clang::RecordDecl>(RD->getCanonicalDecl())))
+            continue;
+        CacheLineMap layout(RD, Ctx, config_.cacheLineBytes,
+                            config_.atomicTypeNames);
+        auto &sig = it->second;
+        sig.recordAlignBytes = layout.recordAlign();
+        for (const auto &f : layout.fields()) {
+            if (!f.isMutable || f.name.empty())
+                continue;
+            // A bitfield's extent is the declared type's, not the bits it
+            // owns, so every bitfield in a storage unit exports the same
+            // byte range and pairs with its neighbours. They do share a
+            // line, but they share a word, and no padding reaches that.
+            if (f.decl && f.decl->isBitField())
+                continue;
+            sig.fieldExtents[f.name] =
+                FieldExtent{f.offsetBytes, f.sizeBytes, f.isAtomic};
+        }
+        if (!sig.fieldExtents.empty()) {
+            auto loc = resolveSourceLocation(RD->getLocation(), SM);
+            sig.declFile = loc.file;
+            sig.declLine = loc.line;
+        }
     }
 
     // Thread-role facts for the cross-TU reduce: call edges + entries
     // from the graph already built for hotness, writer names from the
     // escape traversal. No additional TU walks.
     cg.snapshotForThreadRoles(threadRoles_);
-    escape.appendFieldWriterNames(threadRoles_);
+    escape.appendFieldAccessNames(threadRoles_);
     collectOverriddenVirtuals(decls, threadRoles_);
     // Ownership facts come from the vocabulary prepass, which already walked
     // this TU for them. Collecting again here would be the second walk the

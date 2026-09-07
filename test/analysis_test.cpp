@@ -584,7 +584,7 @@ void testThreadRoleFactCollection() {
 
     lshaz::EscapeAnalysis escape(Ctx);
     escape.scanTranslationUnit(TU);
-    escape.appendFieldWriterNames(facts);
+    escape.appendFieldAccessNames(facts);
     check(facts.fieldWriters.count("Stats::mainCount") == 1 &&
               facts.fieldWriters["Stats::mainCount"].count("helper") == 1,
           "field writer attributed by name");
@@ -827,7 +827,7 @@ void testThreadRoleLambdaEntry() {
     cg.snapshotForThreadRoles(facts);
     lshaz::EscapeAnalysis escape(Ctx);
     escape.scanTranslationUnit(TU);
-    escape.appendFieldWriterNames(facts);
+    escape.appendFieldAccessNames(facts);
 
     // The worker lambda's write must attribute to the lambda node, not
     // the spawner, and the pair must come out disjoint end to end.

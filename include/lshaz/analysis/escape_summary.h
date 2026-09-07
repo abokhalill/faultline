@@ -1,11 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <unordered_map>
 
 namespace lshaz {
+
+// One mutable field's place in its record. Enough to redo the co-residency
+// test exactly in the reduce phase; the pairs themselves are quadratic in
+// field count and would be shipped for the same answer.
+struct FieldExtent {
+    uint64_t offsetBytes = 0;
+    uint64_t sizeBytes   = 0;   // 0 means two TUs disagreed, see merge
+    bool isAtomic = false;
+};
 
 // Per-type escape signals collected from a single TU.
 // Structural signals (atomics, sync, volatile, shared_ptr)
@@ -39,6 +50,17 @@ struct TypeEscapeSignals {
     bool hasDeliberateLayout = false;
     unsigned accessorCount = 0;   // distinct functions touching this type in TU
 
+    // Layout of the mutable fields, plus where the definition lives. A store
+    // to one field invalidates the whole line, so a core reading a different
+    // field on it re-fetches; deciding that needs the two accesses joined,
+    // and they routinely sit in different TUs. Carried here rather than in a
+    // summary of its own because the reduce needs hasSharingRoute() on the
+    // same key and two maps could disagree on which types exist.
+    std::map<std::string, FieldExtent> fieldExtents;
+    uint64_t recordAlignBytes = 0;
+    std::string declFile;
+    unsigned declLine = 0;
+
     // Merge another TU's signals into this aggregate.
     void merge(const TypeEscapeSignals &other) {
         hasAtomics     |= other.hasAtomics;
@@ -52,6 +74,33 @@ struct TypeEscapeSignals {
         hasStandingWrites |= other.hasStandingWrites;
         hasDeliberateLayout |= other.hasDeliberateLayout;
         accessorCount  += other.accessorCount;
+
+        for (const auto &[name, e] : other.fieldExtents) {
+            auto [it, inserted] = fieldExtents.emplace(name, e);
+            // The same header compiled under different -D can lay the record
+            // out two ways. Then sharing a line is not a property of the
+            // program and the field drops out, rather than the answer
+            // depending on which shard reported last. Absorbing, so the
+            // result does not depend on merge order either.
+            if (!inserted && (it->second.offsetBytes != e.offsetBytes ||
+                              it->second.sizeBytes != e.sizeBytes))
+                it->second = FieldExtent{};
+        }
+        // Larger alignment admits fewer base shifts and so fewer pairs:
+        // max is both the conservative choice and an order-free one.
+        recordAlignBytes = std::max(recordAlignBytes, other.recordAlignBytes);
+        if (declLine != 0 && other.declLine != 0) {
+            // Canonical location tiebreak, same one dedup uses.
+            const bool otherWins =
+                other.declFile.size() < declFile.size() ||
+                (other.declFile.size() == declFile.size() &&
+                 (other.declFile < declFile ||
+                  (other.declFile == declFile && other.declLine < declLine)));
+            if (otherWins) { declFile = other.declFile; declLine = other.declLine; }
+        } else if (other.declLine != 0) {
+            declFile = other.declFile;
+            declLine = other.declLine;
+        }
     }
 
     // Structural signals only, no TU-specific publication evidence.

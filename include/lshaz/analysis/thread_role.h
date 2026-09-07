@@ -26,6 +26,12 @@ struct ThreadRoleSummary {
     // "type_name::field_name" -> functions writing that field in this TU.
     std::map<std::string, std::set<std::string>> fieldWriters;
 
+    // Same key, functions that only read the field. A store invalidates the
+    // whole line, so a reader of a neighbouring field pays the same miss a
+    // second writer would; establishing that needs both sides, and the store
+    // and the read are routinely compiled apart.
+    std::map<std::string, std::set<std::string>> fieldReaders;
+
     // Loop nesting at each call site, and each function's own maximum loop
     // depth. Hotness inference is loop-depth-weighted, so the reduce phase
     // needs both to rerun the per-TU relaxation over the merged graph rather
@@ -132,6 +138,8 @@ struct ThreadRoleSummary {
             callEdges[caller].insert(callees.begin(), callees.end());
         for (const auto &[field, writers] : other.fieldWriters)
             fieldWriters[field].insert(writers.begin(), writers.end());
+        for (const auto &[field, readers] : other.fieldReaders)
+            fieldReaders[field].insert(readers.begin(), readers.end());
         // Max, not overwrite: an inline body seen in several TUs must not
         // depend on which shard reported it last, or output stops being
         // jobs-invariant.

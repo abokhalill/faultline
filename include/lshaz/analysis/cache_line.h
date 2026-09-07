@@ -13,6 +13,14 @@
 
 namespace lshaz {
 
+// Exists a realizable base shift placing both extents on one line. Bucket
+// co-membership over-approximates: it unions each field's line range across
+// shifts, pairing fields that never co-reside at the same shift. Free of the
+// AST so the reduce phase can rerun it over serialized offsets.
+bool extentsCanCoReside(uint64_t offA, uint64_t sizeA,
+                        uint64_t offB, uint64_t sizeB,
+                        uint64_t recordAlign, uint64_t lineBytes);
+
 struct FieldLineEntry {
     const clang::FieldDecl *decl = nullptr;
     std::string name;

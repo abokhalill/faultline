@@ -203,10 +203,15 @@ public:
     // object has one owner at a time however many threads touch it.
     bool hasStandingWrites(const clang::RecordDecl *RD) const;
 
-    // Snapshot per-field writer sets as names ("Type::field" -> writer
+    // Snapshot per-field writer and reader sets as names ("Type::field" ->
     // functions) into the TU's thread-role facts. Same key convention as
     // buildEscapeSummary: canonical qualified names.
-    void appendFieldWriterNames(ThreadRoleSummary &out) const;
+    void appendFieldAccessNames(ThreadRoleSummary &out) const;
+
+    // Records whose fields this TU reads or writes. Exporting a layout costs
+    // a pass over the record, and one nothing touches has no access to join
+    // against.
+    std::unordered_set<const clang::RecordDecl *> accessedRecords() const;
 
     // Public so the TU-scan visitor (anonymous namespace) can populate it.
     struct FieldWriteRecord {
