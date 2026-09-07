@@ -107,6 +107,13 @@ for f in found:
     for v in f.get('structuralEvidence', {}).values():
         if isinstance(v, str):
             flagged.add(v.split('::')[-1])
+    # Data-centric rules name the object, not the code: FL004 reports the
+    # array `used_memory` while perf attributes the cost to the function
+    # sweeping it. The functions live in the escalations, quoted, and
+    # ignoring them scored those rules as misses on findings they made.
+    for e in f.get('escalations', []):
+        for name in re.findall(r"'([A-Za-z_][A-Za-z0-9_:]*)'", e):
+            flagged.add(name.split('::')[-1])
 
 if not hot:
     print(f"\nNo HITM attributable to '{target}'. All of it is kernel or other objects.")
