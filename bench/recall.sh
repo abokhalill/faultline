@@ -26,7 +26,17 @@ PID=$(pgrep -x "$(basename "$BIN")" | head -1)
 echo "sampling pid $PID for ${SECS}s"
 
 DATA=$(mktemp /tmp/recall.XXXX.data)
-perf c2c record -a -o "$DATA" -- sleep "$SECS" >/dev/null 2>&1
+# --all-user and -p, not -a. Recording the machine pulls in kernel samples,
+# and resolving those through /proc/kcore aborts the entire report before it
+# prints a row when perf and the kernel differ in version. The symptom is
+# "HITM observed: 0 local, 0 remote" on a workload measured to have 77, which
+# is the exact false null this script exists to avoid producing. The join
+# below discards kernel rows anyway.
+#
+# ldlat=5 rather than the default 30: cross-core hits served from a peer's
+# L2 or the LLC land under a 30-cycle floor and vanish.
+perf c2c record --all-user --ldlat=5 -p "$PID" -o "$DATA" \
+    -- sleep "$SECS" >/dev/null 2>&1
 
 # --stdio report, full symbol detail. c2c's own summary is percentages; we
 # need per-line attribution, so the shared-cacheline table is what we parse.
