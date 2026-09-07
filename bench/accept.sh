@@ -59,14 +59,18 @@ echo "=== 4. known positive AND negative: c2c must SEPARATE them ==="
 # Relaunch until the window closes. The packed arm runs ~80x longer for the
 # same count, so no single count keeps both arms alive through it.
 c2c_run() {
-    local stop=/tmp/accept_stop.$$
-    touch "$stop"
-    ( while [ -e "$stop" ]; do ./stripe_cost 4 "$1" 20000000 0,1,2,3 >/dev/null 2>&1; done ) &
-    local kp=$!
-    sleep 1
-    perf c2c record -a -o "$2" -- sleep 6 >/dev/null 2>&1
-    rm -f "$stop"
-    wait $kp 2>/dev/null
+    # Record the workload itself, not the machine. `-a` pulls in kernel
+    # samples, and resolving those through /proc/kcore aborts the report
+    # before it prints a single row on some kernel and perf-version pairs,
+    # which is indistinguishable from a blind instrument. It also mixes in
+    # every other process on the box and forced a relaunch loop whose churn
+    # was its own noise source. One long run per arm removes all three.
+    #
+    # ldlat=5 rather than the default 30: this workload's cost lands on the
+    # store side, and the few loads that do miss are cheap L2/LLC hits that
+    # a 30-cycle floor discards.
+    perf c2c record --ldlat=5 -c 2000 -o "$2" -- \
+        ./stripe_cost 4 "$1" 500000000 0,1,2,3 >/dev/null 2>&1
     perf c2c report -i "$2" --stdio 2>/dev/null
 }
 field() {
@@ -102,6 +106,18 @@ else
     # so loads reaching LLC are the coherence traffic.
     if [ "$pos_frac" -ge 50 ] && [ "$pos_frac" -ge $(( 5 * neg_frac + 1 )) ]; then
         ok "LLC-hit fraction separates the arms: ${pos_frac}% packed vs ${neg_frac}% padded"
+        separated=1
+    fi
+    # Both checks above read the load side, and stripe_cost is a store
+    # workload: each thread writes its own slot, so the write takes the line
+    # Modified and misses L1D when a peer just invalidated it, while the
+    # loads that follow hit L1D off the line the thread now owns. On a
+    # 9900K the load side gave 4 HITM against 0 and the store side gave
+    # 35906 misses against 19, so reading only HITM called a working
+    # instrument blind.
+    pos_sm=$(field "$pos" 'Store L1D Miss'); neg_sm=$(field "$neg" 'Store L1D Miss')
+    if [ "$pos_sm" -gt 0 ] && [ "$pos_sm" -ge $(( 10 * neg_sm + 1 )) ]; then
+        ok "store L1D misses separate the arms: $pos_sm packed vs $neg_sm padded"
         separated=1
     fi
 
