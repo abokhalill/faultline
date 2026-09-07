@@ -6,6 +6,7 @@
 #include "lshaz/pipeline/tu_cache.h"
 
 #include "lshaz/analysis/action.h"
+#include "lshaz/analysis/cache_line.h"
 #include "lshaz/analysis/vocabulary.h"
 #include "lshaz/core/dedup.h"
 #include "lshaz/core/hot_path.h"
@@ -2034,6 +2035,262 @@ static unsigned emitAggregationSweepFindings(
     return emitted;
 }
 
+// A store to one field invalidates the whole line, so a core reading a
+// different field on it re-fetches and pays the miss a second writer would.
+// FL002 sees that only where both halves compile together: redis stores
+// redisCommand::calls in server.c while db.c reads the key specs on the same
+// line, and no single TU can join them. The layout is a program fact and the
+// two access sets merge, so the join belongs here.
+static unsigned emitCrossTUSharedLineFindings(
+        std::vector<Diagnostic> &diagnostics,
+        const EscapeSummary &escape,
+        const ThreadRoleSummary &facts,
+        const ThreadRoleVerdicts &roles,
+        uint64_t lineBytes) {
+    if (lineBytes == 0)
+        return 0;
+
+    // A type already reported takes the pair as added evidence. A second
+    // finding would land on the same record location and be collapsed by
+    // dedup, which drops the cross-TU half rather than merging it.
+    //
+    // Every instance, not the first: this runs before dedup, and on redis a
+    // type carries up to 75 of them. Marking one leaves the evidence on
+    // whichever copy dedup happens not to keep.
+    std::map<std::string, std::vector<Diagnostic *>> reported;
+    for (auto &d : diagnostics) {
+        if (d.suppressed || (d.ruleID != "FL002" && d.ruleID != "FL041"))
+            continue;
+        auto it = d.structuralEvidence.find("type_name");
+        if (it != d.structuralEvidence.end() && !it->second.empty())
+            reported[it->second].push_back(&d);
+    }
+
+    auto namesFor = [](const std::map<std::string, std::set<std::string>> &m,
+                       const std::string &key) -> const std::set<std::string> * {
+        auto it = m.find(key);
+        return it == m.end() || it->second.empty() ? nullptr : &it->second;
+    };
+    // Every accessor on the main thread means no two cores hold the line, so
+    // no store of one field costs the reader of another anything. Unknown
+    // roles decline to conclude that, which is the direction that keeps a
+    // finding rather than inventing one.
+    auto allMainThread = [&roles](const std::set<std::string> &a,
+                                  const std::set<std::string> &b) {
+        for (const auto *s : {&a, &b})
+            for (const auto &fn : *s)
+                if (roles.roleOf(fn) != ROLE_MAIN)
+                    return false;
+        return true;
+    };
+
+    std::vector<std::string> typeNames;
+    typeNames.reserve(escape.size());
+    for (const auto &[name, sig] : escape)
+        if (sig.fieldExtents.size() >= 2 && sig.declLine != 0)
+            typeNames.push_back(name);
+    // EscapeSummary is a hash map, and dedup runs before the output sort.
+    std::sort(typeNames.begin(), typeNames.end());
+
+    constexpr size_t kMaxReportedPairs = 5;
+    // Ranking needs more than it reports, and a wide record has thousands of
+    // co-resident pairs. Bounded because this runs once per routed type.
+    constexpr size_t kMaxCandidates = 256;
+    unsigned emitted = 0;
+    for (const auto &typeName : typeNames) {
+        const auto &sig = escape.at(typeName);
+        // Two cores must be able to reach one instance. The map phase cannot
+        // answer this: the record lives in a header and its global lives in
+        // one .c.
+        if (!sig.hasSharingRoute())
+            continue;
+
+        struct Hit {
+            std::string writer, other;
+            unsigned others;      // distinct readers, or distinct co-writers
+            bool bothWritten;
+        };
+        std::vector<Hit> hits;
+        bool disjointRoles = false;
+        bool anyMultiWriter = false;
+        // Which field stores and which one only reads is not decided by the
+        // order the names sort in, so both directions of every co-resident
+        // pair are asked.
+        auto consider = [&](const std::string &w, const std::string &o) {
+            const auto *writers = namesFor(facts.fieldWriters, typeName + "::" + w);
+            if (!writers)
+                return;
+            const auto *coWriters =
+                namesFor(facts.fieldWriters, typeName + "::" + o);
+            if (coWriters) {
+                unsigned distinct = 0;
+                for (const auto &c : *coWriters)
+                    if (!writers->count(c))
+                        ++distinct;
+                if (distinct && !allMainThread(*writers, *coWriters)) {
+                    uint8_t a = roles.rolesOf(*writers), b = roles.rolesOf(*coWriters);
+                    if (a != ROLE_NONE && b != ROLE_NONE && (a & b) == 0)
+                        disjointRoles = true;
+                    anyMultiWriter = true;
+                    hits.push_back({w, o, distinct, true});
+                    return;
+                }
+            }
+            const auto *readers = namesFor(facts.fieldReaders, typeName + "::" + o);
+            if (!readers)
+                return;
+            // A function that also writes the field it reads makes this the
+            // write/write case, not a reader paying for someone else's store.
+            unsigned distinct = 0;
+            for (const auto &r : *readers)
+                if (!writers->count(r) && !(coWriters && coWriters->count(r)))
+                    ++distinct;
+            if (!distinct || allMainThread(*writers, *readers))
+                return;
+            uint8_t a = roles.rolesOf(*writers), b = roles.rolesOf(*readers);
+            if (a != ROLE_NONE && b != ROLE_NONE && (a & b) == 0)
+                disjointRoles = true;
+            hits.push_back({w, o, distinct, false});
+        };
+
+        for (auto a = sig.fieldExtents.begin();
+             a != sig.fieldExtents.end() && hits.size() < kMaxCandidates; ++a) {
+            if (a->second.sizeBytes == 0)
+                continue;
+            for (auto b = std::next(a);
+                 b != sig.fieldExtents.end() && hits.size() < kMaxCandidates;
+                 ++b) {
+                if (b->second.sizeBytes == 0)
+                    continue;
+                if (!extentsCanCoReside(a->second.offsetBytes,
+                                        a->second.sizeBytes,
+                                        b->second.offsetBytes,
+                                        b->second.sizeBytes,
+                                        sig.recordAlignBytes, lineBytes))
+                    continue;
+                const size_t before = hits.size();
+                consider(a->first, b->first);
+                if (hits.size() == before)
+                    consider(b->first, a->first);
+            }
+        }
+        if (hits.empty())
+            continue;
+        // Field order is alphabetical, and on a 572-field record the first
+        // pairs found say nothing. Rank by mechanism, then by how many
+        // functions carry it; the name tail only keeps the order total.
+        std::sort(hits.begin(), hits.end(), [](const Hit &x, const Hit &y) {
+            if (x.bothWritten != y.bothWritten) return x.bothWritten;
+            if (x.others != y.others) return x.others > y.others;
+            if (x.writer != y.writer) return x.writer < y.writer;
+            return x.other < y.other;
+        });
+        if (hits.size() > kMaxReportedPairs)
+            hits.resize(kMaxReportedPairs);
+
+        std::string detail;
+        for (size_t i = 0; i < hits.size(); ++i) {
+            if (i) detail += "; ";
+            if (hits[i].bothWritten)
+                detail += "'" + hits[i].writer + "' and '" + hits[i].other +
+                          "' on one line are written from " +
+                          std::to_string(hits[i].others) +
+                          " function(s) that do not overlap";
+            else
+                detail += "'" + hits[i].writer + "' is stored while '" +
+                          hits[i].other + "' on the same line is read from " +
+                          std::to_string(hits[i].others) +
+                          " function(s) that never write it";
+        }
+
+        auto existing = reported.find(typeName);
+        if (existing != reported.end()) {
+            for (auto *d : existing->second)
+                d->escalations.push_back(
+                    "cross-TU line-sharing evidence: " + detail);
+            continue;
+        }
+
+        Diagnostic d;
+        d.ruleID = "FL002";
+        d.title = "False Sharing Candidate";
+        d.location.file = sig.declFile;
+        d.location.line = sig.declLine;
+        d.location.column = 1;
+        // A reader pays one miss per remote store; two writers trade the line
+        // in both directions. Real, and not the same cost.
+        d.severity = anyMultiWriter ? Severity::High : Severity::Medium;
+        d.confidence = disjointRoles ? 0.68 : 0.58;
+        d.evidenceTier = EvidenceTier::Likely;
+
+        std::ostringstream hw;
+        hw << "Struct '" << typeName << "': ";
+        if (hits[0].bothWritten)
+            hw << "'" << hits[0].writer << "' and '" << hits[0].other
+               << "' share a cache line and are written from disjoint sets of "
+               << "functions, so each write pulls the line back in Modified "
+               << "from the other core. ";
+        else
+            hw << "a store to '" << hits[0].writer << "' invalidates the cache "
+               << "line holding '" << hits[0].other << "', which is read by "
+               << "function(s) that never write it, so each store costs those "
+               << "readers a re-fetch of a line they did not modify. ";
+        hw << "The accesses are in different translation units, so no "
+           << "single-TU view shows both.";
+        d.hardwareReasoning = hw.str();
+
+        std::string pairFields;
+        for (size_t i = 0; i < hits.size(); ++i) {
+            if (i) pairFields += ';';
+            pairFields += hits[i].writer + "|" + hits[i].other;
+        }
+        d.structuralEvidence = {
+            {"type_name", typeName},
+            {"thread_escape", "true"},
+            {"pair_fields", pairFields},
+            {"cross_tu_line_sharing", "true"},
+            {"atomics", sig.hasAtomics ? "yes" : "no"},
+        };
+        d.escalations.push_back("cross-TU line-sharing evidence: " + detail);
+        if (disjointRoles)
+            d.escalations.push_back(
+                "the two access sets are on provably disjoint thread roles, "
+                "so they run on different cores rather than possibly the same "
+                "one");
+        if (sig.hasDeliberateLayout)
+            d.escalations.push_back(
+                "deliberate cache-line layout detected on this type: verify "
+                "the flagged field is not already isolated by design");
+
+        d.mechanismClaims = {
+            {"co-located mutable fields share a line",
+             "two mutable fields co-resident under some base alignment", true,
+             Severity::Medium},
+            {anyMultiWriter
+                 ? "MESI invalidation ping-pong between the two writers"
+                 : "a store to one downgrades the line under the other's reader",
+             anyMultiWriter
+                 ? "disjoint writer sets reaching both fields"
+                 : "a writer of one field and a non-writing reader of the other",
+             true, d.severity},
+            // The gate the map phase cannot answer: the record lives in a
+            // header and its global lives in one .c.
+            {"two threads reach the same instance",
+             "some TU shows a shared instance and a thread-borne writer", true,
+             d.severity, /*gating=*/true},
+        };
+        d.mitigation =
+            "Move the stored field off the line the readers touch, with "
+            "alignas(64) or by grouping read-mostly fields together. Padding "
+            "the readers apart from each other does nothing here: the cost is "
+            "one store landing on a line that other cores hold.";
+
+        diagnostics.push_back(std::move(d));
+        ++emitted;
+    }
+    return emitted;
+}
+
 // Findings from the compiler's own remark stream. Hot-filtered because one
 // mid-sized C file emits ~12.8k records.
 static unsigned emitOptRemarkFindings(
@@ -3493,6 +3750,13 @@ ScanResult ScanPipeline::run(
     if (sweepEmitted > 0)
         report("aggregation_sweeps", std::to_string(sweepEmitted) +
                " aggregation sweep finding(s)");
+
+    unsigned crossLine = emitCrossTUSharedLineFindings(
+        result.diagnostics, result.escapeSummary, result.threadRoleFacts,
+        result.threadRoles, request.config.cacheLineBytes);
+    if (crossLine > 0)
+        report("shared_lines", std::to_string(crossLine) +
+               " cross-TU read/write line-sharing finding(s)");
 
     // Affinity respect runs before dedup so all duplicates demote alike.
     std::string affinityAPI =

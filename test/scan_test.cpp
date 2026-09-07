@@ -291,6 +291,15 @@ void testStripeIndexIdentity(const std::string &bin,
     check(contains(r.out, "read/write evidence"),
           "a stored field beside a field read by another function is "
           "reported without a second writer");
+
+    // canary_xtu_cmd stores 'calls' in canary_c.c and reads the specs beside
+    // it from canary.cpp. Neither TU holds both halves, so the map phase has
+    // nothing to grade and this only exists if the reduce join ran.
+    check(contains(r.out, "canary_xtu_cmd"),
+          "a store and a read of one cache line in different TUs are joined "
+          "in the reduce phase");
+    check(contains(r.out, "\"cross_tu_line_sharing\": \"true\""),
+          "the cross-TU line-sharing finding is labelled as such");
 }
 
 // The channel rides the IR pass, so every other canary run here misses it:

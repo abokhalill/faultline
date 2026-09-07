@@ -136,3 +136,22 @@ __attribute__((hot))
 void *canary_reserve_replay(void) {
     return canary_map_arena(4ul << 20);
 }
+
+// The store half of the cross-TU line-sharing canary. Its reader lives in
+// canary.cpp, so neither TU sees a writer and a distinct reader on this line.
+#include "canary_xtu.h"
+
+canary_xtu_cmd canary_xtu_table[4];
+
+static void *canary_xtu_dispatch(void *arg) {
+    long id = (long)arg;
+    for (int i = 0; i < 1000; i++)
+        canary_xtu_table[id & 3].calls++;
+    return 0;
+}
+
+void canary_xtu_spawn(void) {
+    pthread_t t;
+    pthread_create(&t, 0, canary_xtu_dispatch, (void *)0);
+    pthread_join(t, 0);
+}

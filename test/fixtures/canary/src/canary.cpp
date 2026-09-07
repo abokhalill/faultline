@@ -198,3 +198,12 @@ int main() {
     canary::run();
     return static_cast<int>(canary::total_accounted() & 1);
 }
+
+// The read half of the cross-TU line-sharing canary. Reads the key specs and
+// never touches 'calls'; the store is in canary_c.c.
+#include "canary_xtu.h"
+
+extern "C" unsigned long canary_xtu_lookup(int slot) {
+    const canary_xtu_cmd &e = canary_xtu_table[slot & 3];
+    return e.key_spec_a + e.key_spec_b + e.key_spec_c;
+}

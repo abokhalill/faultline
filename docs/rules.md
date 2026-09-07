@@ -233,6 +233,22 @@ contention):
   TU carry their own instance of the finding, which outranks this one at
   cross-TU deduplication.
 
+**Cross-TU pairs.** Write evidence above is per-TU, so a store compiled apart
+from the read beside it is invisible to it: redis stores `redisCommand::calls`
+in `server.c` while `db.c` reads the key specs on the same line. The reduce
+phase re-forms the co-residency test from serialized field offsets and joins it
+against the merged per-field writer and reader sets, adding the pair as
+evidence on the existing finding, or emitting one where no TU held both halves.
+The pair must clear the sharing-route verdict first, so a type nothing shows a
+thread reaching is not reported on this path.
+
+Ranked by mechanism, not by field order: a write/write pair outranks a
+read/write one, then the count of non-overlapping functions. On a 572-field
+record the alphabetically first pairs say nothing. Bitfields are excluded, a
+bitfield's exported extent is its declared type's rather than the bits it owns,
+so every bitfield in a storage unit would pair with its neighbours, and no
+padding reaches a shared word anyway.
+
 **Demotions:** deliberate-layout contract, and a density conjunct. Contended-RMW
 cost decays with inter-write spacing only while both writers sit under one
 last-level cache: measured collapsing to zero by ~119ns within a CCD, and flat
