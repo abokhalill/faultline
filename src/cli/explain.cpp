@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "lshaz/core/emitters.h"
 #include "lshaz/core/registry.h"
 #include "lshaz/core/severity.h"
 
@@ -26,10 +27,25 @@ int runExplainCommand(int argc, const char **argv) {
                          << r->getTitle() << "  ["
                          << severityToString(r->getBaseSeverity()) << "]\n";
         }
+        // Listed alongside the rules, not in a footnote: a consumer that
+        // sees FL004 in its JSON looks here for what it means.
+        llvm::outs() << "\nEmitted by the reduce phase or a compiler stream:\n\n";
+        for (const auto &d : nonRuleEmitters()) {
+            llvm::outs() << "  " << d.id << "  " << d.title << "  ["
+                         << severityToString(d.baseSeverity) << "]\n";
+        }
         return 0;
     }
 
     const char *id = argv[0];
+    if (const EmitterDoc *e = findEmitterByID(id)) {
+        llvm::outs() << e->id << ": " << e->title << "\n"
+                     << "Severity: " << severityToString(e->baseSeverity)
+                     << "\n\n"
+                     << "Hardware Mechanism:\n  " << e->mechanism << "\n";
+        return 0;
+    }
+
     const Rule *rule = RuleRegistry::instance().findByID(id);
     if (!rule) {
         llvm::errs() << "lshaz explain: unknown rule '" << id << "'\n"

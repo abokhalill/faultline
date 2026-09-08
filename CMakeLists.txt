@@ -88,6 +88,7 @@ set(LSHAZ_SOURCES
     src/core/hot_path.cpp
     src/core/config.cpp
     src/core/dedup.cpp
+    src/core/emitters.cpp
     src/core/interaction.cpp
     src/core/perf_profile.cpp
     src/core/precision.cpp

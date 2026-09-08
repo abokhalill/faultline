@@ -194,8 +194,35 @@ long canary_scale_into(long *out, const long *bound, long n);
 int canary_drain_pending(int id);
 }
 
+// FL092. Two fields on one line whose writers sit on provably disjoint
+// thread roles, on a type this fixture does not isolate while SharedRegistry
+// above already is. The compound is gated on that role attribution landing,
+// so a fixture with the layout alone never reaches it.
+namespace canary {
+struct RoleSplitCounters {
+    uint64_t produced;
+    uint64_t consumed;
+};
+static RoleSplitCounters g_role_split;
+
+static void *produce_thread(void *) {
+    for (int i = 0; i < 1000; i++) g_role_split.produced++;
+    return nullptr;
+}
+
+void consume_on_main() { g_role_split.consumed++; }
+
+void spawn_producer() {
+    pthread_t t;
+    pthread_create(&t, nullptr, produce_thread, nullptr);
+    pthread_join(t, nullptr);
+}
+} // namespace canary
+
 int main() {
     canary::run();
+    canary::spawn_producer();
+    canary::consume_on_main();
     return static_cast<int>(canary::total_accounted() & 1);
 }
 
